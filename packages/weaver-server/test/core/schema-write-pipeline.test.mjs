@@ -1,6 +1,7 @@
 import { deepRemove, deepSet } from "@weaver-conf/config-engine";
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { createSchemaRegistry } from "../../src/core/schema-registry.ts";
+import { normalizeBatchEntries } from "../../src/core/schema-write-boundary.ts";
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
@@ -203,6 +204,56 @@ describe("schema-registered config writes", () => {
       expect(provider.entries(), name).toEqual(initial);
       expect(await service.get("billing"), name).toEqual(initial.billing);
     }
+  });
+
+  test("batch overlap preflight handles large sibling cardinality", () => {
+    const entries = {};
+    for (let index = 0; index < 25_000; index++) {
+      const key = index % 2 === 0
+        ? `bulk.branch${index}.value`
+        : `bulk[branch${index}][value]`;
+      entries[key] = index;
+    }
+
+    const normalized = normalizeBatchEntries(entries);
+
+    expect(normalized.success).toBe(true);
+    if (!normalized.success) throw new Error("Expected valid sibling batch");
+    expect(Object.keys(normalized.entries)).toHaveLength(25_000);
+    expect(normalized.entries["bulk.branch24999.value"]).toBe(24_999);
+  });
+
+  test("batch overlap errors select canonical paths independently of input order", () => {
+    const first = normalizeBatchEntries({
+      "zeta.child": true,
+      zeta: {},
+      "alpha.child": true,
+      alpha: {},
+    });
+    const reversed = normalizeBatchEntries({
+      alpha: {},
+      "alpha.child": true,
+      zeta: {},
+      "zeta.child": true,
+    });
+    const expected = {
+      success: false,
+      result: {
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Batch contains overlapping configuration paths",
+          details: {
+            ancestorKey: "alpha",
+            descendantKey: "alpha.child",
+            paths: ["alpha", "alpha.child"],
+          },
+        },
+      },
+    };
+
+    expect(first).toEqual(expected);
+    expect(reversed).toEqual(expected);
   });
 
   test("creating another registry cannot replace bound enforcement", async () => {

@@ -32,9 +32,21 @@ export type NormalizedBatchEntries =
 interface BatchPath {
   readonly source: string;
   readonly key: string;
-  readonly path: string;
   readonly segments: readonly string[];
   readonly value: unknown;
+}
+
+interface BatchPathTrieNode {
+  readonly children: Map<string, BatchPathTrieNode>;
+  terminal?: BatchPath;
+  hasTerminal: boolean;
+  overlap: boolean;
+  containsOverlap: boolean;
+}
+
+interface BatchOverlap {
+  readonly ancestor: BatchPath;
+  readonly descendant: BatchPath;
 }
 
 const bindings = new WeakMap<
@@ -190,7 +202,6 @@ function parseBatchPath(source: string, value: unknown): BatchPath | null {
       source,
       value,
       key: parsed.storageKey,
-      path: parsed.path,
       segments: parsed.segments,
     };
   } catch {
@@ -198,30 +209,86 @@ function parseBatchPath(source: string, value: unknown): BatchPath | null {
   }
 }
 
-function findBatchOverlap(
-  paths: readonly BatchPath[],
-): { readonly ancestor: BatchPath; readonly descendant: BatchPath } | null {
-  const sorted = [...paths].sort((left, right) =>
-    left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
-  );
-  for (const ancestor of sorted) {
-    for (const descendant of sorted) {
-      if (isStrictAncestor(ancestor.segments, descendant.segments)) {
-        return { ancestor, descendant };
-      }
+function findBatchOverlap(paths: readonly BatchPath[]): BatchOverlap | null {
+  const root = createBatchPathTrieNode();
+  for (const path of paths) insertBatchPath(root, path);
+  return selectBatchOverlap(root);
+}
+
+function insertBatchPath(root: BatchPathTrieNode, path: BatchPath): void {
+  let node = root;
+  const visited = [root];
+  for (const segment of path.segments) {
+    if (node.terminal !== undefined) markBatchOverlap(visited, node);
+    let child = node.children.get(segment);
+    if (child === undefined) {
+      child = createBatchPathTrieNode();
+      node.children.set(segment, child);
     }
+    node = child;
+    visited.push(node);
+  }
+  if (node.hasTerminal) markBatchOverlap(visited, node);
+  node.terminal = path;
+  for (const visitedNode of visited) visitedNode.hasTerminal = true;
+}
+
+function markBatchOverlap(
+  visited: readonly BatchPathTrieNode[],
+  overlapNode: BatchPathTrieNode,
+): void {
+  overlapNode.overlap = true;
+  for (const visitedNode of visited) visitedNode.containsOverlap = true;
+}
+
+function selectBatchOverlap(root: BatchPathTrieNode): BatchOverlap | null {
+  let node: BatchPathTrieNode | undefined = root;
+  while (node !== undefined) {
+    if (node.overlap && node.terminal !== undefined) {
+      const descendant = firstTrieDescendant(node);
+      return descendant === null
+        ? null
+        : { ancestor: node.terminal, descendant };
+    }
+    node = firstTrieChild(node, (child) => child.containsOverlap);
   }
   return null;
 }
 
-function isStrictAncestor(
-  ancestor: readonly string[],
-  descendant: readonly string[],
-): boolean {
-  return (
-    ancestor.length < descendant.length &&
-    ancestor.every((segment, index) => segment === descendant[index])
-  );
+function firstTrieDescendant(node: BatchPathTrieNode): BatchPath | null {
+  let descendant = firstTrieChild(node, (child) => child.hasTerminal);
+  while (descendant !== undefined) {
+    if (descendant.terminal !== undefined) return descendant.terminal;
+    descendant = firstTrieChild(descendant, (child) => child.hasTerminal);
+  }
+  return null;
+}
+
+function firstTrieChild(
+  node: BatchPathTrieNode,
+  eligible: (child: BatchPathTrieNode) => boolean,
+): BatchPathTrieNode | undefined {
+  let selected:
+    | { readonly segment: string; readonly node: BatchPathTrieNode }
+    | undefined;
+  for (const [segment, child] of node.children) {
+    if (
+      eligible(child) &&
+      (selected === undefined || segment < selected.segment)
+    ) {
+      selected = { segment, node: child };
+    }
+  }
+  return selected?.node;
+}
+
+function createBatchPathTrieNode(): BatchPathTrieNode {
+  return {
+    children: new Map(),
+    hasTerminal: false,
+    overlap: false,
+    containsOverlap: false,
+  };
 }
 
 function failedBatch(
