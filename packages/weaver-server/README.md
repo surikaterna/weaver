@@ -43,6 +43,11 @@ descend from an invalid registered anchor fail with `VALIDATION_ERROR`; REST
 maps this runtime condition to HTTP 422. Unrelated unregistered reads and
 schema-compatible partial layer writes remain available, but an incomplete
 effective value is not served until later layers or writes complete it.
+Subscription feeds apply the same boundary to base and materialized scope
+contexts. Overlapping registrations are emitted as one aggregate root: an
+invalid member removes that root, while recovery emits one fully resolved root
+value. Successful schema registration triggers the same projection after the
+registry is applied (and persisted when persistence is configured).
 
 ### Auth
 

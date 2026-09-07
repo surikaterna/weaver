@@ -227,7 +227,12 @@ describe("SSEAdapter", () => {
     expect(partial.success).toBe(true);
     await Promise.resolve();
     await Promise.resolve();
-    expect(parseMessages(client)).toHaveLength(1);
+    expect(parseMessages(client)).toHaveLength(2);
+    expect(parseMessages(client)[1]?.data).toMatchObject({
+      key: "checkout",
+      action: "remove",
+      value: null,
+    });
     await expect(realAdapter.createClient()).rejects.toMatchObject({
       code: "VALIDATION_ERROR",
     });
@@ -240,11 +245,58 @@ describe("SSEAdapter", () => {
     );
     expect(completed.success).toBe(true);
     const messages = parseMessages(client);
-    expect(messages).toHaveLength(2);
-    expect(messages[1]?.data).toMatchObject({
+    expect(messages).toHaveLength(3);
+    expect(messages[2]?.data).toMatchObject({
       key: "checkout",
       value: { limit: 10, mode: "test" },
     });
+    client.close();
+  });
+
+  it("invalidates an existing client when registration makes its root invalid", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: { checkout: { limit: 10 }, public: { ready: true } },
+    });
+    const configService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const realAdapter = createSSEAdapter({ configService });
+    const client = await realAdapter.createClient();
+    const registry = createSchemaRegistry({ configService });
+
+    await registry.register({
+      serviceId: "checkout",
+      environment: "test",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema: {
+        type: "object",
+        required: ["mode"],
+        properties: {
+          mode: { type: "string" },
+          limit: { type: "number" },
+        },
+        additionalProperties: false,
+      },
+      fragmentSlots: [],
+    });
+    await configService.set("platform", "public.ready", false);
+    await configService.set("platform", "checkout.mode", "prod");
+
+    const changes = parseMessages(client).filter(
+      (message) => message.event === "change",
+    );
+    expect(
+      changes.map((message) => [message.data.action, message.data.key]),
+    ).toEqual([
+      ["remove", "checkout"],
+      ["remove", "checkout"],
+      ["set", "public.ready"],
+      ["set", "checkout"],
+    ]);
+    expect(changes.at(-1)?.data.value).toEqual({ limit: 10, mode: "prod" });
     client.close();
   });
 

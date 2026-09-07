@@ -21,7 +21,10 @@ import {
   writeInternalConfig,
 } from "./config-service-internal";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
-import { bindSchemaReadRegistry } from "./schema-read-boundary";
+import {
+  bindSchemaReadRegistry,
+  notifySchemaRegistration,
+} from "./schema-read-boundary";
 import {
   parsePersistedRegistry,
   serializeRegistry,
@@ -150,7 +153,10 @@ export function createSchemaRegistry(
   const registry: SchemaRegistry = {
     async register(request, context) {
       const evaluation = evaluateRegistration(state, request, context);
+      if (!evaluation.result.success) return evaluation.result;
       applyEvaluation(state, evaluation);
+      if (evaluation.entry)
+        notifySchemaRegistration(options.configService, evaluation.entry.path);
       return evaluation.result;
     },
 
@@ -204,6 +210,8 @@ export async function createPersistentSchemaRegistry(
       const failure = await persist(updatedState, environment, context);
       if (failure) return failure;
       applyEvaluation(state, evaluation);
+      if (evaluation.entry)
+        notifySchemaRegistration(options.configService, evaluation.entry.path);
       return evaluation.result;
     },
 

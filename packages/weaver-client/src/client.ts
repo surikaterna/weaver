@@ -104,6 +104,8 @@ export async function createWeaverClient(
       onRestartRequired: () => {
         pendingRestart = true;
       },
+      applyScopedDelta: (delta, scopePath) =>
+        scopeLoader.applyDelta(delta, scopePath),
     });
 
     if (boot.freshSnapshot) {

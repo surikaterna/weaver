@@ -171,6 +171,57 @@ describe("REST body validation", () => {
     );
   });
 
+  it("returns recursively resolved registered objects without markers", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {
+        checkout: {
+          db: {
+            host: { _weaver: "mount", source: "shared.host" },
+            port: 5432,
+          },
+        },
+        shared: {
+          host: { _weaver: "secret-ref", provider: "vault", uri: "host" },
+        },
+      },
+    });
+    const configService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+      secretBackend: { resolve: async () => "db.internal" },
+    });
+    const schemaRegistry = createSchemaRegistry({ configService });
+    await schemaRegistry.register({
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema: settingsSchema,
+      fragmentSlots: [],
+    });
+    const adapter = createRestAdapter({ configService, schemaRegistry });
+
+    const exact = await adapter.handleRequest("GET", "/v1/config/checkout", {
+      params: {},
+      query: {},
+      headers: {},
+    });
+    const ancestor = await adapter.handleRequest("GET", "/v1/config", {
+      params: {},
+      query: {},
+      headers: {},
+    });
+
+    expect(exact.body).toMatchObject({
+      data: { value: { db: { host: "db.internal", port: 5432 } } },
+    });
+    expect(ancestor.body).toMatchObject({
+      data: { entries: { checkout: { db: { host: "db.internal" } } } },
+    });
+    expect(JSON.stringify({ exact, ancestor })).not.toContain("_weaver");
+  });
+
   it("does not expose protected metadata through REST reads", async () => {
     const provider = createInMemoryStorageProvider({
       id: "platform",

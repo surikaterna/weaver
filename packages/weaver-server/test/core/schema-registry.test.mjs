@@ -226,7 +226,7 @@ describe("SchemaRegistry", () => {
     expect(await restartedService.get("billing")).toEqual({ enabled: true });
   });
 
-  test("internal registry persistence does not emit public config deltas", async () => {
+  test("registry persistence emits only the effective root projection", async () => {
     const opts = await makeOptions();
     const deltas = [];
     opts.configService.onDelta((delta) => deltas.push(delta));
@@ -236,7 +236,14 @@ describe("SchemaRegistry", () => {
       serviceRegistration("billing", "dev", { type: "object" }),
     );
 
-    expect(deltas).toEqual([]);
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0]).toMatchObject({
+      action: "remove",
+      key: "billing",
+      value: null,
+      layer: "weaver-effective",
+    });
+    expect(JSON.stringify(deltas)).not.toContain("_weaver");
   });
 
   test("persistent registry hydrates schemas after restart", async () => {
@@ -441,6 +448,8 @@ describe("SchemaRegistry", () => {
       environment: "dev",
     });
     const registry = await createPersistentSchemaRegistry({ configService });
+    const deltas = [];
+    configService.onDelta((delta) => deltas.push(delta));
 
     const result = await registry.register({
       ...serviceRegistration("svc", "dev", {
@@ -452,6 +461,7 @@ describe("SchemaRegistry", () => {
     expect(result.success).toBe(false);
     expect(await registry.getSchema("svc", "dev")).toBe(null);
     expect(registry.listAll()).toEqual({});
+    expect(deltas).toEqual([]);
   });
 });
 

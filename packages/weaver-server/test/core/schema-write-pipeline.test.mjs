@@ -705,6 +705,171 @@ describe("schema-registered config writes", () => {
     });
   });
 
+  test("object reads and source projections use the same recursively resolved state", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      billing: {
+        apiKey: { _weaver: "mount", source: "shared.token" },
+      },
+      shared: {
+        token: { _weaver: "secret-ref", provider: "vault", uri: "good" },
+      },
+    });
+    const secrets = new Map([["good", "SECRET-A"], ["next", "SECRET-B"]]);
+    const service = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+      secretBackend: { resolve: async (ref) => secrets.get(ref.uri) },
+    });
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration({
+      type: "object",
+      required: ["apiKey"],
+      properties: { apiKey: { type: "string" } },
+      additionalProperties: false,
+    }));
+
+    expect(await service.get("billing")).toEqual({ apiKey: "SECRET-A" });
+    expect(await service.getNamespace("billing")).toEqual({ apiKey: "SECRET-A" });
+    const deltas = [];
+    service.onDelta((delta) => deltas.push(delta));
+
+    await service.set("platform", "shared.token", 42);
+    expect(deltas.map((delta) => [delta.action, delta.key])).toEqual([
+      ["remove", "billing"],
+      ["set", "shared.token"],
+    ]);
+    deltas.length = 0;
+
+    await service.set("platform", "shared.token", {
+      _weaver: "secret-ref",
+      provider: "vault",
+      uri: "next",
+    });
+    expect(deltas[0]).toMatchObject({
+      action: "set",
+      key: "billing",
+      value: { apiKey: "SECRET-B" },
+      layer: "weaver-effective",
+    });
+    expect(JSON.stringify(deltas)).not.toContain("secret-ref");
+  });
+
+  test("overlapping anchors project one topmost root only after all members validate", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      billing: { plugins: { tax: {} } },
+    });
+    const service = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const registry = createSchemaRegistry({ configService: service });
+    const deltas = [];
+    service.onDelta((delta) => deltas.push(delta));
+
+    await registry.register(serviceRegistration(
+      extensibleServiceSchema,
+      [{ slotPath: "/plugins", accepts: "object" }],
+    ));
+    deltas.length = 0;
+    await registry.register({
+      serviceId: "billing",
+      providerId: "tax",
+      slotPath: "/plugins",
+      environment: "test",
+      owner: owner("tax"),
+      schema: { ...fragmentSchema, required: ["providerEnabled"] },
+    });
+
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0]).toMatchObject({ action: "remove", key: "billing" });
+    deltas.length = 0;
+    await service.set("platform", "billing.plugins.tax.providerEnabled", true);
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0]).toMatchObject({
+      action: "set",
+      key: "billing",
+      value: { plugins: { tax: { providerEnabled: true } } },
+    });
+  });
+
+  test("a valid fragment cannot publish beneath an invalid parent", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      billing: { plugins: { tax: { providerEnabled: true } } },
+    });
+    const service = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const registry = createSchemaRegistry({ configService: service });
+    const deltas = [];
+    service.onDelta((delta) => deltas.push(delta));
+
+    await registry.register(serviceRegistration({
+      type: "object",
+      required: ["mode"],
+      properties: {
+        mode: { type: "string" },
+        plugins: { type: "object" },
+      },
+      additionalProperties: false,
+    }, [{ slotPath: "/plugins", accepts: "object" }]));
+    await registry.register({
+      serviceId: "billing",
+      providerId: "tax",
+      slotPath: "/plugins",
+      environment: "test",
+      owner: owner("tax"),
+      schema: { ...fragmentSchema, required: ["providerEnabled"] },
+    });
+
+    expect(deltas.map((delta) => [delta.action, delta.key])).toEqual([
+      ["remove", "billing"],
+      ["remove", "billing"],
+    ]);
+  });
+
+  test("base and scoped source mutations project only their affected contexts", async () => {
+    const base = createTestProvider("base", "platform", {
+      billing: { mode: { _weaver: "mount", source: "shared.mode" } },
+      shared: { mode: "prod" },
+    });
+    const tenant = createTestProvider("tenant", "tenant:acme", {
+      shared: { mode: "test" },
+    });
+    const service = await createWeaverConfigService({
+      providers: [base, tenant],
+      environment: "test",
+    });
+    const registry = createSchemaRegistry({ configService: service });
+    await service.get("shared.mode", {
+      scopePath: [{ scopeId: "tenant", value: "acme" }],
+    });
+    await registry.register(serviceRegistration(serviceSchema));
+    const deltas = [];
+    service.onDelta((delta) => deltas.push(delta));
+
+    await service.set("tenant:acme", "shared.mode", 42);
+    expect(deltas.map((delta) => [delta.action, delta.layer, delta.key])).toEqual([
+      ["remove", "tenant:acme", "billing"],
+      ["set", "tenant:acme", "shared.mode"],
+    ]);
+    deltas.length = 0;
+    await service.set("tenant:acme", "shared.mode", "test");
+    expect(deltas[0]).toMatchObject({
+      action: "set",
+      layer: "tenant:acme",
+      key: "billing",
+      value: { mode: "test" },
+    });
+    deltas.length = 0;
+
+    await service.set("platform", "shared.mode", "prod");
+    expect(deltas.filter((delta) => delta.key === "billing").map((delta) => delta.layer)).toEqual([
+      "tenant:acme",
+      "weaver-effective",
+    ]);
+  });
+
   test("protected and unregistered public write paths are rejected", async () => {
     const { registry, service } = await makeRegisteredService();
 

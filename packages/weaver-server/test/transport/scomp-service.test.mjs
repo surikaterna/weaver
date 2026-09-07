@@ -215,6 +215,63 @@ describe("createWeaverScompService", () => {
     await expect(service.router[route("get")].handler({ key: "public.ready" })).resolves.toEqual({ value: true });
   });
 
+  test("registered object reads and feed projections are fully resolved", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      checkout: { token: { _weaver: "mount", source: "shared.token" } },
+      shared: { token: "A" },
+    });
+    const svc = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+    });
+    const deps = buildScompDeps(svc);
+    const service = createWeaverScompService(deps);
+    const feed = service.router[route("subscribe")].handler({});
+    let registration;
+    setTimeout(() => {
+      registration = deps.schemaRegistry.register({
+        serviceId: "checkout",
+        environment: "default",
+        owner: { name: "Checkout", contact: "checkout@example.com" },
+        schema: {
+          type: "object",
+          required: ["token", "mode"],
+          properties: { token: { type: "string" }, mode: { type: "string" } },
+          additionalProperties: false,
+        },
+        fragmentSlots: [],
+      });
+    }, 10);
+    expect((await feed.next()).value).toMatchObject({
+      action: "remove",
+      key: "checkout",
+    });
+    await registration;
+
+    const recovery = feed.next();
+    await deps.schemaRegistry.register({
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema: {
+        type: "object",
+        required: ["token"],
+        properties: { token: { type: "string" } },
+        additionalProperties: false,
+      },
+      fragmentSlots: [],
+    });
+    expect((await recovery).value).toMatchObject({
+      action: "set",
+      key: "checkout",
+      value: { token: "A" },
+    });
+    await expect(service.router[route("get")].handler({ key: "checkout" })).resolves.toEqual({
+      value: { token: "A" },
+    });
+    await feed.return();
+  });
+
   test("public read handlers do not expose protected metadata", async () => {
     const provider = createTestProvider("p1", "platform", {
       app: {

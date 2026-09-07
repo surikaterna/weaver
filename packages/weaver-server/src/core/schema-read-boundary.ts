@@ -5,12 +5,11 @@ import {
   validateEffectiveConfiguration,
 } from "@weaver-conf/config-engine";
 import type { ScopeInstance } from "@weaver-conf/config-types";
-import { WeaverErrorInstance } from "@weaver-conf/config-types";
 import { createWeaverError } from "../types/errors";
 import type { ConfigDelta } from "../types/index";
 import type { WeaverConfigService } from "./config-service-types";
 import type { RegisteredSchemaAnchor } from "./schema-registry";
-import { parseScopeLayer, parseScopeQuery } from "./scope-utils";
+import { parseScopeQuery } from "./scope-utils";
 
 type AnchorEnumerator = (
   environment: string,
@@ -20,21 +19,35 @@ interface SchemaReadBinding {
   readonly anchors: AnchorEnumerator;
 }
 
+export interface RuntimeProjectionContext {
+  readonly layer: string;
+  readonly scopePath?: ScopeInstance[] | undefined;
+}
+
+interface AnchorGroup {
+  readonly root: RegisteredSchemaAnchor;
+  readonly members: RegisteredSchemaAnchor[];
+}
+
+type RegistrationProjector = (path: string) => void;
+
 const bindings = new WeakMap<
   WeaverConfigService,
   ReadonlyArray<SchemaReadBinding>
 >();
 const environments = new WeakMap<WeaverConfigService, string>();
-const suppressedAnchors = new WeakMap<
+const registrationProjectors = new WeakMap<
   WeaverConfigService,
-  Map<string, Set<string>>
+  RegistrationProjector
 >();
 
 export function registerSchemaReadHost(
   service: WeaverConfigService,
   environment: string,
+  projectRegistration: RegistrationProjector,
 ): void {
   environments.set(service, environment);
+  registrationProjectors.set(service, projectRegistration);
 }
 
 export function bindSchemaReadRegistry(
@@ -45,25 +58,30 @@ export function bindSchemaReadRegistry(
   bindings.set(service, [...current, { anchors }]);
 }
 
+export function notifySchemaRegistration(
+  service: WeaverConfigService,
+  path: string,
+): void {
+  registrationProjectors.get(service)?.(path);
+}
+
 export function assertValidRuntimeRead(
   service: WeaverConfigService,
   entries: Record<string, unknown>,
   requestedKey?: string,
 ): void {
-  const environment = environments.get(service) ?? "";
+  const environment = environmentFor(service);
   const requestedPath = requestedKey
     ? runtimePathFromStorageKey(requestedKey)
     : undefined;
-  const anchors = runtimeAnchors(service, environment, requestedPath);
+  const anchors = runtimeAnchors(service, environment).filter(
+    (anchor) =>
+      requestedPath === undefined || pathsIntersect(anchor.path, requestedPath),
+  );
 
   for (const anchor of anchors) {
-    const parsed = parseCanonicalConfigPath(anchor.path);
-    const value = deepGet(entries, parsed.storageKey);
-    const validation = validateEffectiveConfiguration(anchor.schema, value, {
-      path: parsed.segments,
-    });
+    const validation = validateAnchor(anchor, entries);
     if (validation.valid) continue;
-
     throw createWeaverError(
       "VALIDATION_ERROR",
       "Effective configuration does not match registered schema",
@@ -77,13 +95,6 @@ export function assertValidRuntimeRead(
   }
 }
 
-export function isEffectiveConfigurationError(error: unknown): boolean {
-  return (
-    error instanceof WeaverErrorInstance &&
-    error.details?.kind === "effective-configuration-invalid"
-  );
-}
-
 export function assertValidRuntimeScopes(
   service: WeaverConfigService,
   scopes: Record<string, Record<string, unknown>>,
@@ -94,118 +105,166 @@ export function assertValidRuntimeScopes(
   }
 }
 
-export function runtimeDeltasToPublish(
+export function projectRuntimeMutation(
   service: WeaverConfigService,
   delta: ConfigDelta,
+  contexts: ReadonlyArray<RuntimeProjectionContext>,
   resolve: (scopePath?: ScopeInstance[]) => Record<string, unknown>,
 ): ConfigDelta[] {
-  const scope = parseScopeLayer(delta.layer);
-  const scopePath = scope
-    ? [{ scopeId: scope.scopeId, value: scope.value }]
-    : undefined;
-  const entries = resolve(scopePath);
-  try {
-    assertValidRuntimeRead(service, entries, delta.key);
-  } catch (error: unknown) {
-    const anchorPath = effectiveErrorAnchor(error);
-    if (anchorPath !== undefined)
-      rememberSuppressed(service, delta.layer, anchorPath);
-    if (isEffectiveConfigurationError(error)) return [];
-    throw error;
-  }
-
-  return recoverSuppressedDeltas(service, delta, entries);
-}
-
-function effectiveErrorAnchor(error: unknown): string | undefined {
-  if (!isEffectiveConfigurationError(error)) return undefined;
-  const anchorPath =
-    error instanceof WeaverErrorInstance
-      ? error.details?.anchorPath
-      : undefined;
-  return typeof anchorPath === "string" ? anchorPath : undefined;
-}
-
-function rememberSuppressed(
-  service: WeaverConfigService,
-  layer: string,
-  anchorPath: string,
-): void {
-  const byLayer = suppressedAnchors.get(service) ?? new Map();
-  const anchors = byLayer.get(layer) ?? new Set();
-  anchors.add(anchorPath);
-  byLayer.set(layer, anchors);
-  suppressedAnchors.set(service, byLayer);
-}
-
-function recoverSuppressedDeltas(
-  service: WeaverConfigService,
-  delta: ConfigDelta,
-  entries: Record<string, unknown>,
-): ConfigDelta[] {
-  const anchors = suppressedAnchors.get(service)?.get(delta.layer);
-  if (!anchors) return [delta];
-  const recovered: ConfigDelta[] = [];
-  for (const anchorPath of [...anchors].sort()) {
-    const key = parseCanonicalConfigPath(anchorPath).storageKey;
-    try {
-      assertValidRuntimeRead(service, entries, key);
-    } catch (error: unknown) {
-      if (isEffectiveConfigurationError(error)) continue;
-      throw error;
-    }
-    anchors.delete(anchorPath);
-    recovered.push({
-      ...delta,
-      action: "set",
-      key,
-      value: deepGet(entries, key),
-    });
-  }
-  if (anchors.size === 0) suppressedAnchors.get(service)?.delete(delta.layer);
+  const projections = projectContexts(service, contexts, resolve, delta);
   const deltaPath = runtimePathFromStorageKey(delta.key);
-  const replacesDelta = recovered.some((item) => {
-    const anchorPath = runtimePathFromStorageKey(item.key);
-    return (
-      anchorPath !== undefined &&
-      deltaPath !== undefined &&
-      pathsIntersect(anchorPath, deltaPath)
+  const replaced = projectionRoots(service).some(
+    (root) => deltaPath !== undefined && pathsIntersect(root.path, deltaPath),
+  );
+  return replaced
+    ? projections
+    : [...projections, resolvedSourceDelta(delta, resolve)];
+}
+
+export function projectRuntimeRegistration(
+  service: WeaverConfigService,
+  changedPath: string,
+  contexts: ReadonlyArray<RuntimeProjectionContext>,
+  resolve: (scopePath?: ScopeInstance[]) => Record<string, unknown>,
+): ConfigDelta[] {
+  const trigger: ConfigDelta = {
+    action: "set",
+    key: parseCanonicalConfigPath(changedPath).storageKey,
+    value: null,
+    layer: "weaver-effective",
+    environment: environmentFor(service),
+    timestamp: new Date().toISOString(),
+  };
+  return projectContexts(service, contexts, resolve, trigger, changedPath);
+}
+
+function projectContexts(
+  service: WeaverConfigService,
+  contexts: ReadonlyArray<RuntimeProjectionContext>,
+  resolve: (scopePath?: ScopeInstance[]) => Record<string, unknown>,
+  trigger: ConfigDelta,
+  changedPath?: string,
+): ConfigDelta[] {
+  const groups = projectionGroups(service).filter(
+    (group) =>
+      changedPath === undefined || pathsIntersect(group.root.path, changedPath),
+  );
+  const projected: ConfigDelta[] = [];
+  for (const context of sortedContexts(contexts)) {
+    const entries = resolve(context.scopePath);
+    for (const group of groups) {
+      projected.push(projectGroup(group, entries, context.layer, trigger));
+    }
+  }
+  return projected;
+}
+
+function projectGroup(
+  group: AnchorGroup,
+  entries: Record<string, unknown>,
+  layer: string,
+  trigger: ConfigDelta,
+): ConfigDelta {
+  const key = parseCanonicalConfigPath(group.root.path).storageKey;
+  const valid = group.members.every(
+    (anchor) => validateAnchor(anchor, entries).valid,
+  );
+  const value = deepGet(entries, key);
+  if (!valid || value === undefined) {
+    return { ...trigger, action: "remove", key, value: null, layer };
+  }
+  return { ...trigger, action: "set", key, value, layer };
+}
+
+function resolvedSourceDelta(
+  delta: ConfigDelta,
+  resolve: (scopePath?: ScopeInstance[]) => Record<string, unknown>,
+): ConfigDelta {
+  const scopePath = delta.layer.includes(":")
+    ? parseScopeQuery(delta.layer)
+    : undefined;
+  const value = deepGet(resolve(scopePath), delta.key);
+  return value === undefined
+    ? { ...delta, action: "remove", value: null }
+    : { ...delta, action: "set", value };
+}
+
+function projectionGroups(service: WeaverConfigService): AnchorGroup[] {
+  const groups: AnchorGroup[] = [];
+  for (const anchor of runtimeAnchors(service, environmentFor(service))) {
+    const group = groups.find((candidate) =>
+      isPathAncestor(candidate.root.path, anchor.path),
     );
-  });
-  return replacesDelta ? recovered : [...recovered, delta];
+    if (group) group.members.push(anchor);
+    else groups.push({ root: anchor, members: [anchor] });
+  }
+  return groups;
+}
+
+function projectionRoots(
+  service: WeaverConfigService,
+): RegisteredSchemaAnchor[] {
+  return projectionGroups(service).map((group) => group.root);
 }
 
 function runtimeAnchors(
   service: WeaverConfigService,
   environment: string,
-  requestedPath: string | undefined,
 ): RegisteredSchemaAnchor[] {
   const registered = bindings.get(service) ?? [];
   return registered
     .flatMap((binding) => binding.anchors(environment))
-    .filter(
-      (anchor) =>
-        requestedPath === undefined ||
-        pathsIntersect(anchor.path, requestedPath),
-    )
     .sort(compareAnchors);
 }
 
-function pathsIntersect(anchorPath: string, requestedPath: string): boolean {
-  return (
-    anchorPath === requestedPath ||
-    anchorPath.startsWith(`${requestedPath}/`) ||
-    requestedPath.startsWith(`${anchorPath}/`)
+function validateAnchor(
+  anchor: RegisteredSchemaAnchor,
+  entries: Record<string, unknown>,
+) {
+  const parsed = parseCanonicalConfigPath(anchor.path);
+  return validateEffectiveConfiguration(
+    anchor.schema,
+    deepGet(entries, parsed.storageKey),
+    { path: parsed.segments },
   );
+}
+
+function sortedContexts(
+  contexts: ReadonlyArray<RuntimeProjectionContext>,
+): RuntimeProjectionContext[] {
+  const byLayer = new Map<string, RuntimeProjectionContext>();
+  for (const context of contexts) byLayer.set(context.layer, context);
+  return [...byLayer.values()].sort((left, right) =>
+    left.layer.localeCompare(right.layer),
+  );
+}
+
+function pathsIntersect(left: string, right: string): boolean {
+  return isPathAncestor(left, right) || isPathAncestor(right, left);
+}
+
+function isPathAncestor(ancestor: string, path: string): boolean {
+  return path === ancestor || path.startsWith(`${ancestor}/`);
 }
 
 function compareAnchors(
   left: RegisteredSchemaAnchor,
   right: RegisteredSchemaAnchor,
 ): number {
+  const depth = pathDepth(left.path) - pathDepth(right.path);
   return (
-    left.path.localeCompare(right.path) || left.kind.localeCompare(right.kind)
+    depth ||
+    left.path.localeCompare(right.path) ||
+    left.kind.localeCompare(right.kind)
   );
+}
+
+function pathDepth(path: string): number {
+  return parseCanonicalConfigPath(path).segments.length;
+}
+
+function environmentFor(service: WeaverConfigService): string {
+  return environments.get(service) ?? "";
 }
 
 function runtimePathFromStorageKey(key: string): string | undefined {

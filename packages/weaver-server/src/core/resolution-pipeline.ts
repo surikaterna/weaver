@@ -19,6 +19,7 @@ export interface ResolutionPipeline {
   resolveEntries(
     entries: Record<string, unknown>,
     prefix?: string,
+    lookupEntries?: Record<string, unknown>,
   ): Record<string, unknown>;
   /** Rebuild internal mount map after state changes. */
   rebuildMountMap(): void;
@@ -78,13 +79,14 @@ export async function createResolutionPipeline(
   function resolveEntries(
     entries: Record<string, unknown>,
     prefix = "",
+    lookupEntries = getMergedState(),
   ): Record<string, unknown> {
     const result: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(entries)) {
       const fullKey = prefix ? `${prefix}.${k}` : k;
       if (isConfigMount(v)) {
         const mountResult = resolveMountedValue(fullKey, mountMap, (mk) =>
-          deepGet(getMergedState(), mk),
+          deepGet(lookupEntries, mk),
         );
         if (!mountResult.ok) {
           result[k] = undefined;
@@ -103,7 +105,11 @@ export async function createResolutionPipeline(
       } else if (isSecretReference(v)) {
         result[k] = secretResolver?.getResolved(fullKey) ?? v;
       } else if (v !== null && typeof v === "object" && !Array.isArray(v)) {
-        result[k] = resolveEntries(v as Record<string, unknown>, fullKey);
+        result[k] = resolveEntries(
+          v as Record<string, unknown>,
+          fullKey,
+          lookupEntries,
+        );
       } else {
         result[k] = v;
       }

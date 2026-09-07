@@ -121,6 +121,42 @@ describe("client↔server integration (local transport round-trip)", () => {
     client = await createWeaverClient({ transport });
   });
 
+  it("converges scoped registered roots after invalidation and recovery", async () => {
+    await client.close();
+    const scopePath = [{ scopeId: "tenant", value: "acme" }];
+    transport = createLocalTransport({
+      snapshot: {
+        entries: { checkout: { mode: "base" } },
+        scopes: { "tenant:acme": { checkout: { mode: "scoped" } } },
+        revision: "scoped-0",
+        timestamp: new Date().toISOString(),
+      },
+    });
+    client = await createWeaverClient({ transport, scopeLoading: "hot" });
+
+    transport.pushDelta({
+      key: "checkout",
+      action: "remove",
+      value: null,
+      layer: "tenant:acme",
+      timestamp: new Date().toISOString(),
+    });
+    expect(client.getForScope("checkout", scopePath)).toBe(undefined);
+    expect(client.get("checkout.mode")).toBe("base");
+
+    transport.pushDelta({
+      key: "checkout",
+      action: "set",
+      value: { mode: "recovered", plugins: { tax: { rate: 0.2 } } },
+      layer: "tenant:acme",
+      timestamp: new Date().toISOString(),
+    });
+    expect(client.getForScope("checkout", scopePath)).toEqual({
+      mode: "recovered",
+      plugins: { tax: { rate: 0.2 } },
+    });
+  });
+
   it("should transition to disconnected on close", async () => {
     await client.close();
     expect(client.connected).toBe(false);
