@@ -95,7 +95,7 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
     const docs = z.array(configDocumentSchema).parse(rawDocs);
 
     const entries: Record<string, unknown> = {};
-    for (const doc of sortConfigDocuments(docs)) {
+    for (const doc of selectEffectiveDocuments(docs)) {
       deepSet(entries, doc.key, cloneValue(doc.value));
     }
     return { entries };
@@ -125,7 +125,7 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
       );
 
       await this.upsertRootDocument(layer, rootKey, rootValue);
-      await this.deleteDescendantDocuments(layer, rootKey);
+      await this.deleteDescendantDocumentsBestEffort(layer, rootKey);
     } catch (err) {
       const message = extractErrorMessage(err);
       return {
@@ -259,7 +259,7 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
 
     deepRemove(existingRoot, buildPath(tail));
     await this.upsertRootDocument(layer, rootKey, existingRoot);
-    await this.deleteDescendantDocuments(layer, rootKey);
+    await this.deleteDescendantDocumentsBestEffort(layer, rootKey);
   }
 
   private async upsertRootDocument(
@@ -274,18 +274,29 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
     );
   }
 
-  private async deleteDescendantDocuments(
+  private async deleteDescendantDocumentsBestEffort(
     layer: string,
     key: string,
   ): Promise<void> {
-    await this.collection.deleteMany(
-      {
-        layer,
-        environment: this.environment,
-        key: { $regex: descendantKeyPattern(key) },
-      },
-      { maxTimeMS: this.timeoutMs },
-    );
+    try {
+      await this.collection.deleteMany(
+        {
+          layer,
+          environment: this.environment,
+          key: { $regex: descendantKeyPattern(key) },
+        },
+        { maxTimeMS: this.timeoutMs },
+      );
+    } catch (err) {
+      const message = extractErrorMessage(err);
+      try {
+        this.logger.warn(
+          `[weaver] MongoDB descendant cleanup failed for root "${key}"; the authoritative root document remains valid: ${message}`,
+        );
+      } catch {
+        return;
+      }
+    }
   }
 
   private async deletePathAndDescendants(
@@ -323,6 +334,21 @@ function sortConfigDocuments(
     if (dateOrder !== 0) return dateOrder;
     return parsePath(left.key).length - parsePath(right.key).length;
   });
+}
+
+function selectEffectiveDocuments(
+  docs: readonly ConfigDocument[],
+): ConfigDocument[] {
+  const rootKeys = new Set(
+    docs.filter((doc) => parsePath(doc.key).length === 1).map((doc) => doc.key),
+  );
+  const effectiveDocs = docs.filter((doc) => {
+    const segments = parsePath(doc.key);
+    if (segments.length === 1) return true;
+    const rootKey = buildPath([getRootSegment(segments)]);
+    return !rootKeys.has(rootKey);
+  });
+  return sortConfigDocuments(effectiveDocs);
 }
 
 function descendantKeyPattern(key: string): string {

@@ -107,6 +107,33 @@ test("write() canonicalizes nested paths into a root object document", async () 
   });
 });
 
+test("write() succeeds when stale descendant cleanup fails", async () => {
+  const col = createMockCollection();
+  col.docs.push({
+    layer: "user",
+    environment: "prod",
+    key: "billing.plan",
+    value: "stale",
+    updatedAt: "9999-01-01",
+  });
+  col.deleteMany = () => Promise.reject(new Error("cleanup timeout"));
+  const provider = createMongoDBStorageProvider({
+    id: "mongo-user",
+    layer: "user",
+    collection: col,
+    environment: "prod",
+    logger: { info() {}, warn() {}, error() {}, debug() {} },
+  });
+
+  expect((await provider.write("billing.plan", "pro")).success).toBe(true);
+  expect((await provider.write("billing.limits.seats", 10)).success).toBe(true);
+  expect((await provider.load()).entries.billing).toEqual({
+    plan: "pro",
+    limits: { seats: 10 },
+  });
+  expect(col.docs.some((doc) => doc.key === "billing.plan")).toBe(true);
+});
+
 test("load() hydrates legacy dotted documents as nested objects", async () => {
   const col = createMockCollection();
   col.docs.push(
@@ -143,6 +170,40 @@ test("remove() updates MongoDB root object document for nested paths", async () 
   expect(col.docs).toHaveLength(1);
   expect(col.docs[0].key).toBe("billing");
   expect(col.docs[0].value).toEqual({ plan: "pro", limits: {} });
+});
+
+test("nested remove succeeds without resurrecting stale descendants when cleanup fails", async () => {
+  const col = createMockCollection();
+  col.docs.push(
+    {
+      layer: "user",
+      environment: "prod",
+      key: "billing",
+      value: { plan: "pro", limits: { seats: 10 } },
+      updatedAt: "2024-01-01",
+    },
+    {
+      layer: "user",
+      environment: "prod",
+      key: "billing.plan",
+      value: "stale",
+      updatedAt: "9999-01-01",
+    },
+  );
+  col.deleteMany = () => Promise.reject(new Error("cleanup timeout"));
+  const provider = createMongoDBStorageProvider({
+    id: "mongo-user",
+    layer: "user",
+    collection: col,
+    environment: "prod",
+    logger: { info() {}, warn() {}, error() {}, debug() {} },
+  });
+
+  expect((await provider.remove("billing.plan")).success).toBe(true);
+  expect((await provider.load()).entries.billing).toEqual({
+    limits: { seats: 10 },
+  });
+  expect(col.docs.some((doc) => doc.key === "billing.plan")).toBe(true);
 });
 
 test("remove() deletes document", async () => {
