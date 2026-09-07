@@ -54,8 +54,13 @@ describe("REST body validation", () => {
       id: "platform",
       layer: "platform",
       initialEntries: {
-        app: { name: "public" },
-        _weaver: { registry: { schemas: "private" } },
+        app: {
+          name: "public",
+          direct: { _weaver: "mount", source: "_weaver.registry.schemas" },
+          bridge: { _weaver: "mount", source: "_weaver.registry.schemas" },
+          chained: { _weaver: "mount", source: "app.bridge" },
+        },
+        _weaver: { registry: { schemas: "LEAK" } },
       },
     });
     const configService = await createWeaverConfigService({
@@ -74,6 +79,16 @@ describe("REST body validation", () => {
       "/v1/config/_weaver/registry/schemas",
       { params: {}, query: {}, headers: {} },
     );
+    const mounted = await adapter.handleRequest(
+      "GET",
+      "/v1/config/app/direct",
+      { params: {}, query: {}, headers: {} },
+    );
+    const chained = await adapter.handleRequest(
+      "GET",
+      "/v1/config/app/chained",
+      { params: {}, query: {}, headers: {} },
+    );
     const inspection = await adapter.handleRequest(
       "GET",
       "/v1/config/_weaver?inspect",
@@ -85,9 +100,14 @@ describe("REST body validation", () => {
     });
     expect(snapshot.body).not.toHaveProperty("data.entries._weaver");
     expect(direct.body).toMatchObject({ data: { value: undefined } });
+    expect(mounted.body).toMatchObject({ data: { value: undefined } });
+    expect(chained.body).toMatchObject({ data: { value: undefined } });
     expect(inspection.body).toMatchObject({
       data: { effectiveValue: undefined, layerValues: {} },
     });
+    expect(JSON.stringify({ snapshot, mounted, chained })).not.toContain(
+      "LEAK",
+    );
   });
 
   it("PUT /v1/config/key rejects body without value field", async () => {

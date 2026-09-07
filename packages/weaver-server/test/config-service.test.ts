@@ -117,11 +117,56 @@ describe("WeaverConfigService", () => {
     }
   });
 
+  it("fails closed for direct and chained mounts into protected metadata", async () => {
+    const svc = await makeService({
+      app: {
+        direct: { _weaver: "mount", source: "_weaver.registry.schemas" },
+        bridge: { _weaver: "mount", source: "_weaver.registry.schemas" },
+        chained: { _weaver: "mount", source: "app.bridge" },
+        absent: { _weaver: "mount", source: "missing.value" },
+        publicValue: { enabled: true },
+        publicAlias: { _weaver: "mount", source: "app.publicValue" },
+      },
+      _weaver: { registry: { schemas: { secret: "LEAK" } } },
+    });
+
+    const snapshot = await svc.resolveAll();
+    const namespace = await svc.getNamespace("app");
+
+    expect(snapshot.entries).toMatchObject({
+      app: {
+        direct: undefined,
+        chained: undefined,
+        absent: undefined,
+        publicAlias: { enabled: true },
+      },
+    });
+    expect(namespace).toMatchObject({
+      direct: undefined,
+      chained: undefined,
+      absent: undefined,
+      publicAlias: { enabled: true },
+    });
+    expect(await svc.get("app.direct")).toBe(undefined);
+    expect(await svc.get("app.chained")).toBe(undefined);
+    expect(await svc.get("app.absent")).toBe(undefined);
+    expect(await svc.get("app.publicAlias")).toEqual({ enabled: true });
+    expect(JSON.stringify({ snapshot, namespace })).not.toContain("LEAK");
+  });
+
   it("filters protected metadata from nested scoped snapshots", async () => {
     const platform = createInMemoryStorageProvider({
       id: "platform",
       layer: "platform",
-      initialEntries: { app: { base: true }, _weaver: { base: "private" } },
+      initialEntries: {
+        app: {
+          base: true,
+          direct: { _weaver: "mount", source: "_weaver.base" },
+          bridge: { _weaver: "mount", source: "_weaver.base" },
+          chained: { _weaver: "mount", source: "app.bridge" },
+        },
+        _weaver: { base: "LEAK" },
+      },
     });
     const tenant = createInMemoryStorageProvider({
       id: "tenant-acme",
@@ -137,15 +182,23 @@ describe("WeaverConfigService", () => {
       scopePath: [{ scopeId: "tenant", value: "acme" }],
     });
 
-    expect(snapshot.entries).toEqual({ app: { base: true } });
+    expect(snapshot.entries).toMatchObject({
+      app: { base: true, direct: undefined, chained: undefined },
+    });
     expect(snapshot.scopes).toEqual({
       "tenant:acme": { app: { scoped: true } },
     });
     expect(
-      await svc.get("app", {
+      await svc.getNamespace("app", {
         scopePath: [{ scopeId: "tenant", value: "acme" }],
       }),
-    ).toEqual({ base: true, scoped: true });
+    ).toMatchObject({
+      base: true,
+      scoped: true,
+      direct: undefined,
+      chained: undefined,
+    });
+    expect(JSON.stringify(snapshot)).not.toContain("LEAK");
   });
 
   it("removes a value", async () => {

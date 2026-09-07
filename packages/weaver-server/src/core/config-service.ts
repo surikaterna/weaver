@@ -297,8 +297,8 @@ export async function createWeaverConfigService(
 
   // --- Mount + Secret resolution pipeline ---
   const pipeline = await createResolutionPipeline({
-    getMergedState: () => getMergedState(),
-    getBaseEntries,
+    getMergedState: () => filterProtectedConfigEntries(getMergedState()),
+    getBaseEntries: () => filterProtectedConfigEntries(getBaseEntries()),
     secretBackend: options.secretBackend,
   });
 

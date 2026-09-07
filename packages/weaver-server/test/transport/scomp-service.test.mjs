@@ -111,22 +111,34 @@ describe("createWeaverScompService", () => {
 
   test("public read handlers do not expose protected metadata", async () => {
     const provider = createTestProvider("p1", "platform", {
-      app: { name: "public" },
-      _weaver: { registry: { schemas: "private" } },
+      app: {
+        name: "public",
+        direct: { _weaver: "mount", source: "_weaver.registry.schemas" },
+        bridge: { _weaver: "mount", source: "_weaver.registry.schemas" },
+        chained: { _weaver: "mount", source: "app.bridge" },
+      },
+      _weaver: { registry: { schemas: "LEAK" } },
     });
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
     const service = createWeaverScompService(buildScompDeps(svc));
 
     const snapshot = await service.router[route("resolveAll")].handler({});
     const direct = await service.router[route("get")].handler({ key: "_weaver.registry.schemas" });
+    const mounted = await service.router[route("get")].handler({ key: "app.direct" });
+    const chained = await service.router[route("get")].handler({ key: "app.chained" });
     const namespace = await service.router[route("getNamespace")].handler({ prefix: "_weaver" });
     const inspection = await service.router[route("inspect")].handler({ key: "_weaver" });
 
-    expect(snapshot.entries).toEqual({ app: { name: "public" } });
+    expect(snapshot.entries).toMatchObject({
+      app: { name: "public", direct: undefined, chained: undefined },
+    });
     expect(direct).toEqual({ value: undefined });
+    expect(mounted).toEqual({ value: undefined });
+    expect(chained).toEqual({ value: undefined });
     expect(namespace).toEqual({ entries: {} });
     expect(inspection.effectiveValue).toBe(undefined);
     expect(inspection.layerValues).toEqual({});
+    expect(JSON.stringify({ snapshot, mounted, chained })).not.toContain("LEAK");
   });
 
   test("get handler returns value", async () => {

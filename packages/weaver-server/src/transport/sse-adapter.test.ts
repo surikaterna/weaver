@@ -128,8 +128,13 @@ describe("SSEAdapter", () => {
       id: "platform",
       layer: "platform",
       initialEntries: {
-        app: { name: "public" },
-        _weaver: { registry: { schemas: "private" } },
+        app: {
+          name: "public",
+          direct: { _weaver: "mount", source: "_weaver.registry.schemas" },
+          bridge: { _weaver: "mount", source: "_weaver.registry.schemas" },
+          chained: { _weaver: "mount", source: "app.bridge" },
+        },
+        _weaver: { registry: { schemas: "LEAK" } },
       },
     });
     const configService = await createWeaverConfigService({
@@ -138,10 +143,11 @@ describe("SSEAdapter", () => {
     });
     const realAdapter = createSSEAdapter({ configService });
 
-    const client = await realAdapter.createClient({ prefix: "_weaver" });
+    const client = await realAdapter.createClient({ prefix: "app" });
     const messages = parseMessages(client);
 
-    expect(msg(messages, 0).data.entries).toEqual({});
+    expect(msg(messages, 0).data.entries).toEqual({ app: { name: "public" } });
+    expect(JSON.stringify(messages)).not.toContain("LEAK");
     client.close();
   });
 
