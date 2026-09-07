@@ -83,6 +83,12 @@ export interface ConfigurationPropertySchema {
   "x-weaver"?: WeaverPropertyExtensions | undefined;
 }
 
+/** Configuration schema whose root is unambiguously an object. */
+export interface ObjectConfigurationPropertySchema
+  extends ConfigurationPropertySchema {
+  readonly type: "object";
+}
+
 /** Weaver-specific property extensions (sensitivity, change policy, reload behavior). */
 export interface WeaverPropertyExtensions {
   sensitive?: boolean | undefined;

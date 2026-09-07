@@ -1,5 +1,6 @@
 import type {
   ConfigurationPropertySchema,
+  ObjectConfigurationPropertySchema,
   WeaverError,
 } from "@weaver-conf/config-types";
 import type { ZodRawShape } from "zod";
@@ -19,7 +20,7 @@ export interface SchemaRegistrationResult {
  */
 export function zodShapeToJsonSchema(
   shape: ZodRawShape,
-): ConfigurationPropertySchema {
+): ObjectConfigurationPropertySchema {
   const properties: Record<string, ConfigurationPropertySchema> = {};
   const required: string[] = [];
 

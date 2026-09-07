@@ -100,6 +100,14 @@ describe("configurationLayerDataSchema", () => {
 });
 
 describe("schema registration request schemas", () => {
+  const invalidRootSchemas = [
+    { type: "string" },
+    { type: "array", items: { type: "string" } },
+    { properties: { enabled: { type: "boolean" } } },
+    { oneOf: [{ type: "object" }, { type: "string" }] },
+    { type: ["object", "null"] },
+  ];
+
   it("accepts path-first service registration shape", () => {
     const result = serviceSchemaRegistrationRequestSchema.safeParse({
       serviceId: "lynx",
@@ -160,6 +168,35 @@ describe("schema registration request schemas", () => {
         path: "/lynx/plugins/ghost.settings.panel",
       }).success,
     ).toBe(false);
+  });
+
+  it("rejects non-object and ambiguous service schema roots", () => {
+    for (const schema of invalidRootSchemas) {
+      const result = serviceSchemaRegistrationRequestSchema.safeParse({
+        serviceId: "lynx",
+        environment: "default",
+        owner: { name: "Lynx", contact: "lynx@example.com" },
+        schema,
+        fragmentSlots: [],
+      });
+
+      expect(result.success).toBe(false);
+    }
+  });
+
+  it("rejects non-object and ambiguous fragment schema roots", () => {
+    for (const schema of invalidRootSchemas) {
+      const result = fragmentSchemaRegistrationRequestSchema.safeParse({
+        serviceId: "lynx",
+        providerId: "ghost.settings.panel",
+        slotPath: "/plugins",
+        environment: "default",
+        owner: { name: "Ghost", contact: "ghost@example.com" },
+        schema,
+      });
+
+      expect(result.success).toBe(false);
+    }
   });
 
   it("accepts response metadata with owner and provider identity", () => {

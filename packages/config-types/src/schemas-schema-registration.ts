@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { weaverErrorSchema } from "./errors";
-import { configurationPropertySchemaSchema } from "./schemas-property";
+import { objectConfigurationPropertySchemaSchema } from "./schemas-property";
 
 export const registrationOwnerSchema = z.strictObject({
   name: z.string().min(1),
@@ -20,7 +20,7 @@ export const serviceSchemaRegistrationRequestSchema = z.strictObject({
   serviceId: z.string().min(1),
   environment: z.string().min(1),
   owner: registrationOwnerSchema,
-  schema: configurationPropertySchemaSchema,
+  schema: objectConfigurationPropertySchemaSchema,
   schemaVersion: z.string().min(1).optional(),
   fragmentSlots: z.array(fragmentSlotDeclarationSchema).readonly(),
 });
@@ -31,7 +31,7 @@ export const fragmentSchemaRegistrationRequestSchema = z.strictObject({
   slotPath: z.string().min(1),
   environment: z.string().min(1),
   owner: registrationOwnerSchema,
-  schema: configurationPropertySchemaSchema,
+  schema: objectConfigurationPropertySchemaSchema,
   schemaVersion: z.string().min(1).optional(),
 });
 

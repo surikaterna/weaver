@@ -1,6 +1,6 @@
 import type {
   ConfigAuditEntry,
-  ConfigurationPropertySchema,
+  ObjectConfigurationPropertySchema,
   WriteResult,
 } from "@weaver-conf/config-types";
 import type { AuditService } from "../audit/audit-service";
@@ -17,7 +17,7 @@ import type {
 } from "../core/schema-registry";
 import { createRestAdapter } from "./rest-adapter";
 
-const settingsSchema: ConfigurationPropertySchema = {
+const settingsSchema: ObjectConfigurationPropertySchema = {
   type: "object",
   properties: { enabled: { type: "boolean" } },
   required: ["enabled"],

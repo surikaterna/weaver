@@ -4,12 +4,13 @@ import {
 } from "@weaver-conf/config-engine";
 import type {
   ConfigurationPropertySchema,
+  ObjectConfigurationPropertySchema,
   SchemaRegistrationRequest as PathSchemaRegistrationRequest,
   SchemaRegistrationAuditMetadata,
   SchemaRegistrationMetadata,
 } from "@weaver-conf/config-types";
 import {
-  configurationPropertySchemaSchema,
+  objectConfigurationPropertySchemaSchema,
   schemaRegistrationMetadataSchema,
 } from "@weaver-conf/config-types";
 import { z } from "zod";
@@ -52,7 +53,7 @@ export interface SchemaRegistrationResult {
 export interface RegisteredSchemaAnchor {
   readonly kind: "service" | "fragment";
   readonly path: string;
-  readonly schema: ConfigurationPropertySchema;
+  readonly schema: ObjectConfigurationPropertySchema;
   readonly environment: string;
   readonly metadata: SchemaRegistrationMetadata;
 }
@@ -60,7 +61,7 @@ export interface RegisteredSchemaAnchor {
 export const registeredSchemaAnchorSchema = z.strictObject({
   kind: z.enum(["service", "fragment"]),
   path: z.string(),
-  schema: configurationPropertySchemaSchema,
+  schema: objectConfigurationPropertySchemaSchema,
   environment: z.string(),
   metadata: schemaRegistrationMetadataSchema,
 });

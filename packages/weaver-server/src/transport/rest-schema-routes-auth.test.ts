@@ -1,5 +1,5 @@
 import type {
-  ConfigurationPropertySchema,
+  ObjectConfigurationPropertySchema,
   WriteResult,
 } from "@weaver-conf/config-types";
 import type { AuthContext } from "../auth/auth-middleware";
@@ -14,7 +14,7 @@ import type { AuthGate } from "./auth-gate";
 import type { RestResponse } from "./rest-adapter";
 import { createRestAdapter } from "./rest-adapter";
 
-const settingsSchema: ConfigurationPropertySchema = {
+const settingsSchema: ObjectConfigurationPropertySchema = {
   type: "object",
   properties: {
     db: {
