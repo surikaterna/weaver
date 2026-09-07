@@ -206,7 +206,7 @@ describe("REST schema routes authGate denial", () => {
 
     expect(res.status).toBe(403);
     expect(registryCalls.lists).toBe(0);
-    expect(authGate.readKeys).toEqual(["_weaver.registry.schemas"]);
+    expect(authGate.readKeys).toEqual([]);
   });
 
   it("denies service schema registration before registering schema", async () => {

@@ -111,6 +111,18 @@ function gateRead(
   return deps.authGate.gateRead(accessCtx, key, req.schemaMap?.get(key));
 }
 
+function gateAdminRead(
+  req: RestRequest,
+  deps: SchemaRouteDeps,
+): RestResponse | null {
+  if (!deps.authGate) return null;
+  if (!req.authContext) return authContextRequired(deps.configService);
+  if (!req.authContext.isAdmin) {
+    return v1Error(deps.configService, "FORBIDDEN", "Admin access required");
+  }
+  return null;
+}
+
 function gateWrite(
   req: RestRequest,
   deps: SchemaRouteDeps,
@@ -185,6 +197,8 @@ function listSchemasRoute(deps: SchemaRouteDeps): RestRoute {
     method: "GET",
     path: "/v1/admin/schemas",
     async handler(req) {
+      const adminDenied = gateAdminRead(req, deps);
+      if (adminDenied) return adminDenied;
       if (!schemaRegistry) return unavailable(configService);
       const denied = gateRead(req, deps, schemaRegistryAdminKey);
       if (denied) return denied;
