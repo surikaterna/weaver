@@ -163,6 +163,48 @@ describe("schema-registered config writes", () => {
     expect(await service.get("billing.mode")).toBe("prod");
   });
 
+  test("batches reject ancestor and descendant paths before provider I/O", async () => {
+    const cases = [
+      ["descendant first", { "billing.mode": "invalid", billing: { mode: "prod" } }, "billing.mode"],
+      ["ancestor first", { billing: { mode: "invalid" }, "billing.mode": "prod" }, "billing.mode"],
+      ["bracket descendant first", { "billing[mode]": "invalid", billing: { mode: "prod" } }, "billing[mode]"],
+      ["bracket ancestor first", { billing: { mode: "invalid" }, "billing[mode]": "prod" }, "billing[mode]"],
+    ];
+
+    for (const [name, entries, descendantSource] of cases) {
+      const initial = { billing: { mode: "test", limit: 1 } };
+      const { provider, service } = await makeRegisteredService(initial);
+      const write = provider.write;
+      let attemptedWrites = 0;
+      provider.write = async (key, value) => {
+        attemptedWrites++;
+        if (attemptedWrites === 2) {
+          return { success: false, error: { code: "WRITE_FAILED", message: "armed second failure" } };
+        }
+        return write(key, value);
+      };
+
+      const result = await service.setMany("platform", entries);
+
+      expect(result, name).toEqual({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Batch contains overlapping configuration paths",
+          details: {
+            ancestorKey: "billing",
+            descendantKey: "billing.mode",
+            paths: ["billing", descendantSource],
+          },
+        },
+      });
+      expect(attemptedWrites, name).toBe(0);
+      expect(provider.writes, name).toEqual([]);
+      expect(provider.entries(), name).toEqual(initial);
+      expect(await service.get("billing"), name).toEqual(initial.billing);
+    }
+  });
+
   test("creating another registry cannot replace bound enforcement", async () => {
     const { provider, service } = await makeRegisteredService({
       billing: { mode: "test" },

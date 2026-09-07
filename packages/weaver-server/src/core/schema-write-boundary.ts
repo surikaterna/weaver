@@ -29,6 +29,14 @@ export type NormalizedBatchEntries =
   | { readonly success: true; readonly entries: Record<string, unknown> }
   | { readonly success: false; readonly result: WriteResult };
 
+interface BatchPath {
+  readonly source: string;
+  readonly key: string;
+  readonly path: string;
+  readonly segments: readonly string[];
+  readonly value: unknown;
+}
+
 const bindings = new WeakMap<
   WeaverConfigService,
   ReadonlyArray<SchemaBoundaryBinding>
@@ -59,22 +67,32 @@ export function validatePublicWrite(key: string): WriteResult | null {
 export function normalizeBatchEntries(
   entries: Record<string, unknown>,
 ): NormalizedBatchEntries {
-  const normalized: Record<string, unknown> = {};
+  const paths: BatchPath[] = [];
   const sourceByKey = new Map<string, string>();
   for (const [source, value] of Object.entries(entries)) {
-    const key = canonicalStorageKey(source);
-    if (key === null)
+    const parsed = parseBatchPath(source, value);
+    if (parsed === null)
       return failedBatch("Invalid configuration path", { key: source });
-    const previous = sourceByKey.get(key);
+    const previous = sourceByKey.get(parsed.key);
     if (previous !== undefined) {
       return failedBatch("Batch contains duplicate configuration paths", {
-        canonicalKey: key,
+        canonicalKey: parsed.key,
         paths: [previous, source],
       });
     }
-    sourceByKey.set(key, source);
-    normalized[key] = value;
+    sourceByKey.set(parsed.key, source);
+    paths.push(parsed);
   }
+  const overlap = findBatchOverlap(paths);
+  if (overlap !== null) {
+    return failedBatch("Batch contains overlapping configuration paths", {
+      ancestorKey: overlap.ancestor.key,
+      descendantKey: overlap.descendant.key,
+      paths: [overlap.ancestor.source, overlap.descendant.source],
+    });
+  }
+  const normalized: Record<string, unknown> = {};
+  for (const batchPath of paths) normalized[batchPath.key] = batchPath.value;
   return { success: true, entries: normalized };
 }
 
@@ -165,12 +183,45 @@ function storagePath(key: string): string | null {
   }
 }
 
-function canonicalStorageKey(key: string): string | null {
+function parseBatchPath(source: string, value: unknown): BatchPath | null {
   try {
-    return canonicalConfigPathFromStorageKey(key).storageKey;
+    const parsed = canonicalConfigPathFromStorageKey(source);
+    return {
+      source,
+      value,
+      key: parsed.storageKey,
+      path: parsed.path,
+      segments: parsed.segments,
+    };
   } catch {
     return null;
   }
+}
+
+function findBatchOverlap(
+  paths: readonly BatchPath[],
+): { readonly ancestor: BatchPath; readonly descendant: BatchPath } | null {
+  const sorted = [...paths].sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+  );
+  for (const ancestor of sorted) {
+    for (const descendant of sorted) {
+      if (isStrictAncestor(ancestor.segments, descendant.segments)) {
+        return { ancestor, descendant };
+      }
+    }
+  }
+  return null;
+}
+
+function isStrictAncestor(
+  ancestor: readonly string[],
+  descendant: readonly string[],
+): boolean {
+  return (
+    ancestor.length < descendant.length &&
+    ancestor.every((segment, index) => segment === descendant[index])
+  );
 }
 
 function failedBatch(
