@@ -5,7 +5,7 @@ import type {
 } from "@weaver-conf/config-engine";
 import {
   assertPublicConfigPath,
-  buildPath,
+  parseCanonicalConfigPath,
   validateConfigurationPatch,
   validateEffectiveConfiguration,
   validatePartialConfiguration,
@@ -89,12 +89,12 @@ export async function prepareRegisteredPatchWrite(
     resolved.anchor.schema,
     relativeSegments,
     value,
-    { path: canonicalPathSegments(resolved.anchor.path) },
+    { path: parseCanonicalConfigPath(resolved.anchor.path).segments },
   );
   if (!patchValidation.valid)
     return validationFailure(patchValidation, resolved);
 
-  const anchorKey = canonicalPathToStorageKey(resolved.anchor.path);
+  const anchorKey = parseCanonicalConfigPath(resolved.anchor.path).storageKey;
   const baseValue = await getLayerValue(anchorKey);
   const baseValidation = validateExistingLayerValue(baseValue, resolved);
   if (!baseValidation.success) return baseValidation;
@@ -103,7 +103,7 @@ export async function prepareRegisteredPatchWrite(
   const resultValidation = validatePartialConfiguration(
     resolved.anchor.schema,
     nextValue,
-    { path: canonicalPathSegments(resolved.anchor.path) },
+    { path: parseCanonicalConfigPath(resolved.anchor.path).segments },
   );
   if (!resultValidation.valid)
     return validationFailure(resultValidation, resolved);
@@ -136,7 +136,9 @@ export async function validateRegisteredEffectiveConfiguration(
     );
   }
 
-  const value = await getEffectiveValue(canonicalPathToStorageKey(anchor.path));
+  const value = await getEffectiveValue(
+    parseCanonicalConfigPath(anchor.path).storageKey,
+  );
   return validateEffectiveConfiguration(anchor.schema, value, {
     path: normalized.segments,
   });
@@ -191,7 +193,7 @@ function validateExistingLayerValue(
     resolved.anchor.schema,
     value,
     {
-      path: canonicalPathSegments(resolved.anchor.path),
+      path: parseCanonicalConfigPath(resolved.anchor.path).segments,
     },
   );
   return validation.valid
@@ -218,7 +220,7 @@ function preparedWrite(
   return {
     success: true,
     anchorPath,
-    key: canonicalPathToStorageKey(anchorPath),
+    key: parseCanonicalConfigPath(anchorPath).storageKey,
     value,
   };
 }
@@ -251,7 +253,7 @@ function normalizeCanonicalPath(path: string):
         message: `Path "${normalized}" must use canonical slash segments`,
       };
     }
-    const segments = canonicalPathSegments(normalized);
+    const segments = parseCanonicalConfigPath(normalized).segments;
     if (segments.length === 0) {
       return {
         success: false,
@@ -264,21 +266,12 @@ function normalizeCanonicalPath(path: string):
   }
 }
 
-function canonicalPathSegments(path: string): readonly string[] {
-  if (path === "/") return [];
-  return path.slice(1).split("/");
-}
-
 function relativePathSegments(
   anchorPath: string,
   path: string,
 ): readonly string[] {
-  const anchorSegments = canonicalPathSegments(anchorPath);
-  return canonicalPathSegments(path).slice(anchorSegments.length);
-}
-
-function canonicalPathToStorageKey(path: string): string {
-  return buildPath(canonicalPathSegments(path));
+  const anchorSegments = parseCanonicalConfigPath(anchorPath).segments;
+  return parseCanonicalConfigPath(path).segments.slice(anchorSegments.length);
 }
 
 function patchLayerObject(

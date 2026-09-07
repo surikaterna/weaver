@@ -6,4 +6,4 @@
 "@weaver-conf/transport-scomp": major
 ---
 
-Introduce path-first, object-root-only schema registration contracts, canonical service/fragment path derivation, prototype-pollution-safe path invariants, the protected Weaver internal registry root invariant, and schema-compatible partial/effective validation APIs.
+Introduce path-first, object-root-only schema registration contracts, canonical service/fragment path derivation and slash-path/storage-key conversion, aligned identifier and slot-path schemas, prototype-pollution-safe path invariants, the protected Weaver internal registry root invariant, and schema-compatible partial/effective validation APIs.

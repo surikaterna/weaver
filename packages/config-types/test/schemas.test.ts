@@ -6,6 +6,12 @@ import {
   scopeInstanceSchema,
 } from "../src/schemas-layers.js";
 import {
+  providerIdSchema,
+  publicConfigPathSchema,
+  serviceIdSchema,
+  slotPathSchema,
+} from "../src/schemas-registration-paths.js";
+import {
   fragmentSchemaRegistrationRequestSchema,
   schemaRegistrationMetadataSchema,
   serviceSchemaRegistrationRequestSchema,
@@ -107,6 +113,70 @@ describe("schema registration request schemas", () => {
     { oneOf: [{ type: "object" }, { type: "string" }] },
     { type: ["object", "null"] },
   ];
+
+  it("enforces registration identifier and slot path lexical contracts", () => {
+    for (const id of ["lynx", "checkout-api"]) {
+      expect(serviceIdSchema.safeParse(id).success).toBe(true);
+    }
+    for (const id of ["_weaver", "Upper", "bad/id", "constructor"]) {
+      expect(serviceIdSchema.safeParse(id).success).toBe(false);
+    }
+    for (const id of ["ghost.settings.panel", "Ghost_2", "provider-id"]) {
+      expect(providerIdSchema.safeParse(id).success).toBe(true);
+    }
+    for (const id of ["bad/id", " bad", "prototype", "provider[dot]"]) {
+      expect(providerIdSchema.safeParse(id).success).toBe(false);
+    }
+    for (const path of ["/plugins", "/plugin.keys/nested-key"]) {
+      expect(slotPathSchema.safeParse(path).success).toBe(true);
+    }
+    for (const path of [
+      "plugins",
+      "/",
+      "/plugins/",
+      "/plugins//nested",
+      "/[plugins]",
+      "/plugins/__proto__",
+    ]) {
+      expect(slotPathSchema.safeParse(path).success).toBe(false);
+    }
+  });
+
+  it("validates public canonical paths with the same segment rules", () => {
+    for (const path of ["/lynx", "/lynx/plugin.keys", "/lynx/plugins/"]) {
+      expect(publicConfigPathSchema.safeParse(path).success).toBe(true);
+    }
+    for (const path of [
+      "/",
+      "lynx",
+      "/_weaver/registry",
+      "/lynx//plugins",
+      "/lynx/[plugin.keys]",
+      "/lynx/constructor",
+    ]) {
+      expect(publicConfigPathSchema.safeParse(path).success).toBe(false);
+    }
+  });
+
+  it("rejects service-prefixed slot paths", () => {
+    const request = {
+      serviceId: "lynx",
+      environment: "default",
+      owner: { name: "Lynx", contact: "lynx@example.com" },
+      schema: { type: "object" },
+      fragmentSlots: [{ slotPath: "/lynx/plugins", accepts: "object" }],
+    };
+    expect(
+      serviceSchemaRegistrationRequestSchema.safeParse(request).success,
+    ).toBe(false);
+    expect(
+      fragmentSchemaRegistrationRequestSchema.safeParse({
+        ...request,
+        providerId: "ghost.settings.panel",
+        slotPath: "/lynx/plugins",
+      }).success,
+    ).toBe(false);
+  });
 
   it("accepts path-first service registration shape", () => {
     const result = serviceSchemaRegistrationRequestSchema.safeParse({

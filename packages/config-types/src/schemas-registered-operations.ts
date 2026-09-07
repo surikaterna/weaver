@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { writeResultSchema } from "./schemas-providers";
+import { publicConfigPathSchema } from "./schemas-registration-paths";
 import { schemaValidationResultSchema } from "./schemas-schema-validation";
 
 const registeredWriteOptionsSchema = {
@@ -10,7 +11,7 @@ const registeredWriteOptionsSchema = {
 
 export const registeredObjectWriteRequestSchema = z
   .strictObject({
-    anchorPath: z.string().min(1),
+    anchorPath: publicConfigPathSchema,
     value: z.unknown(),
     ...registeredWriteOptionsSchema,
   })
@@ -21,7 +22,7 @@ export const registeredObjectWriteRequestSchema = z
 
 export const registeredPathPatchRequestSchema = z
   .strictObject({
-    path: z.string().min(1),
+    path: publicConfigPathSchema,
     value: z.unknown(),
     ...registeredWriteOptionsSchema,
   })
@@ -31,7 +32,7 @@ export const registeredPathPatchRequestSchema = z
   });
 
 export const registeredEffectiveValidationRequestSchema = z.strictObject({
-  anchorPath: z.string().min(1),
+  anchorPath: publicConfigPathSchema,
   environment: z.string().min(1).optional(),
   scope: z.string().min(1).optional(),
 });

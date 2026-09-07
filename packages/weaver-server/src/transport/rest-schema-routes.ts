@@ -1,4 +1,4 @@
-import { buildPath } from "@weaver-conf/config-engine";
+import { parseCanonicalConfigPath } from "@weaver-conf/config-engine";
 import type { WriteResult } from "@weaver-conf/config-types";
 import type { AuditService } from "../audit/audit-service";
 import type {
@@ -95,10 +95,6 @@ function extractExpectedRevision(req: RestRequest): string | undefined {
 }
 
 const schemaRegistryAdminKey = "_weaver.registry.schemas";
-
-function storageKeyFromCanonicalPath(path: string): string {
-  return buildPath(path.slice(1).split("/"));
-}
 
 function gateRead(
   req: RestRequest,
@@ -262,7 +258,7 @@ function setRegisteredObjectRoute(deps: SchemaRouteDeps): RestRoute {
       if (!schemaRegistry) return unavailable(configService);
       const layer = req.query.layer ?? "platform";
       const anchorPath = canonicalRoutePath(req.params, "anchorPath");
-      const key = storageKeyFromCanonicalPath(anchorPath);
+      const key = parseCanonicalConfigPath(anchorPath).storageKey;
       const denied = gateWrite(req, deps, layer, key);
       if (denied) return denied;
       const body = registeredObjectWriteBodySchema.parse(req.body);
@@ -300,7 +296,7 @@ function patchRegisteredPathRoute(deps: SchemaRouteDeps): RestRoute {
       if (!schemaRegistry) return unavailable(configService);
       const layer = req.query.layer ?? "platform";
       const path = canonicalRoutePath(req.params, "path");
-      const key = storageKeyFromCanonicalPath(path);
+      const key = parseCanonicalConfigPath(path).storageKey;
       const denied = gateWrite(req, deps, layer, key);
       if (denied) return denied;
       const body = registeredPathPatchBodySchema.parse(req.body);
@@ -337,7 +333,7 @@ function validateRegisteredEffectiveRoute(deps: SchemaRouteDeps): RestRoute {
     async handler(req) {
       if (!schemaRegistry) return unavailable(configService);
       const anchorPath = canonicalRoutePath(req.params, "anchorPath");
-      const key = storageKeyFromCanonicalPath(anchorPath);
+      const key = parseCanonicalConfigPath(anchorPath).storageKey;
       const denied = gateRead(req, deps, key);
       if (denied) return denied;
       const context = effectiveValidationContext(req, schemaRegistry);
