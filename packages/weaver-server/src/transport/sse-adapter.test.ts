@@ -232,6 +232,19 @@ describe("SSEAdapter", () => {
       code: "VALIDATION_ERROR",
     });
     expect(realAdapter.clientCount).toBe(1);
+
+    const completed = await configService.set(
+      "platform",
+      "checkout.mode",
+      "test",
+    );
+    expect(completed.success).toBe(true);
+    const messages = parseMessages(client);
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.data).toMatchObject({
+      key: "checkout",
+      value: { limit: 10, mode: "test" },
+    });
     client.close();
   });
 

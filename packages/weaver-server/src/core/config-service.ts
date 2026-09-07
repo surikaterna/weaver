@@ -44,8 +44,8 @@ import { createResolutionPipeline } from "./resolution-pipeline";
 import {
   assertValidRuntimeRead,
   assertValidRuntimeScopes,
-  canPublishRuntimeDelta,
   registerSchemaReadHost,
+  runtimeDeltasToPublish,
 } from "./schema-read-boundary";
 import {
   normalizeBatchEntries,
@@ -234,9 +234,13 @@ export async function createWeaverConfigService(
   });
 
   function fireDelta(delta: ConfigDelta): void {
-    if (!canPublishRuntimeDelta(service, delta, resolvedEffectiveState)) return;
-    for (const handler of deltaHandlers) {
-      handler(delta);
+    const published = runtimeDeltasToPublish(
+      service,
+      delta,
+      resolvedEffectiveState,
+    );
+    for (const next of published) {
+      for (const handler of deltaHandlers) handler(next);
     }
   }
 

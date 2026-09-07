@@ -25,6 +25,10 @@ const bindings = new WeakMap<
   ReadonlyArray<SchemaReadBinding>
 >();
 const environments = new WeakMap<WeaverConfigService, string>();
+const suppressedAnchors = new WeakMap<
+  WeaverConfigService,
+  Map<string, Set<string>>
+>();
 
 export function registerSchemaReadHost(
   service: WeaverConfigService,
@@ -90,22 +94,85 @@ export function assertValidRuntimeScopes(
   }
 }
 
-export function canPublishRuntimeDelta(
+export function runtimeDeltasToPublish(
   service: WeaverConfigService,
   delta: ConfigDelta,
   resolve: (scopePath?: ScopeInstance[]) => Record<string, unknown>,
-): boolean {
+): ConfigDelta[] {
   const scope = parseScopeLayer(delta.layer);
   const scopePath = scope
     ? [{ scopeId: scope.scopeId, value: scope.value }]
     : undefined;
+  const entries = resolve(scopePath);
   try {
-    assertValidRuntimeRead(service, resolve(scopePath), delta.key);
-    return true;
+    assertValidRuntimeRead(service, entries, delta.key);
   } catch (error: unknown) {
-    if (isEffectiveConfigurationError(error)) return false;
+    const anchorPath = effectiveErrorAnchor(error);
+    if (anchorPath !== undefined)
+      rememberSuppressed(service, delta.layer, anchorPath);
+    if (isEffectiveConfigurationError(error)) return [];
     throw error;
   }
+
+  return recoverSuppressedDeltas(service, delta, entries);
+}
+
+function effectiveErrorAnchor(error: unknown): string | undefined {
+  if (!isEffectiveConfigurationError(error)) return undefined;
+  const anchorPath =
+    error instanceof WeaverErrorInstance
+      ? error.details?.anchorPath
+      : undefined;
+  return typeof anchorPath === "string" ? anchorPath : undefined;
+}
+
+function rememberSuppressed(
+  service: WeaverConfigService,
+  layer: string,
+  anchorPath: string,
+): void {
+  const byLayer = suppressedAnchors.get(service) ?? new Map();
+  const anchors = byLayer.get(layer) ?? new Set();
+  anchors.add(anchorPath);
+  byLayer.set(layer, anchors);
+  suppressedAnchors.set(service, byLayer);
+}
+
+function recoverSuppressedDeltas(
+  service: WeaverConfigService,
+  delta: ConfigDelta,
+  entries: Record<string, unknown>,
+): ConfigDelta[] {
+  const anchors = suppressedAnchors.get(service)?.get(delta.layer);
+  if (!anchors) return [delta];
+  const recovered: ConfigDelta[] = [];
+  for (const anchorPath of [...anchors].sort()) {
+    const key = parseCanonicalConfigPath(anchorPath).storageKey;
+    try {
+      assertValidRuntimeRead(service, entries, key);
+    } catch (error: unknown) {
+      if (isEffectiveConfigurationError(error)) continue;
+      throw error;
+    }
+    anchors.delete(anchorPath);
+    recovered.push({
+      ...delta,
+      action: "set",
+      key,
+      value: deepGet(entries, key),
+    });
+  }
+  if (anchors.size === 0) suppressedAnchors.get(service)?.delete(delta.layer);
+  const deltaPath = runtimePathFromStorageKey(delta.key);
+  const replacesDelta = recovered.some((item) => {
+    const anchorPath = runtimePathFromStorageKey(item.key);
+    return (
+      anchorPath !== undefined &&
+      deltaPath !== undefined &&
+      pathsIntersect(anchorPath, deltaPath)
+    );
+  });
+  return replacesDelta ? recovered : [...recovered, delta];
 }
 
 function runtimeAnchors(
