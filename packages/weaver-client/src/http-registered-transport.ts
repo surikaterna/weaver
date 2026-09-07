@@ -16,6 +16,8 @@ import type { z } from "zod";
 import type { HttpServerError, ValidatedRequestOptions } from "./http-request";
 import type { WriteOptions, WriteResult } from "./transport";
 
+const effectiveValidationStatuses = new Set([422]);
+
 export interface HttpRegisteredContext {
   buildScopeQuery(scopePath?: ScopeInstance[]): string;
   queryString(params: Record<string, string | undefined>): string;
@@ -128,6 +130,8 @@ export function validateRegisteredEffective(
     "GET",
     `/v1/registered/effective${path}${qs}`,
     registeredEffectiveValidationResponseSchema,
+    undefined,
+    { acceptedStatuses: effectiveValidationStatuses },
   );
 }
 
@@ -175,7 +179,7 @@ function failedRegistration(
     isNewSchema: false,
     hasBreakingChanges: false,
     error: {
-      code: "VALIDATION_ERROR",
+      code: error.code,
       message: error.message,
       ...(error.details ? { details: error.details } : {}),
     },

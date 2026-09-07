@@ -68,7 +68,6 @@ export async function fetchWithRetry(
 
       return res;
     } catch (err) {
-      clearTimeout(timer);
       const message = err instanceof Error ? err.message : String(err);
       const isTimeout = controller.signal.aborted;
 
@@ -83,6 +82,8 @@ export async function fetchWithRetry(
         continue;
       }
       throw err;
+    } finally {
+      clearTimeout(timer);
     }
   }
 

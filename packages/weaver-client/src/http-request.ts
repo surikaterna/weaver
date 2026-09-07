@@ -1,12 +1,9 @@
+import { weaverErrorSchema } from "@weaver-conf/config-types";
 import { z } from "zod";
 import { fetchWithRetry, type RetryOptions } from "./http-retry";
 import type { TransportError } from "./http-transport";
 
-const serverErrorSchema = z.object({
-  code: z.string(),
-  message: z.string(),
-  details: z.record(z.string(), z.unknown()).optional(),
-});
+const serverErrorSchema = weaverErrorSchema;
 
 const responseEnvelopeSchema = z.object({
   data: z.unknown(),
@@ -35,7 +32,20 @@ export class HttpServerResponseError extends Error {
   }
 }
 
+export class HttpResponseContractError extends Error {
+  readonly statusCode: number;
+  readonly path: string;
+
+  constructor(statusCode: number, path: string) {
+    super(`HTTP ${statusCode} response from ${path} did not contain an error`);
+    this.name = "HttpResponseContractError";
+    this.statusCode = statusCode;
+    this.path = path;
+  }
+}
+
 export interface ValidatedRequestOptions<T> {
+  readonly acceptedStatuses?: ReadonlySet<number> | undefined;
   readonly headers?: Record<string, string> | undefined;
   readonly mapServerError?: ((error: HttpServerError) => T) | undefined;
 }
@@ -124,13 +134,24 @@ function reportServerError(
   options: HttpRequesterOptions,
   error: HttpServerError,
   status: number,
+  method: string,
 ): void {
   options.onError?.({
     type: "server",
     message: error.message,
     statusCode: status,
-    retryable: status >= 500,
+    retryable: isReadMethod(method) && status >= 500,
   });
+}
+
+function rejectUnexpectedStatus(
+  options: HttpRequesterOptions,
+  response: Response,
+  path: string,
+): never {
+  const error = new HttpResponseContractError(response.status, path);
+  reportParseError(error, response.status, options.onError);
+  throw error;
 }
 
 async function request(
@@ -145,11 +166,12 @@ async function request(
     path,
     body,
   );
-  if (!response.ok && envelope.error) {
-    reportServerError(options, envelope.error, response.status);
+  if (response.ok) return envelope.data;
+  if (envelope.error) {
+    reportServerError(options, envelope.error, response.status, method);
     throw new HttpServerResponseError(envelope.error, response.status);
   }
-  return envelope.data;
+  return rejectUnexpectedStatus(options, response, path);
 }
 
 async function requestValidated<T>(
@@ -167,8 +189,16 @@ async function requestValidated<T>(
     body,
     requestOptions?.headers,
   );
-  if (!response.ok && envelope.error) {
-    reportServerError(options, envelope.error, response.status);
+  if (response.ok) {
+    return parseResponse(
+      responseSchema,
+      envelope.data,
+      response.status,
+      options.onError,
+    );
+  }
+  if (envelope.error) {
+    reportServerError(options, envelope.error, response.status, method);
     if (requestOptions?.mapServerError) {
       const mapped = requestOptions.mapServerError(envelope.error);
       return parseResponse(
@@ -179,6 +209,9 @@ async function requestValidated<T>(
       );
     }
     throw new HttpServerResponseError(envelope.error, response.status);
+  }
+  if (!requestOptions?.acceptedStatuses?.has(response.status)) {
+    return rejectUnexpectedStatus(options, response, path);
   }
   return parseResponse(
     responseSchema,
@@ -195,19 +228,26 @@ async function fetchResponse(
   body?: unknown,
   requestHeaders?: Record<string, string>,
 ): Promise<Response> {
-  try {
-    return await fetchWithRetry(
-      `${options.baseUrl}${path}`,
-      {
-        method,
-        headers: { ...options.buildHeaders(), ...requestHeaders },
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      },
-      options,
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    options.onError?.({ type: "connection", message, retryable: false });
-    throw error;
-  }
+  return fetchWithRetry(
+    `${options.baseUrl}${path}`,
+    {
+      method,
+      headers: { ...options.buildHeaders(), ...requestHeaders },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    },
+    {
+      ...options,
+      retry: isReadMethod(method)
+        ? options.retry
+        : { ...options.retry, maxAttempts: 1 },
+    },
+  );
+}
+
+/**
+ * Only side-effect-free reads are safe to replay without server deduplication.
+ * If-Match prevents stale writes but cannot resolve an ambiguous completed write.
+ */
+function isReadMethod(method: string): boolean {
+  return method === "GET";
 }

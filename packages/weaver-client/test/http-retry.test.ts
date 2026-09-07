@@ -91,4 +91,50 @@ describe("fetchWithRetry", () => {
     );
     expect(errors.length).toBe(1);
   });
+
+  it("reports a terminal timeout once without reclassifying it", async () => {
+    const errors: Array<{ type: string }> = [];
+    const fetchFn: typeof globalThis.fetch = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("timed out", "AbortError")),
+          { once: true },
+        );
+      });
+    await expect(
+      fetchWithRetry(
+        "http://x",
+        {},
+        {
+          retry: { maxAttempts: 1, baseDelay: 0, maxDelay: 0 },
+          timeout: 1,
+          fetchFn,
+          onError: (error) => errors.push(error),
+        },
+      ),
+    ).rejects.toThrow("timed out");
+    expect(errors).toEqual([
+      { type: "timeout", message: "timed out", retryable: false },
+    ]);
+  });
+
+  it("clears the timeout after a completed request", async () => {
+    let signal: AbortSignal | null = null;
+    const fetchFn: typeof globalThis.fetch = async (_input, init) => {
+      signal = init?.signal ?? null;
+      return new Response(null, { status: 200 });
+    };
+    await fetchWithRetry(
+      "http://x",
+      {},
+      {
+        retry: { maxAttempts: 1, baseDelay: 0, maxDelay: 0 },
+        timeout: 1,
+        fetchFn,
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(signal?.aborted).toBe(false);
+  });
 });

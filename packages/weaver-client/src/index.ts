@@ -3,7 +3,10 @@ export { createWeaverClient } from "./client";
 export { flattenObject } from "./flatten";
 export type { FileSystemPersistenceOptions } from "./fs-persistence";
 export { createFileSystemPersistence } from "./fs-persistence";
-export { HttpServerResponseError } from "./http-request";
+export {
+  HttpResponseContractError,
+  HttpServerResponseError,
+} from "./http-request";
 export { fetchWithRetry, type RetryOptions } from "./http-retry";
 export type { HttpTransportOptions, TransportError } from "./http-transport";
 export { createHttpTransport } from "./http-transport";
