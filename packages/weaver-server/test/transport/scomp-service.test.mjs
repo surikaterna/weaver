@@ -12,16 +12,22 @@ function route(name) {
 
 function createTestProvider(id, layer, entries, writable = true) {
   let data = JSON.parse(JSON.stringify(entries));
+  const writes = [];
+  const removes = [];
   return {
     id,
     layer,
     writable,
+    writes,
+    removes,
     async load() { return { entries: JSON.parse(JSON.stringify(data)) }; },
     async write(key, value) {
+      writes.push({ key, value });
       deepSet(data, key, value);
       return { success: true };
     },
     async remove(key) {
+      removes.push(key);
       deepRemove(data, key);
       return { success: true };
     },
@@ -35,6 +41,67 @@ function buildScompDeps(configService) {
 }
 
 describe("createWeaverScompService", () => {
+  test("normal SCOMP writes cannot bypass a bound registered schema", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      checkout: { mode: "prod" },
+    });
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "default" });
+    const deps = buildScompDeps(svc);
+    await deps.schemaRegistry.register({
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema: {
+        type: "object",
+        required: ["mode"],
+        properties: { mode: { type: "string", enum: ["prod", "test"] } },
+        additionalProperties: false,
+      },
+      fragmentSlots: [],
+    });
+    const service = createWeaverScompService(deps);
+
+    const direct = await service.router[route("set")].handler({
+      layer: "platform",
+      key: "checkout.mode",
+      value: "invalid",
+    });
+    const batch = await service.router[route("setMany")].handler({
+      layer: "platform",
+      entries: { "safe.value": true, "checkout.mode": "invalid" },
+    });
+    const remove = await service.router[route("remove")].handler({
+      layer: "platform",
+      key: "checkout.mode",
+    });
+    const wrongEnvironment = await service.router[route("set")].handler({
+      layer: "platform",
+      key: "checkout.mode",
+      value: "invalid",
+      environment: "other",
+    });
+    const wrongEnvironmentRemove = await service.router[route("remove")].handler({
+      layer: "platform",
+      key: "checkout.mode",
+      environment: "other",
+    });
+    const duplicateBatch = await service.router[route("setMany")].handler({
+      layer: "platform",
+      entries: { "checkout.mode": "invalid", "checkout[mode]": "prod" },
+    });
+
+    expect([
+      direct.success,
+      batch.success,
+      remove.success,
+      wrongEnvironment.success,
+      wrongEnvironmentRemove.success,
+      duplicateBatch.success,
+    ]).toEqual([false, false, false, false, false, false]);
+    expect(provider.writes).toEqual([]);
+    expect(provider.removes).toEqual([]);
+  });
+
   test("returns a ServiceDefinition with name and router", async () => {
     const provider = createTestProvider("p1", "platform", { app: { name: "test" } });
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
@@ -52,12 +119,79 @@ describe("createWeaverScompService", () => {
     const expected = [
       "resolveAll", "get", "getNamespace", "inspect", "set", "setMany",
       "remove", "listScopes", "listScopeValues", "fetchSchemas",
-      "registerSchema", "subscribe",
+      "registerSchema", "setRegisteredObject", "patchRegisteredPath",
+      "validateRegisteredEffective", "subscribe",
     ];
     for (const name of expected) {
       expect(routes.includes(route(name))).toBeTruthy();
     }
     expect(routes.length).toBe(expected.length);
+  });
+
+  test("registered operations preserve canonical metadata and anchor objects", async () => {
+    const provider = createTestProvider("p1", "platform", {});
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "default" });
+    const service = createWeaverScompService(buildScompDeps(svc));
+    const schema = {
+      type: "object",
+      properties: {
+        db: {
+          type: "object",
+          properties: { host: { type: "string" }, port: { type: "integer" } },
+          required: ["host", "port"],
+        },
+      },
+      required: ["db"],
+    };
+    const registered = await service.router[route("registerSchema")].handler({
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema,
+      fragmentSlots: [],
+    });
+    expect(registered.metadata.servicePath).toBe("/checkout");
+
+    await service.router[route("setRegisteredObject")].handler({
+      anchorPath: "/checkout",
+      value: { db: { host: "localhost", port: 5432 } },
+      layer: "platform",
+    });
+    await service.router[route("patchRegisteredPath")].handler({
+      path: "/checkout/db/host",
+      value: "db.internal",
+      layer: "platform",
+    });
+    const value = await svc.get("checkout");
+    expect(value).toEqual({ db: { host: "db.internal", port: 5432 } });
+  });
+
+  test("registerSchema returns typed validation failures for unsafe environments", async () => {
+    const provider = createTestProvider("p1", "platform", {});
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "default" });
+    const deps = buildScompDeps(svc);
+    const service = createWeaverScompService(deps);
+    const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
+
+    for (const environment of [
+      "__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod", 42,
+    ]) {
+      const result = await service.router[route("registerSchema")].handler({
+        serviceId: "checkout",
+        environment,
+        owner: { name: "Checkout", contact: "checkout@example.com" },
+        schema: { type: "object" },
+        fragmentSlots: [],
+      });
+      expect(result).toMatchObject({
+        success: false,
+        error: { code: "VALIDATION_ERROR" },
+      });
+    }
+
+    expect(deps.schemaRegistry.listAll()).toEqual({});
+    expect(provider.writes).toEqual([]);
+    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(prototypeBefore);
   });
 
   test("resolveAll handler returns snapshot", async () => {
@@ -68,6 +202,147 @@ describe("createWeaverScompService", () => {
     expect(result.entries).toBeTruthy();
     expect(result.entries.app.port).toBe(3000);
     expect(result.revision).toBeTruthy();
+  });
+
+  test("resolveAll returns inherited effective scope state", async () => {
+    const base = createTestProvider("base", "platform", { app: { mode: "base", limit: 1 } });
+    const tenant = createTestProvider("tenant", "tenant:acme", { app: { limit: 2 } });
+    const svc = await createWeaverConfigService({
+      providers: [base, tenant],
+      environment: "dev",
+    });
+    const service = createWeaverScompService(buildScompDeps(svc));
+
+    const result = await service.router[route("resolveAll")].handler({ scope: "tenant:acme" });
+
+    expect(result.entries.app).toEqual({ mode: "base", limit: 1 });
+    expect(result.scopes["tenant:acme"].app).toEqual({ mode: "base", limit: 2 });
+  });
+
+  test("runtime read handlers reject incomplete registered configuration", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      checkout: { limit: 10 },
+      public: { ready: true },
+    });
+    const svc = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+    });
+    const deps = buildScompDeps(svc);
+    await deps.schemaRegistry.register({
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema: {
+        type: "object",
+        required: ["mode"],
+        properties: {
+          mode: { type: "string" },
+          limit: { type: "number" },
+        },
+        additionalProperties: false,
+      },
+      fragmentSlots: [],
+    });
+    const service = createWeaverScompService(deps);
+
+    await expect(service.router[route("resolveAll")].handler({})).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    await expect(service.router[route("get")].handler({ key: "checkout.limit" })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    await expect(service.router[route("getNamespace")].handler({ prefix: "checkout" })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    await expect(service.router[route("get")].handler({ key: "public.ready" })).resolves.toEqual({ value: true });
+  });
+
+  test("registered object reads and feed projections are fully resolved", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      checkout: { token: { _weaver: "mount", source: "shared.token" } },
+      shared: { token: "A" },
+    });
+    const svc = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+    });
+    const deps = buildScompDeps(svc);
+    const service = createWeaverScompService(deps);
+    const feed = service.router[route("subscribe")].handler({});
+    let registration;
+    setTimeout(() => {
+      registration = deps.schemaRegistry.register({
+        serviceId: "checkout",
+        environment: "default",
+        owner: { name: "Checkout", contact: "checkout@example.com" },
+        schema: {
+          type: "object",
+          required: ["token", "mode"],
+          properties: { token: { type: "string" }, mode: { type: "string" } },
+          additionalProperties: false,
+        },
+        fragmentSlots: [],
+      });
+    }, 10);
+    expect((await feed.next()).value).toMatchObject({
+      action: "remove",
+      key: "checkout",
+    });
+    await registration;
+
+    const recovery = feed.next();
+    await deps.schemaRegistry.register({
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema: {
+        type: "object",
+        required: ["token"],
+        properties: { token: { type: "string" } },
+        additionalProperties: false,
+      },
+      fragmentSlots: [],
+    });
+    expect((await recovery).value).toMatchObject({
+      action: "set",
+      key: "checkout",
+      value: { token: "A" },
+    });
+    await expect(service.router[route("get")].handler({ key: "checkout" })).resolves.toEqual({
+      value: { token: "A" },
+    });
+    await feed.return();
+  });
+
+  test("public read handlers do not expose protected metadata", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      app: {
+        name: "public",
+        direct: { _weaver: "mount", source: "_weaver.registry.schemas" },
+        bridge: { _weaver: "mount", source: "_weaver.registry.schemas" },
+        chained: { _weaver: "mount", source: "app.bridge" },
+      },
+      _weaver: { registry: { schemas: "LEAK" } },
+    });
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+    const service = createWeaverScompService(buildScompDeps(svc));
+
+    const snapshot = await service.router[route("resolveAll")].handler({});
+    const direct = await service.router[route("get")].handler({ key: "_weaver.registry.schemas" });
+    const mounted = await service.router[route("get")].handler({ key: "app.direct" });
+    const chained = await service.router[route("get")].handler({ key: "app.chained" });
+    const namespace = await service.router[route("getNamespace")].handler({ prefix: "_weaver" });
+    const inspection = await service.router[route("inspect")].handler({ key: "_weaver" });
+
+    expect(snapshot.entries).toEqual({ app: { name: "public" } });
+    expect(direct).toEqual({ value: undefined });
+    expect(mounted).toEqual({ value: undefined });
+    expect(chained).toEqual({ value: undefined });
+    expect(namespace).toEqual({ entries: {} });
+    expect(inspection.effectiveValue).toBe(undefined);
+    expect(inspection.layerValues).toEqual({});
+    expect(JSON.stringify({ snapshot, mounted, chained })).not.toContain("LEAK");
   });
 
   test("get handler returns value", async () => {

@@ -2,6 +2,21 @@
 
 import { createWeaverError } from "@weaver-conf/config-types";
 
+const DANGEROUS_PATH_SEGMENTS: ReadonlySet<string> = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
+export function assertSafePathSegment(segment: string): void {
+  if (DANGEROUS_PATH_SEGMENTS.has(segment)) {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      `Path segment "${segment}" is not allowed`,
+    );
+  }
+}
+
 /**
  * Parses a dot-delimited path with bracket notation into segments.
  * Brackets protect dots from being treated as separators.
@@ -115,6 +130,7 @@ export function parsePath(path: string): readonly string[] {
     throw createWeaverError("VALIDATION_ERROR", `Path must not be empty`);
   }
 
+  for (const segment of segments) assertSafePathSegment(segment);
   return segments;
 }
 
@@ -126,6 +142,7 @@ export function buildPath(segments: readonly string[]): string {
   let result = "";
 
   for (const [i, seg] of segments.entries()) {
+    assertSafePathSegment(seg);
     const compound = isCompoundSegment(seg);
 
     if (i === 0) {

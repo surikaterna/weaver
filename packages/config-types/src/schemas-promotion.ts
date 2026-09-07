@@ -72,6 +72,38 @@ export const sinkDomainAuditEntrySchema = z.strictObject({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
+export const schemaAuditActionSchema = z.enum([
+  "schema.register.service",
+  "schema.register.fragment",
+  "schema.write.object",
+  "schema.patch.path",
+  "schema.validate.effective",
+]);
+
+export const schemaOperationAuditMetadataSchema = z.strictObject({
+  operation: schemaAuditActionSchema,
+  subject: z.string().min(1).optional(),
+  serviceId: z.string().min(1).optional(),
+  providerId: z.string().min(1).optional(),
+  servicePath: z.string().min(1).optional(),
+  canonicalSlotPath: z.string().min(1).optional(),
+  fragmentPath: z.string().min(1).optional(),
+  writePath: z.string().min(1).optional(),
+  environment: z.string().min(1).optional(),
+});
+
+export const schemaDomainAuditEntrySchema = z.strictObject({
+  domain: z.literal("schema"),
+  timestamp: z.string(),
+  actor: z.string(),
+  action: schemaAuditActionSchema,
+  key: z.string(),
+  environment: z.string(),
+  success: z.boolean(),
+  error: z.string().optional(),
+  metadata: schemaOperationAuditMetadataSchema,
+});
+
 export const sessionDomainAuditEntrySchema = z.strictObject({
   domain: z.literal("session"),
   timestamp: z.string(),
@@ -95,6 +127,7 @@ export const secretDomainAuditEntrySchema = z.strictObject({
 export const configAuditEntrySchema = z.discriminatedUnion("domain", [
   configDomainAuditEntrySchema,
   sinkDomainAuditEntrySchema,
+  schemaDomainAuditEntrySchema,
   sessionDomainAuditEntrySchema,
   secretDomainAuditEntrySchema,
 ]);

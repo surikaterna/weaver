@@ -30,11 +30,37 @@ const server = await bootstrap({
 ### Core Services
 
 - `WeaverConfigService` — Central service for reads, writes, and resolution
-- `SchemaRegistry` — Namespace schema registration and validation
+- `SchemaRegistry` — Path-first schema registration and validation
 - `ScopeManager` — Scope provisioning and hierarchy management
 - `SessionManager` — Override session lifecycle (create, expire, audit)
 - `PromotionEngine` — Promotes values between layers with approval workflows
 - `RollbackService` — Reverts configuration to previous revisions
+
+Registered schemas are enforced at the effective runtime read boundary. Public
+`resolveAll`, `get`, and `getNamespace` calls validate values after layer and
+scope merging plus mount and secret resolution. Reads that contain, target, or
+descend from an invalid registered anchor fail with `VALIDATION_ERROR`; REST
+maps this runtime condition to HTTP 422. Unrelated unregistered reads and
+schema-compatible partial layer writes remain available, but an incomplete
+effective value is not served until later layers or writes complete it.
+Subscription feeds apply the same boundary to base and materialized scope
+contexts. Overlapping registrations are emitted as one aggregate root: an
+invalid member removes that root, while recovery emits one fully resolved root
+value. Successful schema registration triggers the same projection after the
+registry is applied (and persisted when persistence is configured).
+
+`ConfigSnapshot.entries` and each value in `ConfigSnapshot.scopes` are complete
+effective states. Scoped values already include inherited base configuration;
+clients must not treat them as physical overlays. Each effective context owns
+its mount map and secret cache, and is refreshed before validation and
+publication. Mounted terminal objects and arrays are resolved recursively;
+array indexes and dotted object keys use canonical, unambiguous secret-cache
+paths, and recursive mount cycles fail closed. Mount candidates with missing,
+non-string, empty, malformed, or unsafe sources are treated as unresolved and
+never exposed or allowed to raise raw parser errors. Effective deltas use
+`weaver-effective` for base or the canonical scope path for scoped state.
+Publication is serialized, and a failing delta listener is logged without
+failing an already committed write or registration.
 
 ### Auth
 

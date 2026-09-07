@@ -1,7 +1,6 @@
 // Full-stack integration smoke test for Weaver
 // Boots weaver-server, connects weaver-client via HTTP transport, and exercises major surfaces.
 
-import { createStaticJsonStorageProvider } from "@weaver-conf/storage-provider-static-json";
 import type { ConfigDelta } from "@weaver-conf/weaver-client";
 import {
   createHttpTransport,
@@ -65,10 +64,10 @@ async function main() {
   const server = await startWeaverServer({
     port: 0,
     providers: [
-      createStaticJsonStorageProvider({
+      createInMemoryStorageProvider({
         id: "base",
         layer: "platform",
-        data: SEED_CONFIG,
+        initialEntries: SEED_CONFIG,
       }),
       createInMemoryStorageProvider({
         id: "default",
@@ -167,15 +166,23 @@ async function main() {
   // ─── 7. Schema Registration ────────────────────────────────
   section("7. Schema Registration");
 
-  const metricsDef = defineNamespace("metrics", { enabled: z.boolean() });
-  const regResult = await client.registerNamespaces([metricsDef]);
-
-  // Transport may not support registerSchema — in that case it skips
-  const registered =
-    regResult.registered.length > 0 || regResult.skipped.length > 0;
+  const regResult = await client.registerSchema({
+    serviceId: "metrics",
+    environment: "default",
+    owner: { name: "metrics", contact: "metrics@example.com" },
+    schema: {
+      type: "object",
+      properties: { enabled: { type: "boolean" } },
+    },
+    fragmentSlots: [],
+  });
+  assert(regResult.success, "path-first service schema registered");
+  const protectedWrite = await client.set("_weaver.registry.schemas", {}, {
+    layer: "platform",
+  });
   assert(
-    registered,
-    `registerNamespaces completed (registered=${regResult.registered.length}, skipped=${regResult.skipped.length})`,
+    protectedWrite.success === false,
+    "public writes cannot bypass protected schema persistence",
   );
 
   // ─── 8. Server Auth (optional gate) ───────────────────────

@@ -4,7 +4,7 @@ import type { ConfigurationLayer, ConfigurationLayerData } from "./types";
 export interface WriteError {
   code: string;
   message: string;
-  details?: Record<string, unknown>;
+  details?: Record<string, unknown> | undefined;
 }
 
 /** Outcome of a write or remove operation against a storage provider. */

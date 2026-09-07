@@ -1,9 +1,31 @@
 import { createContractToken } from "@scompr/core";
+
+export {
+  fragmentSchemaRegistrationRequestSchema,
+  registeredEffectiveValidationRequestSchema,
+  registeredEffectiveValidationResponseSchema,
+  registeredObjectWriteRequestSchema,
+  registeredObjectWriteResponseSchema,
+  registeredPathPatchRequestSchema,
+  registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
+  schemaRegistrationResponseSchema,
+  serviceSchemaRegistrationRequestSchema,
+} from "@weaver-conf/config-types";
+
 import type {
   ConfigDelta,
   ConfigSnapshot,
   ConfigurationInspection,
   ConfigurationPropertySchema,
+  RegisteredEffectiveValidationRequest,
+  RegisteredEffectiveValidationResponse,
+  RegisteredObjectWriteRequest,
+  RegisteredObjectWriteResponse,
+  RegisteredPathPatchRequest,
+  RegisteredPathPatchResponse,
+  SchemaRegistrationRequest,
+  SchemaRegistrationResponse,
   ScopeDefinition,
   WriteResult,
 } from "@weaver-conf/config-types";
@@ -65,10 +87,14 @@ export type EmptyInput = Record<PropertyKey, never>;
 
 export type FetchSchemasInput = EmptyInput;
 
-export interface RegisterSchemaInput {
-  namespace: string;
-  schema: Record<string, unknown>;
-}
+export type RegisterSchemaInput = SchemaRegistrationRequest;
+
+export type SetRegisteredObjectInput = RegisteredObjectWriteRequest;
+
+export type PatchRegisteredPathInput = RegisteredPathPatchRequest;
+
+export type ValidateRegisteredEffectiveInput =
+  RegisteredEffectiveValidationRequest;
 
 export interface SubscribeInput {
   namespace?: string;
@@ -93,7 +119,18 @@ export interface WeaverConfigContract {
   fetchSchemas(
     input: FetchSchemasInput,
   ): Promise<{ schemas: Record<string, ConfigurationPropertySchema> }>;
-  registerSchema(input: RegisterSchemaInput): Promise<void>;
+  registerSchema(
+    input: RegisterSchemaInput,
+  ): Promise<SchemaRegistrationResponse>;
+  setRegisteredObject(
+    input: SetRegisteredObjectInput,
+  ): Promise<RegisteredObjectWriteResponse>;
+  patchRegisteredPath(
+    input: PatchRegisteredPathInput,
+  ): Promise<RegisteredPathPatchResponse>;
+  validateRegisteredEffective(
+    input: ValidateRegisteredEffectiveInput,
+  ): Promise<RegisteredEffectiveValidationResponse>;
 
   // Feed (returns AsyncIterable<T>)
   subscribe(input: SubscribeInput): AsyncIterable<ConfigDelta>;

@@ -73,7 +73,7 @@ describe("WeaverConfigService write path", () => {
     expect(deltas[0].action).toBe("set");
     expect(deltas[0].key).toBe("foo");
     expect(deltas[0].value).toBe("bar");
-    expect(deltas[0].layer).toBe("platform");
+    expect(deltas[0].layer).toBe("weaver-effective");
   });
 
   test("delta has correct action for remove", async () => {

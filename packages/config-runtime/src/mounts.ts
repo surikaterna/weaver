@@ -1,3 +1,4 @@
+import { buildPath, parsePath } from "@weaver-conf/config-engine";
 import { isConfigMount } from "@weaver-conf/config-types";
 
 export interface MountResolution {
@@ -19,19 +20,27 @@ export function buildMountMap(
   entries: Record<string, unknown>,
 ): ReadonlyMap<string, string> {
   const map = new Map<string, string>();
+  const active = new WeakSet<object>();
 
-  function scan(obj: Record<string, unknown>, prefix: string) {
-    for (const [k, v] of Object.entries(obj)) {
-      const fullKey = prefix ? `${prefix}.${k}` : k;
-      if (isConfigMount(v)) {
-        map.set(fullKey, v.source);
-      } else if (v !== null && typeof v === "object" && !Array.isArray(v)) {
-        scan(v as Record<string, unknown>, fullKey);
+  function scan(value: unknown, path: readonly string[]): void {
+    if (hasMountDiscriminant(value)) {
+      const source = validMountSource(value);
+      if (source !== undefined) map.set(buildPath(path), source);
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    if (active.has(value)) return;
+    active.add(value);
+    try {
+      for (const [key, item] of Object.entries(value)) {
+        scan(item, [...path, key]);
       }
+    } finally {
+      active.delete(value);
     }
   }
 
-  scan(entries, "");
+  scan(entries, []);
   return map;
 }
 
@@ -42,8 +51,9 @@ export function resolveMountedValue(
   getValue: (key: string) => unknown,
   maxDepth = 3,
 ): MountResult {
-  const chain: string[] = [key];
-  let current = key;
+  const canonicalKey = buildPath(parsePath(key));
+  const chain: string[] = [canonicalKey];
+  let current = canonicalKey;
 
   for (let depth = 0; depth < maxDepth; depth++) {
     const source = mountMap.get(current);
@@ -77,8 +87,12 @@ export function resolveMountedNamespace(
   const result: Record<string, unknown> = {};
 
   for (const [k, v] of Object.entries(entries)) {
-    const fullKey = prefix ? `${prefix}.${k}` : k;
-    if (isConfigMount(v)) {
+    const fullKey = buildPath([...(prefix ? parsePath(prefix) : []), k]);
+    if (hasMountDiscriminant(v)) {
+      if (!isConfigMount(v) || !mountMap.has(fullKey)) {
+        result[k] = undefined;
+        continue;
+      }
       const resolved = resolveMountedValue(
         fullKey,
         mountMap,
@@ -92,4 +106,22 @@ export function resolveMountedNamespace(
   }
 
   return result;
+}
+
+function hasMountDiscriminant(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "_weaver" in value &&
+    value._weaver === "mount"
+  );
+}
+
+function validMountSource(value: unknown): string | undefined {
+  if (!isConfigMount(value)) return undefined;
+  try {
+    return buildPath(parsePath(value.source));
+  } catch {
+    return undefined;
+  }
 }

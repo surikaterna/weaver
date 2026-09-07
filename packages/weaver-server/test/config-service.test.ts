@@ -44,6 +44,152 @@ describe("WeaverConfigService", () => {
     expect(svc.revision).not.toBe(oldRev);
   });
 
+  it("rejects public writes to protected Weaver metadata paths", async () => {
+    const svc = await makeService({});
+    const keys = [
+      "_weaver",
+      "_weaver.registry.schemas",
+      "/_weaver",
+      "/_weaver/registry/schemas",
+      "[_weaver].registry.schemas",
+    ];
+
+    for (const key of keys) {
+      const result = await svc.set("app", key, "blocked");
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("VALIDATION_ERROR");
+    }
+
+    expect(await svc.get("_weaver.registry.schemas")).toBe(undefined);
+    expect(await svc.get("[_weaver].registry.schemas")).toBe(undefined);
+  });
+
+  it("rejects public removals and batches for protected Weaver metadata paths", async () => {
+    const keys = [
+      "_weaver.registry.schemas",
+      "/_weaver/registry/schemas",
+      "[_weaver].registry.schemas",
+    ];
+
+    for (const key of keys) {
+      const svc = await makeService({
+        _weaver: { registry: { schemas: "internal" } },
+      });
+      const removeResult = await svc.remove("app", key);
+      const batchResult = await svc.setMany("app", {
+        "app.safe": true,
+        [key]: "blocked",
+      });
+
+      expect(removeResult.success).toBe(false);
+      expect(removeResult.error?.code).toBe("VALIDATION_ERROR");
+      expect(batchResult.success).toBe(false);
+      expect(batchResult.error?.code).toBe("VALIDATION_ERROR");
+      expect(await svc.get("app.safe")).toBe(undefined);
+      expect(await svc.get("_weaver.registry.schemas")).toBe(undefined);
+    }
+  });
+
+  it("filters protected metadata from every public read shape", async () => {
+    const svc = await makeService({
+      app: { name: "public" },
+      _weaver: { registry: { schemas: { private: true } } },
+    });
+
+    const snapshot = await svc.resolveAll();
+    expect(snapshot.entries).toEqual({ app: { name: "public" } });
+
+    for (const path of [
+      "_weaver",
+      "_weaver.registry.schemas",
+      "/_weaver",
+      "/_weaver/registry/schemas",
+      "[_weaver].registry.schemas",
+    ]) {
+      expect(await svc.get(path)).toBe(undefined);
+      expect(await svc.getNamespace(path)).toEqual({});
+      expect(await svc.inspect(path)).toEqual({
+        key: path,
+        effectiveValue: undefined,
+        effectiveLayer: undefined,
+        layerValues: {},
+      });
+    }
+  });
+
+  it("fails closed for direct and chained mounts into protected metadata", async () => {
+    const svc = await makeService({
+      app: {
+        direct: { _weaver: "mount", source: "_weaver.registry.schemas" },
+        bridge: { _weaver: "mount", source: "_weaver.registry.schemas" },
+        chained: { _weaver: "mount", source: "app.bridge" },
+        absent: { _weaver: "mount", source: "missing.value" },
+        publicValue: { enabled: true },
+        publicAlias: { _weaver: "mount", source: "app.publicValue" },
+      },
+      _weaver: { registry: { schemas: { secret: "LEAK" } } },
+    });
+
+    const snapshot = await svc.resolveAll();
+    const namespace = await svc.getNamespace("app");
+
+    expect(snapshot.entries).toEqual({
+      app: { publicValue: { enabled: true }, publicAlias: { enabled: true } },
+    });
+    expect(namespace).toEqual({
+      publicValue: { enabled: true },
+      publicAlias: { enabled: true },
+    });
+    expect(await svc.get("app.direct")).toBe(undefined);
+    expect(await svc.get("app.chained")).toBe(undefined);
+    expect(await svc.get("app.absent")).toBe(undefined);
+    expect(await svc.get("app.publicAlias")).toEqual({ enabled: true });
+    expect(JSON.stringify({ snapshot, namespace })).not.toContain("LEAK");
+  });
+
+  it("filters protected metadata from nested scoped snapshots", async () => {
+    const platform = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {
+        app: {
+          base: true,
+          direct: { _weaver: "mount", source: "_weaver.base" },
+          bridge: { _weaver: "mount", source: "_weaver.base" },
+          chained: { _weaver: "mount", source: "app.bridge" },
+        },
+        _weaver: { base: "LEAK" },
+      },
+    });
+    const tenant = createInMemoryStorageProvider({
+      id: "tenant-acme",
+      layer: "tenant:acme",
+      initialEntries: { app: { scoped: true }, _weaver: { scoped: "private" } },
+    });
+    const svc = await createWeaverConfigService({
+      providers: [platform, tenant],
+      environment: "test",
+    });
+
+    const snapshot = await svc.resolveAll({
+      scopePath: [{ scopeId: "tenant", value: "acme" }],
+    });
+
+    expect(snapshot.entries).toEqual({ app: { base: true } });
+    expect(snapshot.scopes).toEqual({
+      "tenant:acme": { app: { base: true, scoped: true } },
+    });
+    expect(
+      await svc.getNamespace("app", {
+        scopePath: [{ scopeId: "tenant", value: "acme" }],
+      }),
+    ).toEqual({
+      base: true,
+      scoped: true,
+    });
+    expect(JSON.stringify(snapshot)).not.toContain("LEAK");
+  });
+
   it("removes a value", async () => {
     const svc = await makeService({ "rm.key": "gone" });
     const result = await svc.remove("app", "rm.key");

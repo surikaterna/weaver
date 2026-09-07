@@ -1,3 +1,4 @@
+import { WeaverErrorInstance } from "@weaver-conf/config-types";
 import type { WeaverClient } from "../src/client.js";
 import { createWeaverClient } from "../src/client.js";
 import type { LocalTransport } from "../src/local-transport.js";
@@ -90,6 +91,137 @@ describe("client↔server integration (local transport round-trip)", () => {
     expect(client.connected).toBe(true);
   });
 
+  it("fails client boot when the server rejects an invalid effective snapshot", async () => {
+    await client.close();
+    const invalidTransport = createLocalTransport({
+      snapshot: {
+        entries: {},
+        scopes: {},
+        revision: "invalid",
+        timestamp: new Date().toISOString(),
+      },
+    });
+    vi.spyOn(invalidTransport, "resolveAll").mockRejectedValue(
+      new WeaverErrorInstance(
+        "VALIDATION_ERROR",
+        "Effective configuration does not match registered schema",
+        {
+          kind: "effective-configuration-invalid",
+          anchorPath: "/checkout",
+        },
+      ),
+    );
+
+    await expect(
+      createWeaverClient({ transport: invalidTransport }),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      details: { anchorPath: "/checkout" },
+    });
+    client = await createWeaverClient({ transport });
+  });
+
+  it("converges scoped registered roots after invalidation and recovery", async () => {
+    await client.close();
+    const scopePath = [{ scopeId: "tenant", value: "acme" }];
+    transport = createLocalTransport({
+      snapshot: {
+        entries: { checkout: { mode: "base" } },
+        scopes: { "tenant:acme": { checkout: { mode: "scoped" } } },
+        revision: "scoped-0",
+        timestamp: new Date().toISOString(),
+      },
+    });
+    client = await createWeaverClient({ transport, scopeLoading: "hot" });
+
+    transport.pushDelta({
+      key: "checkout",
+      action: "remove",
+      value: null,
+      layer: "tenant:acme",
+      timestamp: new Date().toISOString(),
+    });
+    expect(client.getForScope("checkout", scopePath)).toBe(undefined);
+    expect(client.get("checkout.mode")).toBe("base");
+
+    transport.pushDelta({
+      key: "checkout",
+      action: "set",
+      value: {
+        mode: "recovered",
+        plugins: { tax: { rate: 0.2 } },
+        credentials: ["resolved-secret", { token: "nested-secret" }],
+      },
+      layer: "tenant:acme",
+      timestamp: new Date().toISOString(),
+    });
+    expect(client.getForScope("checkout", scopePath)).toEqual({
+      mode: "recovered",
+      plugins: { tax: { rate: 0.2 } },
+      credentials: ["resolved-secret", { token: "nested-secret" }],
+    });
+  });
+
+  it.each([
+    "eager",
+    "hot",
+    "lazy",
+  ] as const)("applies canonical multi-scope effective deltas in %s mode", async (scopeLoading) => {
+    await client.close();
+    const scopePath = [
+      { scopeId: "tenant", value: "acme" },
+      { scopeId: "region", value: "eu" },
+    ];
+    transport = createLocalTransport({
+      snapshot: {
+        entries: { app: { mode: "base", limit: 1, inherited: true } },
+        scopes: {
+          "tenant:acme/region:eu": {
+            app: { mode: "scoped", limit: 2, inherited: true },
+          },
+        },
+        revision: "multi-0",
+        timestamp: new Date().toISOString(),
+      },
+    });
+    client = await createWeaverClient({ transport, scopeLoading });
+    if (scopeLoading === "lazy") await client.preloadScope(scopePath);
+
+    for (const layer of ["weaver-effective", "tenant:acme/region:eu"]) {
+      transport.pushDelta({
+        key: "app.inherited",
+        action: "set",
+        value: false,
+        layer,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    transport.pushDelta({
+      key: "app[limit]",
+      action: "set",
+      value: 3,
+      layer: "tenant:acme/region:eu",
+      timestamp: new Date().toISOString(),
+    });
+    transport.pushDelta({
+      key: "app.mode",
+      action: "remove",
+      value: null,
+      layer: "tenant:acme/region:eu",
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(client.getForScope("app", scopePath)).toEqual({
+      limit: 3,
+      inherited: false,
+    });
+    expect(client.get("app")).toEqual({
+      mode: "base",
+      limit: 1,
+      inherited: false,
+    });
+  });
+
   it("should transition to disconnected on close", async () => {
     await client.close();
     expect(client.connected).toBe(false);
@@ -113,5 +245,36 @@ describe("client↔server integration (local transport round-trip)", () => {
     });
     expect(result.success).toBe(true);
     expect(result.revision).toBeTruthy();
+  });
+
+  it("propagates schema rejections for every client write operation", async () => {
+    const rejected = {
+      success: false,
+      error: {
+        code: "VALIDATION_ERROR" as const,
+        message: "registered schema",
+      },
+    };
+    const set = vi.spyOn(transport, "set").mockResolvedValue(rejected);
+    const setMany = vi.spyOn(transport, "setMany").mockResolvedValue(rejected);
+    const remove = vi.spyOn(transport, "remove").mockResolvedValue(rejected);
+
+    const results = await Promise.all([
+      client.set("checkout.mode", "invalid", { environment: "other" }),
+      client.setMany(
+        { "checkout.mode": "invalid", "checkout[mode]": "prod" },
+        { environment: "other" },
+      ),
+      client.remove("checkout.mode", { environment: "other" }),
+    ]);
+
+    expect(results.every((result) => !result.success)).toBe(true);
+    expect(set).toHaveBeenCalledOnce();
+    expect(setMany).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledOnce();
+    expect(set).toHaveBeenCalledWith("checkout.mode", "invalid", {
+      environment: "other",
+    });
+    expect(client.get("checkout.mode")).toBe(undefined);
   });
 });

@@ -1,6 +1,9 @@
 // Types and interfaces for WeaverConfigService
 
-import type { WeaverLogger } from "@weaver-conf/config-engine";
+import type {
+  SchemaValidationResult,
+  WeaverLogger,
+} from "@weaver-conf/config-engine";
 import type { SecretBackend } from "@weaver-conf/config-runtime";
 import type {
   ConfigurationInspection,
@@ -10,6 +13,7 @@ import type {
   WriteResult,
 } from "@weaver-conf/config-types";
 import type { ConfigDelta, ConfigSnapshot } from "../types/index";
+import type { SchemaRegistry } from "./schema-registry";
 
 export type { Unsubscribe } from "@weaver-conf/config-types";
 
@@ -18,6 +22,16 @@ export interface WriteContext {
   scopePath?: ScopeInstance[];
   actor?: string;
   expectedRevision?: string;
+}
+
+export interface SchemaWriteContext extends WriteContext {
+  schemaRegistry: SchemaRegistry;
+}
+
+export interface EffectiveValidationContext {
+  schemaRegistry: SchemaRegistry;
+  environment?: string;
+  scopePath?: ScopeInstance[];
 }
 
 export interface WeaverConfigServiceOptions {
@@ -63,6 +77,22 @@ export interface WeaverConfigService {
     entries: Record<string, unknown>,
     options?: WriteContext,
   ): Promise<WriteResult>;
+  setRegisteredObject(
+    layer: string,
+    path: string,
+    value: unknown,
+    options: SchemaWriteContext,
+  ): Promise<WriteResult>;
+  patchRegisteredPath(
+    layer: string,
+    path: string,
+    value: unknown,
+    options: SchemaWriteContext,
+  ): Promise<WriteResult>;
+  validateRegisteredEffective(
+    path: string,
+    options: EffectiveValidationContext,
+  ): Promise<SchemaValidationResult>;
   /** Flush all dirty providers. Rarely needed — set/remove auto-flush. */
   flush(): Promise<void>;
   /** Refresh all providers from remote sources, then reload state. */

@@ -78,9 +78,6 @@ importers:
       '@weaver-conf/config-types':
         specifier: workspace:*
         version: link:../../packages/config-types
-      '@weaver-conf/storage-provider-static-json':
-        specifier: workspace:*
-        version: link:../../packages/storage-provider-static-json
       '@weaver-conf/weaver-client':
         specifier: workspace:*
         version: link:../../packages/weaver-client
@@ -129,9 +126,6 @@ importers:
 
   packages/config-policy:
     dependencies:
-      '@weaver-conf/config-engine':
-        specifier: workspace:*
-        version: link:../config-engine
       '@weaver-conf/config-types':
         specifier: workspace:*
         version: link:../config-types
@@ -183,6 +177,9 @@ importers:
 
   packages/config-sessions:
     dependencies:
+      '@weaver-conf/config-engine':
+        specifier: workspace:*
+        version: link:../config-engine
       '@weaver-conf/config-types':
         specifier: workspace:*
         version: link:../config-types

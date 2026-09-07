@@ -91,25 +91,6 @@ describe("Integration: WeaverClient full flow", () => {
     await client.close();
   });
 
-  it("registerNamespaces delegates to transport", async () => {
-    const registered: string[] = [];
-    const transport = createMockTransport();
-    (transport as unknown as Record<string, unknown>).registerSchema = async (
-      ns: string,
-    ) => {
-      registered.push(ns);
-    };
-
-    const client = await createWeaverClient({ transport });
-    const defs = [defineNamespace("editor", { fontSize: z.number() })];
-    const result = await client.registerNamespaces(defs);
-
-    expect(result.registered).toEqual(["editor"]);
-    expect(registered).toEqual(["editor"]);
-
-    await client.close();
-  });
-
   it("pendingRestart fires when restart-required key changes", async () => {
     const transport = createMockTransport({ app: { port: 3000 } });
     (transport as unknown as Record<string, unknown>).fetchSchemas =

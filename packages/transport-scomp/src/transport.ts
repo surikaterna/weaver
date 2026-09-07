@@ -3,6 +3,9 @@ import type {
   ConfigDelta,
   ConfigSnapshot,
   ConfigurationPropertySchema,
+  RegisteredEffectiveValidationResponse,
+  SchemaRegistrationRequest,
+  SchemaRegistrationResponse,
   ScopeDefinition,
   ScopeInstance,
   WriteResult,
@@ -54,9 +57,23 @@ export interface WeaverTransport {
   ): Promise<string[]>;
   fetchSchemas?(): Promise<Record<string, ConfigurationPropertySchema>>;
   registerSchema?(
-    namespace: string,
-    schema: Record<string, unknown>,
-  ): Promise<void>;
+    request: SchemaRegistrationRequest,
+  ): Promise<SchemaRegistrationResponse>;
+  setRegisteredObject?(
+    anchorPath: string,
+    value: unknown,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  patchRegisteredPath?(
+    path: string,
+    value: unknown,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  validateRegisteredEffective?(options: {
+    anchorPath: string;
+    environment?: string;
+    scopePath?: ScopeInstance[];
+  }): Promise<RegisteredEffectiveValidationResponse>;
   close(): Promise<void>;
 }
 
@@ -192,8 +209,39 @@ export function createScompTransport(
       return result.schemas;
     },
 
-    async registerSchema(namespace, schema) {
-      await client.registerSchema({ namespace, schema });
+    async registerSchema(request) {
+      return client.registerSchema(request);
+    },
+
+    async setRegisteredObject(anchorPath, value, opts?) {
+      return client.setRegisteredObject({
+        anchorPath,
+        value,
+        ...(opts?.layer != null && { layer: opts.layer }),
+        ...(opts?.environment != null && { environment: opts.environment }),
+        ...(opts?.ifRevision != null && { ifRevision: opts.ifRevision }),
+      });
+    },
+
+    async patchRegisteredPath(path, value, opts?) {
+      return client.patchRegisteredPath({
+        path,
+        value,
+        ...(opts?.layer != null && { layer: opts.layer }),
+        ...(opts?.environment != null && { environment: opts.environment }),
+        ...(opts?.ifRevision != null && { ifRevision: opts.ifRevision }),
+      });
+    },
+
+    async validateRegisteredEffective(options) {
+      const scope = buildScopeString(options.scopePath);
+      return client.validateRegisteredEffective({
+        anchorPath: options.anchorPath,
+        ...(options.environment != null && {
+          environment: options.environment,
+        }),
+        ...(scope != null && { scope }),
+      });
     },
 
     async close() {

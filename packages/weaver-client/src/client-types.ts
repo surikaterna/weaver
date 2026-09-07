@@ -1,4 +1,10 @@
-import type { ScopeDefinition, ScopeInstance } from "@weaver-conf/config-types";
+import type {
+  RegisteredEffectiveValidationResponse,
+  SchemaRegistrationRequest,
+  SchemaRegistrationResponse,
+  ScopeDefinition,
+  ScopeInstance,
+} from "@weaver-conf/config-types";
 import type { ZodRawShape } from "zod";
 import type {
   InstanceClient,
@@ -7,11 +13,15 @@ import type {
   UntypedNamespaceClient,
 } from "./namespace";
 import type { WeaverClientPersistence } from "./persistence";
-import type { SchemaRegistrationResult } from "./registration";
 import type { ValidationResult } from "./schema-registry";
 import type { ScopeLoadingMode } from "./scope-manager";
 import type { StalenessConfig } from "./staleness";
-import type { WeaverTransport, WriteOptions, WriteResult } from "./transport";
+import type {
+  EffectiveValidationOptions,
+  WeaverTransport,
+  WriteOptions,
+  WriteResult,
+} from "./transport";
 import type {
   ClientMode,
   ConfigDelta,
@@ -74,6 +84,16 @@ export interface WeaverClient {
     options?: WriteOptions,
   ): Promise<WriteResult>;
   remove(key: string, options?: WriteOptions): Promise<WriteResult>;
+  setRegisteredObject(
+    anchorPath: string,
+    value: unknown,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  patchRegisteredPath(
+    path: string,
+    value: unknown,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
 
   // ── Scopes ──
   listScopes(): Promise<ScopeDefinition[]>;
@@ -100,6 +120,9 @@ export interface WeaverClient {
 
   // ── Validation ──
   validate(key: string, value: unknown): ValidationResult;
+  validateRegisteredEffective(
+    options: EffectiveValidationOptions,
+  ): Promise<RegisteredEffectiveValidationResponse>;
   isSensitive(key: string): boolean;
 
   // ── Namespaces ──
@@ -109,9 +132,9 @@ export interface WeaverClient {
   namespace(prefix: string): UntypedNamespaceClient;
 
   // ── Registration ──
-  registerNamespaces(
-    definitions: ReadonlyArray<NamespaceDefinition>,
-  ): Promise<SchemaRegistrationResult>;
+  registerSchema(
+    request: SchemaRegistrationRequest,
+  ): Promise<SchemaRegistrationResponse>;
 
   // ── Instances ──
   instance(basePath: string, instanceId: string): InstanceClient;

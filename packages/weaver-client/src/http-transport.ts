@@ -1,6 +1,14 @@
 import type { ScopeDefinition, ScopeInstance } from "@weaver-conf/config-types";
 import { formatScopePath } from "@weaver-conf/config-types";
-import { fetchWithRetry, type RetryOptions } from "./http-retry";
+import {
+  fetchRegisteredSchemas,
+  patchRegisteredPath as patchRegisteredPathRequest,
+  postSchemaRegistration,
+  putRegisteredObject,
+  validateRegisteredEffective as validateRegisteredEffectiveRequest,
+} from "./http-registered-transport";
+import { createHttpRequester } from "./http-request";
+import type { RetryOptions } from "./http-retry";
 import { createSSEConnection } from "./sse-connection";
 import type { WeaverTransport, WriteOptions, WriteResult } from "./transport";
 import type {
@@ -12,7 +20,7 @@ import type {
 } from "./types";
 
 export interface TransportError {
-  type: "connection" | "timeout" | "parse" | "server";
+  type: "abort" | "connection" | "timeout" | "parse" | "server";
   message: string;
   statusCode?: number;
   retryable: boolean;
@@ -92,60 +100,29 @@ export function createHttpTransport(
     );
   }
 
+  const requester = createHttpRequester({
+    baseUrl,
+    buildHeaders,
+    fetchFn,
+    onError,
+    retry: retryConfig,
+    timeout: requestTimeout,
+  });
+
   async function request<T>(
     method: string,
     path: string,
     body?: unknown,
   ): Promise<T> {
-    let res: Response;
-    try {
-      res = await fetchWithRetry(
-        `${baseUrl}${path}`,
-        {
-          method,
-          headers: buildHeaders(),
-          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-        },
-        { retry: retryConfig, timeout: requestTimeout, fetchFn, onError },
-      );
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      onError?.({
-        type: "connection",
-        message,
-        retryable: false,
-      });
-      throw e;
-    }
-    // SAFETY: server API contract guarantees this response shape
-    let json: {
-      data: T;
-      meta: { revision: string };
-      error?: { code: string; message: string };
-    };
-    try {
-      json = (await res.json()) as typeof json;
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      onError?.({
-        type: "parse",
-        message: `Failed to parse response: ${message}`,
-        statusCode: res.status,
-        retryable: false,
-      });
-      throw new Error(`Failed to parse response from ${path}`);
-    }
-    if (!res.ok && json.error) {
-      onError?.({
-        type: "server",
-        message: json.error.message,
-        statusCode: res.status,
-        retryable: res.status >= 500,
-      });
-      throw new Error(`[${json.error.code}] ${json.error.message}`);
-    }
-    return json.data;
+    // SAFETY: legacy endpoints do not yet export response schemas.
+    return (await requester.request(method, path, body)) as T;
   }
+
+  const registeredContext = {
+    buildScopeQuery,
+    queryString,
+    requestValidated: requester.requestValidated,
+  };
 
   return {
     get lastCheckpoint() {
@@ -308,6 +285,26 @@ export function createHttpTransport(
         `/v1/scopes/${encodeURIComponent(scopeId)}`,
       );
       return result.values;
+    },
+
+    async fetchSchemas() {
+      return fetchRegisteredSchemas(registeredContext);
+    },
+
+    async registerSchema(requestBody) {
+      return postSchemaRegistration(registeredContext, requestBody);
+    },
+
+    async setRegisteredObject(anchorPath, value, opts?) {
+      return putRegisteredObject(registeredContext, anchorPath, value, opts);
+    },
+
+    async patchRegisteredPath(path, value, opts?) {
+      return patchRegisteredPathRequest(registeredContext, path, value, opts);
+    },
+
+    async validateRegisteredEffective(options) {
+      return validateRegisteredEffectiveRequest(registeredContext, options);
     },
 
     async close(): Promise<void> {

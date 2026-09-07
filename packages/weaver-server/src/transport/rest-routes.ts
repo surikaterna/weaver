@@ -2,7 +2,9 @@
 
 import { buildPath } from "@weaver-conf/config-engine";
 import type { WriteResult } from "@weaver-conf/config-types";
+import type { AuditService } from "../audit/audit-service";
 import type { WeaverConfigService, WriteContext } from "../core/config-service";
+import type { SchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
 import { parseScopeQuery } from "../core/scope-utils";
 import type { WeaverErrorCode } from "../types/index";
@@ -10,6 +12,7 @@ import { createWeaverError, httpStatusForError } from "../types/index";
 import type { AuthGate } from "./auth-gate";
 import type { RestRequest, RestResponse, RestRoute } from "./rest-adapter";
 import { envelope, errorEnvelope, v1Headers } from "./rest-helpers";
+import { buildSchemaRoutes } from "./rest-schema-routes";
 import {
   configBatchBodySchema,
   configWriteBodySchema,
@@ -18,8 +21,10 @@ import {
 
 export interface RouteFactoryDeps {
   configService: WeaverConfigService;
+  schemaRegistry?: SchemaRegistry | undefined;
   scopeManager?: ScopeManager | undefined;
   authGate?: AuthGate | undefined;
+  auditService?: AuditService | undefined;
 }
 
 function param(params: Record<string, string>, name: string): string {
@@ -91,9 +96,21 @@ function writeErrorResponse(
 }
 
 export function buildRoutes(deps: RouteFactoryDeps): RestRoute[] {
-  const { configService, scopeManager, authGate } = deps;
+  const {
+    configService,
+    schemaRegistry,
+    scopeManager,
+    authGate,
+    auditService,
+  } = deps;
 
   return [
+    ...buildSchemaRoutes({
+      configService,
+      schemaRegistry,
+      authGate,
+      auditService,
+    }),
     {
       method: "GET",
       path: "/v1/config",
@@ -105,10 +122,13 @@ export function buildRoutes(deps: RouteFactoryDeps): RestRoute[] {
           const accessCtx = authGate.toAccessContext(req.authContext);
           const filtered = authGate.filterVisible(
             accessCtx,
-            snapshot,
+            snapshot.entries,
             req.schemaMap ?? new Map(),
           );
-          return v1Response(configService, 200, filtered);
+          return v1Response(configService, 200, {
+            ...snapshot,
+            entries: filtered,
+          });
         }
         return v1Response(configService, 200, snapshot);
       },

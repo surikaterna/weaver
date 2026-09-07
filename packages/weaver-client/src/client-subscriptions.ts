@@ -1,4 +1,5 @@
 import { deepRemove, deepSet } from "@weaver-conf/config-engine";
+import type { ScopeInstance } from "@weaver-conf/config-types";
 import { matchGlob } from "./client-helpers";
 import type { ClientSchemaRegistry } from "./schema-registry";
 import type { StalenessMonitor } from "./staleness";
@@ -14,6 +15,7 @@ export interface SubscriptionDeps {
   stalenessMonitor: StalenessMonitor;
   onSync: (date: Date) => void;
   onRestartRequired: () => void;
+  applyScopedDelta: (delta: ConfigDelta, scopePath: ScopeInstance[]) => void;
 }
 
 export function setupDeltaSubscription(deps: SubscriptionDeps): Unsubscribe {
@@ -26,12 +28,16 @@ export function setupDeltaSubscription(deps: SubscriptionDeps): Unsubscribe {
     stalenessMonitor,
     onSync,
     onRestartRequired,
+    applyScopedDelta,
   } = deps;
 
   let pendingRestart = false;
 
   return transport.subscribe((delta: ConfigDelta) => {
-    if (!delta.layer.includes(":")) {
+    const scopePath = scopePathFromLayer(delta.layer);
+    if (scopePath) {
+      applyScopedDelta(delta, scopePath);
+    } else {
       if (delta.action === "set") {
         deepSet(baseState, delta.key, delta.value);
       } else {
@@ -63,4 +69,18 @@ export function setupDeltaSubscription(deps: SubscriptionDeps): Unsubscribe {
       }
     }
   });
+}
+
+function scopePathFromLayer(layer: string): ScopeInstance[] | undefined {
+  if (!layer.includes(":")) return undefined;
+  const scopePath: ScopeInstance[] = [];
+  for (const part of layer.split("/")) {
+    const separator = part.indexOf(":");
+    if (separator <= 0 || separator === part.length - 1) return undefined;
+    scopePath.push({
+      scopeId: part.slice(0, separator),
+      value: part.slice(separator + 1),
+    });
+  }
+  return scopePath;
 }

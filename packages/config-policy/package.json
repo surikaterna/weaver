@@ -42,8 +42,7 @@
     "lint": "biome check ."
   },
   "dependencies": {
-    "@weaver-conf/config-types": "workspace:*",
-    "@weaver-conf/config-engine": "workspace:*"
+    "@weaver-conf/config-types": "workspace:*"
   },
   "devDependencies": {
     "@weaver-conf/config-auth": "workspace:*",

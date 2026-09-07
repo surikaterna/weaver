@@ -1,18 +1,21 @@
 import { deepGet } from "@weaver-conf/config-engine";
 import type { ScopeInstance } from "@weaver-conf/config-types";
 import type { ZodRawShape } from "zod";
-
 import { bootClient } from "./client-boot";
 import { applyNamespace } from "./client-helpers";
 import { setupDeltaSubscription } from "./client-subscriptions";
 import type { WeaverClient, WeaverClientOptions } from "./client-types";
+import {
+  unsupportedRegistration,
+  unsupportedValidation,
+  unsupportedWrite,
+} from "./client-unsupported";
 import { createInstanceClient } from "./instance-client";
 import type {
   NamespaceDefinition,
   TypedNamespaceClient,
   UntypedNamespaceClient,
 } from "./namespace";
-import { registerNamespaces } from "./registration";
 import type { ValidationResult } from "./schema-registry";
 import {
   type ClientSchemaRegistry,
@@ -32,27 +35,12 @@ import {
 
 export type { WeaverClient, WeaverClientOptions } from "./client-types";
 
-/**
- * Creates a Weaver client with the specified transport and options.
- *
- * @param options - Client configuration including transport, persistence, and schema settings
- * @returns A connected WeaverClient instance ready for reads, writes, and subscriptions
- *
- * @example
- * ```ts
- * const client = await createWeaverClient({
- *   transport: createHttpTransport({ baseUrl: "http://localhost:3399" }),
- * });
- * const value = client.get("theme.mode");
- * ```
- */
 export async function createWeaverClient(
   options: WeaverClientOptions,
 ): Promise<WeaverClient> {
   const { namespace, transport, scopeLoading = "lazy", persistence } = options;
   const offlineBoot = options.offlineBoot ?? !!persistence;
 
-  // Schema validation setup
   const schemaOpts: SchemaOptions | undefined =
     options.schemas === true ? {} : options.schemas || undefined;
   const registry: ClientSchemaRegistry | undefined = schemaOpts
@@ -116,6 +104,8 @@ export async function createWeaverClient(
       onRestartRequired: () => {
         pendingRestart = true;
       },
+      applyScopedDelta: (delta, scopePath) =>
+        scopeLoader.applyDelta(delta, scopePath),
     });
 
     if (boot.freshSnapshot) {
@@ -244,6 +234,18 @@ export async function createWeaverClient(
       return transport.remove(resolvedKey, opts);
     },
 
+    async setRegisteredObject(anchorPath, value, opts) {
+      if (!transport.setRegisteredObject)
+        return unsupportedWrite("setRegisteredObject");
+      return transport.setRegisteredObject(anchorPath, value, opts);
+    },
+
+    async patchRegisteredPath(path, value, opts) {
+      if (!transport.patchRegisteredPath)
+        return unsupportedWrite("patchRegisteredPath");
+      return transport.patchRegisteredPath(path, value, opts);
+    },
+
     async setMany(
       entries: Record<string, unknown>,
       opts?: WriteOptions,
@@ -332,6 +334,13 @@ export async function createWeaverClient(
       return registry.validate(resolvedKey, value);
     },
 
+    async validateRegisteredEffective(options) {
+      if (!transport.validateRegisteredEffective) {
+        return unsupportedValidation("validateRegisteredEffective");
+      }
+      return transport.validateRegisteredEffective(options);
+    },
+
     isSensitive(key: string): boolean {
       const resolvedKey = applyNamespace(namespace, key);
       if (!registry) return false;
@@ -358,8 +367,11 @@ export async function createWeaverClient(
 
     namespace: namespaceClient,
 
-    async registerNamespaces(definitions: ReadonlyArray<NamespaceDefinition>) {
-      return registerNamespaces(definitions, transport);
+    async registerSchema(request) {
+      if (!transport.registerSchema) {
+        return unsupportedRegistration("registerSchema");
+      }
+      return transport.registerSchema(request);
     },
   };
 

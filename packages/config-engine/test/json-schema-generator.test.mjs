@@ -4,8 +4,8 @@ import {
 } from "../dist/json-schema-generator.js";
 
 /** @param {object} schema */
-function entry(ownerId, schema) {
-  return { ownerId, fullyQualifiedKey: "test.key", schema };
+function entry(_source, schema) {
+  return { schema };
 }
 
 describe("generateSinglePropertySchema", () => {
@@ -136,7 +136,6 @@ describe("generateSinglePropertySchema", () => {
       }),
     );
     expect(result["x-weaver"]).toEqual({
-      namespace: "ghost.shell",
       changePolicy: "full-pipeline",
       visibility: "public",
       reloadBehavior: "hot",
@@ -154,7 +153,7 @@ describe("generateSinglePropertySchema", () => {
     expect(result.minimum).toBe(undefined);
     expect(result.maximum).toBe(undefined);
     expect(result["x-weaver"].changePolicy).toBe(undefined);
-    expect(result["x-weaver"].namespace).toBe("ghost.shell");
+    expect(result["x-weaver"]).toEqual({});
   });
 
   it("emits sensitive field in x-weaver when present", () => {
@@ -217,13 +216,9 @@ describe("generateJsonSchema", () => {
   it("composes multiple schemas into a valid JSON Schema document", () => {
     const schemas = new Map();
     schemas.set("ghost.shell.theme", {
-      ownerId: "ghost.shell",
-      fullyQualifiedKey: "ghost.shell.theme",
       schema: { type: "string", default: "dark", description: "UI theme" },
     });
     schemas.set("ghost.map.zoom", {
-      ownerId: "ghost.map",
-      fullyQualifiedKey: "ghost.map.zoom",
       schema: { type: "number", minimum: 1, maximum: 20, default: 5 },
     });
 

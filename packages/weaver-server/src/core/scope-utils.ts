@@ -52,7 +52,7 @@ export function parseScopeQuery(
   query: string | undefined,
 ): ScopeInstance[] | undefined {
   if (!query) return undefined;
-  return query.split(",").map((part) => {
+  return query.split(/[/,]/).map((part) => {
     const [scopeId = "", value = ""] = part.split(":");
     return { scopeId, value };
   });
