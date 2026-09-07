@@ -128,15 +128,21 @@ describe("client↔server integration (local transport round-trip)", () => {
     const remove = vi.spyOn(transport, "remove").mockResolvedValue(rejected);
 
     const results = await Promise.all([
-      client.set("checkout.mode", "invalid"),
-      client.setMany({ "checkout.mode": "invalid" }),
-      client.remove("checkout.mode"),
+      client.set("checkout.mode", "invalid", { environment: "other" }),
+      client.setMany(
+        { "checkout.mode": "invalid", "checkout[mode]": "prod" },
+        { environment: "other" },
+      ),
+      client.remove("checkout.mode", { environment: "other" }),
     ]);
 
     expect(results.every((result) => !result.success)).toBe(true);
     expect(set).toHaveBeenCalledOnce();
     expect(setMany).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledOnce();
+    expect(set).toHaveBeenCalledWith("checkout.mode", "invalid", {
+      environment: "other",
+    });
     expect(client.get("checkout.mode")).toBe(undefined);
   });
 });

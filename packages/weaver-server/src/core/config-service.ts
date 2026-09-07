@@ -35,7 +35,6 @@ import {
   filterProtectedConfigEntries,
   filterProtectedConfigScopes,
   isProtectedConfigPath,
-  protectedConfigMutationError,
 } from "./protected-config-paths";
 import {
   type ConfigInspectionLayer,
@@ -43,10 +42,12 @@ import {
 } from "./public-config-inspection";
 import { createResolutionPipeline } from "./resolution-pipeline";
 import {
+  normalizeBatchEntries,
   registerSchemaBoundaryHost,
   validateBoundRemove,
   validateBoundSet,
   validateBoundSetMany,
+  validatePublicWrite,
 } from "./schema-write-boundary";
 import {
   buildScopePathString,
@@ -330,8 +331,8 @@ export async function createWeaverConfigService(
       opts?: WriteContext,
     ): Promise<WriteResult> {
       if (!isInternalWrite(opts)) {
-        const protectedError = protectedConfigMutationError(key);
-        if (protectedError) return protectedError;
+        const validation = validatePublicWrite(key);
+        if (validation) return validation;
       }
 
       const revConflict = checkRevision(opts?.expectedRevision);
@@ -364,7 +365,7 @@ export async function createWeaverConfigService(
       if (isDynamicScopedLayer) await getLayerValue(layer, key);
 
       if (!isInternalWrite(opts) && !isValidatedWrite(opts)) {
-        const validation = validateBoundSet(service, key, value, opts, {
+        const validation = validateBoundSet(service, key, value, {
           layerEntries: getLayerEntries(
             provider,
             canonicalLayer,
@@ -438,8 +439,8 @@ export async function createWeaverConfigService(
       opts?: WriteContext,
     ): Promise<WriteResult> {
       if (!isInternalWrite(opts)) {
-        const protectedError = protectedConfigMutationError(key);
-        if (protectedError) return protectedError;
+        const validation = validatePublicWrite(key);
+        if (validation) return validation;
       }
 
       const revConflict = checkRevision(opts?.expectedRevision);
@@ -479,7 +480,7 @@ export async function createWeaverConfigService(
         );
         const candidate = structuredClone(layerEntries);
         deepRemove(candidate, key);
-        const validation = validateBoundRemove(service, key, opts, {
+        const validation = validateBoundRemove(service, key, {
           layerEntries,
           effectiveEntries: effectiveWriteState({
             providers,
@@ -592,11 +593,17 @@ export async function createWeaverConfigService(
     ): Promise<WriteResult> {
       if (!isInternalWrite(opts)) {
         for (const key of Object.keys(entries)) {
-          const protectedError = protectedConfigMutationError(key);
-          if (protectedError) return protectedError;
+          const validation = validatePublicWrite(key);
+          if (validation) return validation;
         }
       }
-      if (Object.keys(entries).length === 0) return { success: true, revision };
+      const normalized = isInternalWrite(opts)
+        ? { success: true as const, entries }
+        : normalizeBatchEntries(entries);
+      if (!normalized.success) return normalized.result;
+      const writeEntries = normalized.entries;
+      if (Object.keys(writeEntries).length === 0)
+        return { success: true, revision };
 
       const revConflict = checkRevision(opts?.expectedRevision);
       if (revConflict) return revConflict;
@@ -619,14 +626,13 @@ export async function createWeaverConfigService(
         ? null
         : validateBoundSetMany(
             service,
-            entries,
-            opts,
+            writeEntries,
             getLayerEntries(provider, canonicalLayer, dynamic),
           );
       if (validation) return validation;
 
       return service.batch(async () => {
-        for (const [key, value] of Object.entries(entries)) {
+        for (const [key, value] of Object.entries(writeEntries)) {
           const result = await service.set(
             layer,
             key,
@@ -646,8 +652,8 @@ export async function createWeaverConfigService(
       opts: SchemaWriteContext,
     ): Promise<WriteResult> {
       if (!isInternalWrite(opts)) {
-        const protectedError = protectedConfigMutationError(path);
-        if (protectedError) return protectedError;
+        const validation = validatePublicWrite(path);
+        if (validation) return validation;
       }
 
       const revConflict = checkRevision(opts.expectedRevision);
@@ -670,8 +676,8 @@ export async function createWeaverConfigService(
       opts: SchemaWriteContext,
     ): Promise<WriteResult> {
       if (!isInternalWrite(opts)) {
-        const protectedError = protectedConfigMutationError(path);
-        if (protectedError) return protectedError;
+        const validation = validatePublicWrite(path);
+        if (validation) return validation;
       }
 
       const revConflict = checkRevision(opts.expectedRevision);

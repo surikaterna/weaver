@@ -106,6 +106,63 @@ describe("schema-registered config writes", () => {
     expect(await service.get("unregistered.safe")).toBe(undefined);
   });
 
+  test("caller metadata cannot select a different write environment", async () => {
+    const { provider, registry, service } = await makeRegisteredService({
+      billing: { mode: "test" },
+    });
+    await registry.register({
+      ...serviceRegistration(extensibleServiceSchema),
+      environment: "other",
+    });
+
+    const direct = await service.set("platform", "billing.mode", "invalid", { environment: "other" });
+    const batch = await service.setMany("platform", { "billing.mode": "invalid" }, { environment: "other" });
+    const remove = await service.remove("platform", "billing.mode", { environment: "other" });
+    const dedicated = await service.setRegisteredObject(
+      "platform",
+      "/billing",
+      { mode: "anything" },
+      { environment: "other", schemaRegistry: registry },
+    );
+
+    expect([direct, batch, remove, dedicated].every((result) => !result.success)).toBe(true);
+    expect(provider.writes).toEqual([]);
+    expect(provider.removes).toEqual([]);
+    expect(await service.get("billing.mode")).toBe("test");
+
+    const matching = await service.set("platform", "billing.mode", "prod", { environment: "test" });
+    expect(matching.success).toBe(true);
+    expect(provider.writes).toEqual([{ key: "billing.mode", value: "prod" }]);
+  });
+
+  test("batches canonicalize keys and reject semantic duplicates before provider I/O", async () => {
+    const { provider, service } = await makeRegisteredService({
+      billing: { mode: "test" },
+    });
+    const validAlias = await service.setMany("platform", {
+      "billing[mode]": "prod",
+    });
+    expect(provider.writes).toEqual([{ key: "billing.mode", value: "prod" }]);
+    provider.writes.length = 0;
+    let attemptedWrites = 0;
+    provider.write = async () => {
+      attemptedWrites++;
+      return { success: false, error: { code: "WRITE_FAILED", message: "must not run" } };
+    };
+
+    const duplicate = await service.setMany("platform", {
+      "billing.mode": "invalid",
+      "billing[mode]": "prod",
+    });
+
+    expect(validAlias.success).toBe(true);
+    expect(duplicate.success).toBe(false);
+    expect(duplicate.error?.message).toContain("duplicate");
+    expect(attemptedWrites).toBe(0);
+    expect(provider.writes).toEqual([]);
+    expect(await service.get("billing.mode")).toBe("prod");
+  });
+
   test("creating another registry cannot replace bound enforcement", async () => {
     const { provider, service } = await makeRegisteredService({
       billing: { mode: "test" },

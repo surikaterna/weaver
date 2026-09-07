@@ -8,7 +8,8 @@ import {
   validatePartialConfiguration,
 } from "@weaver-conf/config-engine";
 import type { WriteResult } from "@weaver-conf/config-types";
-import type { WeaverConfigService, WriteContext } from "./config-service-types";
+import type { WeaverConfigService } from "./config-service-types";
+import { protectedConfigMutationError } from "./protected-config-paths";
 import type { RegisteredSchemaAnchor, SchemaRegistry } from "./schema-registry";
 
 interface SchemaBoundaryBinding {
@@ -23,6 +24,10 @@ interface ValidationState {
   readonly layerEntries: Record<string, unknown>;
   readonly effectiveEntries?: Record<string, unknown>;
 }
+
+export type NormalizedBatchEntries =
+  | { readonly success: true; readonly entries: Record<string, unknown> }
+  | { readonly success: false; readonly result: WriteResult };
 
 const bindings = new WeakMap<
   WeaverConfigService,
@@ -47,29 +52,53 @@ export function bindSchemaRegistry(
   bindings.set(service, [...current, { registry, affectedAnchors }]);
 }
 
+export function validatePublicWrite(key: string): WriteResult | null {
+  return protectedConfigMutationError(key);
+}
+
+export function normalizeBatchEntries(
+  entries: Record<string, unknown>,
+): NormalizedBatchEntries {
+  const normalized: Record<string, unknown> = {};
+  const sourceByKey = new Map<string, string>();
+  for (const [source, value] of Object.entries(entries)) {
+    const key = canonicalStorageKey(source);
+    if (key === null)
+      return failedBatch("Invalid configuration path", { key: source });
+    const previous = sourceByKey.get(key);
+    if (previous !== undefined) {
+      return failedBatch("Batch contains duplicate configuration paths", {
+        canonicalKey: key,
+        paths: [previous, source],
+      });
+    }
+    sourceByKey.set(key, source);
+    normalized[key] = value;
+  }
+  return { success: true, entries: normalized };
+}
+
 export function validateBoundSet(
   service: WeaverConfigService,
   key: string,
   value: unknown,
-  options: WriteContext | undefined,
   state: ValidationState,
 ): WriteResult | null {
   const candidate = structuredClone(state.layerEntries);
   deepSet(candidate, key, value);
-  return validateAffected(service, key, options, candidate, false);
+  return validateAffected(service, key, candidate, false);
 }
 
 export function validateBoundSetMany(
   service: WeaverConfigService,
   entries: Record<string, unknown>,
-  options: WriteContext | undefined,
   layerEntries: Record<string, unknown>,
 ): WriteResult | null {
   const candidate = structuredClone(layerEntries);
   for (const [key, value] of Object.entries(entries))
     deepSet(candidate, key, value);
   for (const key of Object.keys(entries)) {
-    const failure = validateAffected(service, key, options, candidate, false);
+    const failure = validateAffected(service, key, candidate, false);
     if (failure) return failure;
   }
   return null;
@@ -78,26 +107,23 @@ export function validateBoundSetMany(
 export function validateBoundRemove(
   service: WeaverConfigService,
   key: string,
-  options: WriteContext | undefined,
   state: ValidationState,
 ): WriteResult | null {
   const candidateLayer = structuredClone(state.layerEntries);
   deepRemove(candidateLayer, key);
   const effective = state.effectiveEntries ?? candidateLayer;
-  return validateAffected(service, key, options, effective, true);
+  return validateAffected(service, key, effective, true);
 }
 
 function validateAffected(
   service: WeaverConfigService,
   key: string,
-  options: WriteContext | undefined,
   entries: Record<string, unknown>,
   effective: boolean,
 ): WriteResult | null {
   const serviceBindings = bindings.get(service);
   if (!serviceBindings) return null;
-  const environment =
-    options?.environment ?? defaultEnvironments.get(service) ?? "";
+  const environment = defaultEnvironments.get(service) ?? "";
   const path = storagePath(key);
   if (path === null)
     return validationFailure("Invalid configuration path", { key });
@@ -137,6 +163,21 @@ function storagePath(key: string): string | null {
   } catch {
     return null;
   }
+}
+
+function canonicalStorageKey(key: string): string | null {
+  try {
+    return canonicalConfigPathFromStorageKey(key).storageKey;
+  } catch {
+    return null;
+  }
+}
+
+function failedBatch(
+  message: string,
+  details: Record<string, unknown>,
+): NormalizedBatchEntries {
+  return { success: false, result: validationFailure(message, details) };
 }
 
 function validationFailure(

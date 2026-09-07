@@ -56,6 +56,7 @@ describe("REST body validation", () => {
       initialEntries: { checkout: { db: { host: "db", port: 5432 } } },
     });
     const write = vi.spyOn(provider, "write");
+    const remove = vi.spyOn(provider, "remove");
     const configService = await createWeaverConfigService({
       providers: [provider],
       environment: "default",
@@ -80,9 +81,43 @@ describe("REST body validation", () => {
         headers: {},
       },
     );
+    const wrongEnvironment = await adapter.handleRequest(
+      "PUT",
+      "/v1/config/checkout/db/port",
+      {
+        params: {},
+        query: { layer: "platform", env: "other" },
+        body: { value: "invalid" },
+        headers: {},
+      },
+    );
+    const duplicateBatch = await adapter.handleRequest("PATCH", "/v1/config", {
+      params: {},
+      query: { layer: "platform" },
+      body: {
+        entries: {
+          "checkout.db.port": "invalid",
+          "checkout[db][port]": 1234,
+        },
+      },
+      headers: {},
+    });
+    const wrongEnvironmentRemove = await adapter.handleRequest(
+      "DELETE",
+      "/v1/config/checkout/db/port",
+      {
+        params: {},
+        query: { layer: "platform", env: "other" },
+        headers: {},
+      },
+    );
 
     expect(response.status).toBe(400);
+    expect(wrongEnvironment.status).toBe(400);
+    expect(duplicateBatch.status).toBe(400);
+    expect(wrongEnvironmentRemove.status).toBe(400);
     expect(write).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
     expect(await configService.get("checkout.db.port")).toBe(5432);
   });
 

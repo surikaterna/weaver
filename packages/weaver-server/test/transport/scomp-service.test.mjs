@@ -74,8 +74,30 @@ describe("createWeaverScompService", () => {
       layer: "platform",
       key: "checkout.mode",
     });
+    const wrongEnvironment = await service.router[route("set")].handler({
+      layer: "platform",
+      key: "checkout.mode",
+      value: "invalid",
+      environment: "other",
+    });
+    const wrongEnvironmentRemove = await service.router[route("remove")].handler({
+      layer: "platform",
+      key: "checkout.mode",
+      environment: "other",
+    });
+    const duplicateBatch = await service.router[route("setMany")].handler({
+      layer: "platform",
+      entries: { "checkout.mode": "invalid", "checkout[mode]": "prod" },
+    });
 
-    expect([direct.success, batch.success, remove.success]).toEqual([false, false, false]);
+    expect([
+      direct.success,
+      batch.success,
+      remove.success,
+      wrongEnvironment.success,
+      wrongEnvironmentRemove.success,
+      duplicateBatch.success,
+    ]).toEqual([false, false, false, false, false, false]);
     expect(provider.writes).toEqual([]);
     expect(provider.removes).toEqual([]);
   });
