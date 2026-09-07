@@ -5,4 +5,4 @@
 "@weaver-conf/weaver-server": patch
 ---
 
-Align REST, SCOMP, and client schema-registration transports with path-first registered write and effective validation contracts, validate registered HTTP responses through the common timeout and typed error pipeline, and retry only safe read requests when the server provides no mutation deduplication.
+Align REST, SCOMP, and client schema-registration transports with path-first registered write and effective validation contracts, validate registered HTTP responses through the common timeout and typed error pipeline, compose caller cancellation with per-attempt timeouts, and retry only safe read requests when the server provides no mutation deduplication.

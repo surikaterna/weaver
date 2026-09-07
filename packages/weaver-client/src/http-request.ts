@@ -19,7 +19,7 @@ const responseEnvelopeSchema = z.object({
 export type HttpServerError = z.infer<typeof serverErrorSchema>;
 
 export class HttpServerResponseError extends Error {
-  readonly code: string;
+  readonly code: HttpServerError["code"];
   readonly statusCode: number;
   readonly details?: Record<string, unknown> | undefined;
 

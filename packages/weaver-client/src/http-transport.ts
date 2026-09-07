@@ -22,7 +22,7 @@ import type {
 } from "./types";
 
 export interface TransportError {
-  type: "connection" | "timeout" | "parse" | "server";
+  type: "abort" | "connection" | "timeout" | "parse" | "server";
   message: string;
   statusCode?: number;
   retryable: boolean;
