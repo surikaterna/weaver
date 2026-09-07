@@ -10,6 +10,7 @@ import type {
   SchemaRegistrationMetadata,
 } from "@weaver-conf/config-types";
 import {
+  environmentNameSchema,
   objectConfigurationPropertySchemaSchema,
   schemaRegistrationMetadataSchema,
 } from "@weaver-conf/config-types";
@@ -68,7 +69,7 @@ export const registeredSchemaAnchorSchema = z.strictObject({
   kind: z.enum(["service", "fragment"]),
   path: z.string(),
   schema: objectConfigurationPropertySchemaSchema,
-  environment: z.string(),
+  environment: environmentNameSchema,
   metadata: schemaRegistrationMetadataSchema,
 });
 
@@ -191,7 +192,10 @@ export async function createPersistentSchemaRegistry(
 ): Promise<SchemaRegistry> {
   const layer = options.layer ?? defaultPersistenceLayer;
   const key = options.key ?? defaultPersistenceKey;
-  const defaultEnvironment = options.environment;
+  const defaultEnvironment =
+    options.environment !== undefined
+      ? environmentNameSchema.parse(options.environment)
+      : undefined;
   const state = parsePersistedRegistry(
     await readInternalConfig(options.configService, key),
   );
@@ -199,7 +203,10 @@ export async function createPersistentSchemaRegistry(
 
   const registry: SchemaRegistry = {
     async register(request, context) {
-      const environment = request.environment || defaultEnvironment || "";
+      const environment =
+        request.environment === undefined
+          ? (defaultEnvironment ?? "")
+          : request.environment;
       const normalizedRequest = { ...request, environment };
       const evaluation = evaluateRegistration(
         state,

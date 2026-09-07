@@ -166,6 +166,34 @@ describe("createWeaverScompService", () => {
     expect(value).toEqual({ db: { host: "db.internal", port: 5432 } });
   });
 
+  test("registerSchema returns typed validation failures for unsafe environments", async () => {
+    const provider = createTestProvider("p1", "platform", {});
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "default" });
+    const deps = buildScompDeps(svc);
+    const service = createWeaverScompService(deps);
+    const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
+
+    for (const environment of [
+      "__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod", 42,
+    ]) {
+      const result = await service.router[route("registerSchema")].handler({
+        serviceId: "checkout",
+        environment,
+        owner: { name: "Checkout", contact: "checkout@example.com" },
+        schema: { type: "object" },
+        fragmentSlots: [],
+      });
+      expect(result).toMatchObject({
+        success: false,
+        error: { code: "VALIDATION_ERROR" },
+      });
+    }
+
+    expect(deps.schemaRegistry.listAll()).toEqual({});
+    expect(provider.writes).toEqual([]);
+    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(prototypeBefore);
+  });
+
   test("resolveAll handler returns snapshot", async () => {
     const provider = createTestProvider("p1", "platform", { app: { port: 3000 } });
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });

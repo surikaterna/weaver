@@ -1,3 +1,4 @@
+import { environmentNameSchema } from "../src/environment.js";
 import {
   configurationContextSchema,
   configurationLayerDataSchema,
@@ -28,6 +29,46 @@ describe("registeredSchemasResponseSchema", () => {
     expect(
       registeredSchemasResponseSchema.safeParse({
         schemas: { "/checkout": { type: "unsupported" } },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("environmentNameSchema", () => {
+  it("accepts compatible identifiers and rejects dangerous or malformed values", () => {
+    for (const value of ["dev", "production", "prod-us_1.blue", "QA-2"]) {
+      expect(environmentNameSchema.safeParse(value).success).toBe(true);
+    }
+    for (const value of [
+      "__proto__",
+      "constructor",
+      "prototype",
+      "",
+      " dev",
+      "dev/prod",
+      "dev:prod",
+      42,
+    ]) {
+      expect(environmentNameSchema.safeParse(value).success).toBe(false);
+    }
+  });
+
+  it("is enforced by service and fragment registration contracts", () => {
+    const service = {
+      serviceId: "lynx",
+      environment: "__proto__",
+      owner: { name: "Lynx", contact: "lynx@example.com" },
+      schema: { type: "object" },
+      fragmentSlots: [],
+    };
+    expect(
+      serviceSchemaRegistrationRequestSchema.safeParse(service).success,
+    ).toBe(false);
+    expect(
+      fragmentSchemaRegistrationRequestSchema.safeParse({
+        ...service,
+        providerId: "plugin",
+        slotPath: "/plugins",
       }).success,
     ).toBe(false);
   });

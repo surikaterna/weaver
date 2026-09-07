@@ -2,7 +2,12 @@ import {
   createPersistentSchemaRegistry,
   createSchemaRegistry,
 } from "../../src/core/schema-registry.ts";
+import {
+  parsePersistedRegistry,
+  serializeRegistry,
+} from "../../src/core/schema-registry-persistence.ts";
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
+import { ZodError } from "zod";
 
 function deepSet(target, path, value) {
   const parts = path.split(".");
@@ -17,12 +22,14 @@ function deepSet(target, path, value) {
 
 function createTestProvider(id, layer, entries) {
   let data = { ...entries };
+  const writes = [];
   return {
     id,
     layer,
     writable: true,
     async load() { return { entries: { ...data } }; },
-    async write(key, value) { deepSet(data, key, value); return { success: true }; },
+    writes,
+    async write(key, value) { writes.push({ key, value }); deepSet(data, key, value); return { success: true }; },
     async remove(key) { delete data[key]; return { success: true }; },
   };
 }
@@ -85,6 +92,135 @@ describe("SchemaRegistry", () => {
     expect(result.success).toBe(true);
     expect(result.isNewSchema).toBe(true);
     expect(result.hasBreakingChanges).toBe(false);
+  });
+
+  test("transient registry rejects unsafe environments without state side effects", async () => {
+    const opts = await makeOptions();
+    const registry = createSchemaRegistry(opts);
+    const invalidEnvironments = [
+      "__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod", 42,
+    ];
+    const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
+
+    for (const environment of invalidEnvironments) {
+      const result = await registry.register(
+        serviceRegistration("svc", environment, { type: "object" }),
+      );
+      expect(result).toMatchObject({
+        success: false,
+        error: { code: "VALIDATION_ERROR" },
+      });
+    }
+
+    expect(registry.listAll()).toEqual({});
+    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(prototypeBefore);
+  });
+
+  test("persistent registry rejects unsafe environments before persistence", async () => {
+    const provider = createTestProvider("p1", "platform", {});
+    const configService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "dev",
+    });
+    const registry = await createPersistentSchemaRegistry({ configService });
+    const invalidEnvironments = [
+      "__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod", 42,
+    ];
+    const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
+
+    for (const environment of invalidEnvironments) {
+      const result = await registry.register(
+        serviceRegistration("svc", environment, { type: "object" }),
+      );
+      expect(result).toMatchObject({
+        success: false,
+        error: { code: "VALIDATION_ERROR" },
+      });
+    }
+
+    expect(provider.writes).toEqual([]);
+    expect(registry.listAll()).toEqual({});
+    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(prototypeBefore);
+  });
+
+  test("serialization and hydration reject unsafe environment keys without raw throws", () => {
+    const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
+    for (const environment of [
+      "__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod",
+    ]) {
+      const entry = {
+        kind: "service",
+        path: "/svc",
+        environment,
+        schema: { type: "object" },
+        metadata: {
+          serviceId: "svc",
+          servicePath: "/svc",
+          environment,
+          providerId: "svc",
+          owner: { name: "svc", contact: "svc@example.com" },
+        },
+      };
+      const state = { schemas: new Map([[`/svc:${environment}`, entry]]), slots: new Map() };
+      expect(() => serializeRegistry(state)).toThrow(ZodError);
+
+      const raw = {
+        environments: Object.fromEntries([[environment, {
+          schemas: { "/svc": { kind: "service", schema: entry.schema, metadata: entry.metadata } },
+          slots: {},
+        }]]),
+      };
+      expect(() => parsePersistedRegistry(raw)).toThrow(ZodError);
+    }
+    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(prototypeBefore);
+  });
+
+  test("persistent hydration rejects every unsafe environment key", async () => {
+    const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
+    for (const environment of [
+      "__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod",
+    ]) {
+      const metadata = {
+        serviceId: "svc",
+        servicePath: "/svc",
+        environment,
+        providerId: "svc",
+        owner: { name: "svc", contact: "svc@example.com" },
+      };
+      const environments = Object.fromEntries([[environment, {
+        schemas: { "/svc": { kind: "service", schema: { type: "object" }, metadata } },
+        slots: {},
+      }]]);
+      const entries = { _weaver: { registry: { schemas: { environments } } } };
+      const provider = createTestProvider("p1", "platform", entries);
+      const configService = await createWeaverConfigService({
+        providers: [provider],
+        environment: "dev",
+      });
+
+      await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(ZodError);
+      expect(provider.writes).toEqual([]);
+    }
+    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(prototypeBefore);
+  });
+
+  test("persistent registry rejects an invalid default environment before hydration", async () => {
+    const provider = createTestProvider("p1", "platform", {});
+    const configService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "dev",
+    });
+    await expect(
+      createPersistentSchemaRegistry({ configService, environment: "__proto__" }),
+    ).rejects.toThrow(ZodError);
+    expect(provider.writes).toEqual([]);
+  });
+
+  test("hydration requires own registry aggregation properties", () => {
+    const inherited = Object.create({ environments: {} });
+    expect(() => parsePersistedRegistry(inherited)).toThrow(
+      "Persisted schema registry must include own environments object",
+    );
   });
 
   test("register unchanged schema is idempotent", async () => {

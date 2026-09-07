@@ -1,4 +1,5 @@
 // Sub-path barrel: @weaver-conf/config-types/schemas
+export { environmentNamePattern, environmentNameSchema } from "../environment";
 export {
   configurationAccessContextSchema,
   configurationSchemaFragmentSchema,

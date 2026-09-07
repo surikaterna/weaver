@@ -1,3 +1,4 @@
+import type { EnvironmentName } from "./environment";
 import type { WeaverError } from "./errors";
 import type { ObjectConfigurationPropertySchema } from "./property-schema";
 
@@ -20,7 +21,7 @@ export interface SchemaRegistrationAuditMetadata {
 /** Path-first service schema registration request. */
 export interface ServiceSchemaRegistrationRequest {
   readonly serviceId: string;
-  readonly environment: string;
+  readonly environment: EnvironmentName;
   readonly owner: RegistrationOwner;
   readonly schema: ObjectConfigurationPropertySchema;
   readonly schemaVersion?: string | undefined;
@@ -32,7 +33,7 @@ export interface FragmentSchemaRegistrationRequest {
   readonly serviceId: string;
   readonly providerId: string;
   readonly slotPath: string;
-  readonly environment: string;
+  readonly environment: EnvironmentName;
   readonly owner: RegistrationOwner;
   readonly schema: ObjectConfigurationPropertySchema;
   readonly schemaVersion?: string | undefined;
@@ -43,7 +44,7 @@ export interface FragmentSlotRegistrationMetadata {
   readonly servicePath: string;
   readonly slotPath: string;
   readonly canonicalSlotPath: string;
-  readonly environment: string;
+  readonly environment: EnvironmentName;
   readonly providerId: string;
   readonly owner: RegistrationOwner;
   readonly accepts: "object";
@@ -59,7 +60,7 @@ export type SchemaRegistrationRequest =
 export interface SchemaRegistrationMetadata {
   readonly serviceId: string;
   readonly servicePath: string;
-  readonly environment: string;
+  readonly environment: EnvironmentName;
   readonly providerId: string;
   readonly owner: RegistrationOwner;
   readonly schemaVersion?: string | undefined;

@@ -1,10 +1,8 @@
 import { createScompService } from "@scompr/core";
 import {
-  fragmentSchemaRegistrationRequestSchema,
   registeredEffectiveValidationRequestSchema,
   registeredObjectWriteRequestSchema,
   registeredPathPatchRequestSchema,
-  serviceSchemaRegistrationRequestSchema,
 } from "@weaver-conf/config-types";
 import { WeaverConfig } from "@weaver-conf/transport-scomp";
 import type {
@@ -102,11 +100,7 @@ export function createWeaverScompService(deps: ScompServiceDeps) {
     },
 
     async registerSchema(input) {
-      const request =
-        "providerId" in input
-          ? fragmentSchemaRegistrationRequestSchema.parse(input)
-          : serviceSchemaRegistrationRequestSchema.parse(input);
-      return schemaRegistry.register(request);
+      return schemaRegistry.register(input);
     },
 
     async setRegisteredObject(input) {

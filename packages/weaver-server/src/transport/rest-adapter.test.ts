@@ -444,6 +444,53 @@ describe("REST body validation", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects unsafe schema environments without registry side effects", async () => {
+    const configService = mockConfigService();
+    const schemaRegistry = createSchemaRegistry({ configService });
+    const adapter = createRestAdapter({ configService, schemaRegistry });
+    const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
+
+    for (const environment of [
+      "__proto__",
+      "constructor",
+      "prototype",
+      "",
+      " dev",
+      "dev/prod",
+      "dev:prod",
+      42,
+    ]) {
+      const response = await adapter.handleRequest(
+        "POST",
+        "/v1/admin/schemas/services",
+        {
+          params: {},
+          query: {},
+          body: {
+            serviceId: "checkout",
+            environment,
+            owner: { name: "Checkout", contact: "checkout@example.com" },
+            schema: settingsSchema,
+            fragmentSlots: [],
+          },
+          headers: {},
+        },
+      );
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Request validation failed",
+        },
+      });
+    }
+
+    expect(schemaRegistry.listAll()).toEqual({});
+    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(
+      prototypeBefore,
+    );
+  });
+
   it("returns canonical registration metadata", async () => {
     const configService = mockConfigService();
     const adapter = createRestAdapter({

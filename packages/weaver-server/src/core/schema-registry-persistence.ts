@@ -5,6 +5,7 @@ import {
   deriveServicePath,
 } from "@weaver-conf/config-engine";
 import {
+  environmentNameSchema,
   fragmentSlotRegistrationMetadataSchema,
   objectConfigurationPropertySchemaSchema,
   schemaRegistrationMetadataSchema,
@@ -25,7 +26,10 @@ const persistedEnvironmentRegistrySchema = z.strictObject({
 });
 
 const persistedSchemaRegistrySchema = z.strictObject({
-  environments: z.record(z.string(), persistedEnvironmentRegistrySchema),
+  environments: z.record(
+    environmentNameSchema,
+    persistedEnvironmentRegistrySchema,
+  ),
 });
 
 type PersistedSchemaEntry = z.infer<typeof persistedSchemaEntrySchema>;
@@ -34,20 +38,20 @@ type PersistedSchemaRegistry = z.infer<typeof persistedSchemaRegistrySchema>;
 export function serializeRegistry(
   state: RegistryState,
 ): PersistedSchemaRegistry {
-  const persisted: PersistedSchemaRegistry = { environments: {} };
+  const environments = new Map<string, PendingEnvironment>();
   for (const entry of state.schemas.values()) {
-    const env = getPersistedEnvironment(persisted, entry.environment);
-    env.schemas[entry.path] = {
+    const env = getPendingEnvironment(environments, entry.environment);
+    env.schemas.set(entry.path, {
       kind: entry.kind,
       schema: entry.schema,
       metadata: entry.metadata,
-    };
+    });
   }
   for (const slot of state.slots.values()) {
-    const env = getPersistedEnvironment(persisted, slot.environment);
-    env.slots[slot.canonicalSlotPath] = slot;
+    const env = getPendingEnvironment(environments, slot.environment);
+    env.slots.set(slot.canonicalSlotPath, slot);
   }
-  return persisted;
+  return { environments: materializeEnvironments(environments) };
 }
 
 export function parsePersistedRegistry(raw: unknown): RegistryState {
@@ -56,11 +60,7 @@ export function parsePersistedRegistry(raw: unknown): RegistryState {
   if (!isRecord(raw)) {
     throw new Error("Persisted schema registry must be an object");
   }
-  if (!isRecord(raw.environments)) {
-    throw new Error(
-      "Persisted schema registry must include environments object",
-    );
-  }
+  assertPersistedOwnProperties(raw);
   const persisted = persistedSchemaRegistrySchema.parse(raw);
   for (const [environment, env] of Object.entries(persisted.environments)) {
     for (const [path, entry] of Object.entries(env.schemas)) {
@@ -82,15 +82,65 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function getPersistedEnvironment(
-  registry: PersistedSchemaRegistry,
+interface PendingEnvironment {
+  readonly schemas: Map<string, PersistedSchemaEntry>;
+  readonly slots: Map<
+    string,
+    z.infer<typeof fragmentSlotRegistrationMetadataSchema>
+  >;
+}
+
+function getPendingEnvironment(
+  environments: Map<string, PendingEnvironment>,
   environment: string,
-): PersistedSchemaRegistry["environments"][string] {
-  registry.environments[environment] = registry.environments[environment] ?? {
-    schemas: {},
-    slots: {},
-  };
-  return registry.environments[environment];
+): PendingEnvironment {
+  const safeEnvironment = environmentNameSchema.parse(environment);
+  const current = environments.get(safeEnvironment);
+  if (current) return current;
+  const created = { schemas: new Map(), slots: new Map() };
+  environments.set(safeEnvironment, created);
+  return created;
+}
+
+function materializeEnvironments(
+  environments: ReadonlyMap<string, PendingEnvironment>,
+): PersistedSchemaRegistry["environments"] {
+  return Object.fromEntries(
+    [...environments].map(([environment, value]) => [
+      environment,
+      {
+        schemas: Object.fromEntries(value.schemas),
+        slots: Object.fromEntries(value.slots),
+      },
+    ]),
+  );
+}
+
+function assertPersistedOwnProperties(raw: Record<string, unknown>): void {
+  const environments = ownRecord(raw, "environments");
+  for (const [environment, value] of Object.entries(environments)) {
+    environmentNameSchema.parse(environment);
+    const registry = requireRecord(value, `environment ${environment}`);
+    ownRecord(registry, "schemas");
+    ownRecord(registry, "slots");
+  }
+}
+
+function ownRecord(
+  value: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
+  if (!Object.hasOwn(value, key)) {
+    throw new Error(`Persisted schema registry must include own ${key} object`);
+  }
+  return requireRecord(value[key], key);
+}
+
+function requireRecord(value: unknown, field: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error(`Persisted schema registry ${field} must be an object`);
+  }
+  return value;
 }
 
 function toSchemaEntry(

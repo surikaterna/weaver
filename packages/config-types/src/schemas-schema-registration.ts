@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { environmentNameSchema } from "./environment";
 import { weaverErrorSchema } from "./errors";
 import { objectConfigurationPropertySchemaSchema } from "./schemas-property";
 import {
@@ -24,7 +25,7 @@ export const schemaRegistrationAuditMetadataSchema = z.object({
 export const serviceSchemaRegistrationRequestSchema = z
   .strictObject({
     serviceId: serviceIdSchema,
-    environment: z.string().min(1),
+    environment: environmentNameSchema,
     owner: registrationOwnerSchema,
     schema: objectConfigurationPropertySchemaSchema,
     schemaVersion: z.string().min(1).optional(),
@@ -47,7 +48,7 @@ export const fragmentSchemaRegistrationRequestSchema = z
     serviceId: serviceIdSchema,
     providerId: providerIdSchema,
     slotPath: slotPathSchema,
-    environment: z.string().min(1),
+    environment: environmentNameSchema,
     owner: registrationOwnerSchema,
     schema: objectConfigurationPropertySchemaSchema,
     schemaVersion: z.string().min(1).optional(),
@@ -62,7 +63,7 @@ export const fragmentSlotRegistrationMetadataSchema = z.strictObject({
   servicePath: z.string(),
   slotPath: z.string(),
   canonicalSlotPath: z.string(),
-  environment: z.string(),
+  environment: environmentNameSchema,
   providerId: z.string(),
   owner: registrationOwnerSchema,
   accepts: z.literal("object"),
@@ -73,7 +74,7 @@ export const fragmentSlotRegistrationMetadataSchema = z.strictObject({
 export const schemaRegistrationMetadataSchema = z.strictObject({
   serviceId: z.string(),
   servicePath: z.string(),
-  environment: z.string(),
+  environment: environmentNameSchema,
   providerId: z.string(),
   owner: registrationOwnerSchema,
   schemaVersion: z.string().optional(),

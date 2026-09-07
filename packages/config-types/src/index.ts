@@ -20,6 +20,7 @@ export type {
   LayerValueDetail,
   MergedLayerResult,
 } from "./environment";
+export { environmentNamePattern, environmentNameSchema } from "./environment";
 export type { WeaverError, WeaverErrorCode } from "./errors";
 // errors.ts — Shared error taxonomy
 export {
