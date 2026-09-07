@@ -60,6 +60,16 @@ function serviceRegistration(serviceId, environment, schema) {
   };
 }
 
+function persistedRegistryEntries(environmentRegistry) {
+  return {
+    _weaver: {
+      registry: {
+        schemas: { environments: { dev: environmentRegistry } },
+      },
+    },
+  };
+}
+
 describe("SchemaRegistry", () => {
   test("register new schema succeeds with isNewSchema true", async () => {
     const opts = await makeOptions();
@@ -268,6 +278,52 @@ describe("SchemaRegistry", () => {
     });
 
     await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(/Persisted schema registry must be an object/);
+  });
+
+  test("persistent registry rejects dangerous schema and slot paths without changing prototypes", async () => {
+    Reflect.deleteProperty(Object.prototype, "polluted");
+    try {
+      for (const segment of ["__proto__", "constructor", "prototype"]) {
+        const path = `/billing/${segment}`;
+        const schemaEntry = {
+          kind: "service",
+          schema: { type: "object" },
+          metadata: {
+            serviceId: "billing",
+            servicePath: path,
+            environment: "dev",
+            providerId: "billing",
+            owner: { name: "billing", contact: "billing@example.com" },
+          },
+        };
+        const slot = {
+          serviceId: "billing",
+          servicePath: "/billing",
+          slotPath: `/${segment}`,
+          canonicalSlotPath: path,
+          environment: "dev",
+          providerId: "billing",
+          owner: { name: "billing", contact: "billing@example.com" },
+          accepts: "object",
+        };
+
+        for (const environmentRegistry of [
+          { schemas: { [path]: schemaEntry }, slots: {} },
+          { schemas: {}, slots: { [path]: slot } },
+        ]) {
+          const configService = await createWeaverConfigService({
+            providers: [createTestProvider("p1", "platform", persistedRegistryEntries(environmentRegistry))],
+            environment: "dev",
+          });
+          await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(
+            `Path segment "${segment}" is not allowed`,
+          );
+        }
+      }
+      expect(Reflect.get(Object.prototype, "polluted")).toBe(undefined);
+    } finally {
+      Reflect.deleteProperty(Object.prototype, "polluted");
+    }
   });
 
   test("register rejects legacy target fields", async () => {

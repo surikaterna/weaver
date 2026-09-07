@@ -198,8 +198,7 @@ describe("schema-registered config writes", () => {
         });
 
         expect(result.success).toBe(false);
-        expect(result.error?.message).toContain("prototype-pollution");
-        expect(result.error?.details?.segment).toBe(segment);
+        expect(result.error?.message).toContain(`Path segment "${segment}" is not allowed`);
       }
 
       expect(Reflect.get(Object.prototype, "x")).toBe(undefined);

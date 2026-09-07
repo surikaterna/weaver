@@ -85,21 +85,6 @@ export async function prepareRegisteredPatchWrite(
       },
     );
   }
-  const blockedSegment = relativeSegments.find((segment) =>
-    prototypePollutionSegments.has(segment),
-  );
-  if (blockedSegment !== undefined) {
-    return writeFailure(
-      "Registered patch paths must not contain prototype-pollution segments",
-      {
-        path: resolved.path,
-        anchorPath: resolved.anchor.path,
-        environment: resolved.environment,
-        segment: blockedSegment,
-      },
-    );
-  }
-
   const patchValidation = validateConfigurationPatch(
     resolved.anchor.schema,
     relativeSegments,
@@ -349,12 +334,6 @@ function assignMember(current: unknown, segment: string, value: unknown): void {
   }
   if (isRecord(current)) current[segment] = value;
 }
-
-const prototypePollutionSegments = new Set([
-  "__proto__",
-  "prototype",
-  "constructor",
-]);
 
 function invalidPathValidation(
   message: string,

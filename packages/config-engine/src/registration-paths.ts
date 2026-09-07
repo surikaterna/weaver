@@ -1,4 +1,5 @@
 import { createWeaverError } from "@weaver-conf/config-types";
+import { assertSafePathSegment } from "./path";
 
 export const WEAVER_INTERNAL_ROOT = "/_weaver";
 
@@ -35,6 +36,7 @@ export function normalizeConfigPath(path: string): string {
     if (segment.length === 0) return false;
     return true;
   });
+  for (const segment of segments) assertSafePathSegment(segment);
   if (segments.length === 0) return "/";
   return `/${segments.join("/")}`;
 }
@@ -98,6 +100,7 @@ export function deriveFragmentPath(
 }
 
 function validateServiceId(serviceId: string): void {
+  assertSafePathSegment(serviceId);
   if (!SERVICE_ID_PATTERN.test(serviceId)) {
     throw createWeaverError(
       "VALIDATION_ERROR",
@@ -107,6 +110,7 @@ function validateServiceId(serviceId: string): void {
 }
 
 function validateProviderId(providerId: string): void {
+  assertSafePathSegment(providerId);
   if (!PROVIDER_ID_PATTERN.test(providerId)) {
     throw createWeaverError(
       "VALIDATION_ERROR",
