@@ -12,12 +12,6 @@ import type {
   WeaverConfigService,
   WriteContext,
 } from "../core/config-service-types";
-import {
-  effectiveValidationOperation,
-  registeredObjectWriteOperation,
-  registeredPathPatchOperation,
-  schemaRegistrationOperation,
-} from "../core/schema-operation-context";
 import type { SchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
 import { parseScopeQuery } from "../core/scope-utils";
@@ -112,9 +106,7 @@ export function createWeaverScompService(deps: ScompServiceDeps) {
         "providerId" in input
           ? fragmentSchemaRegistrationRequestSchema.parse(input)
           : serviceSchemaRegistrationRequestSchema.parse(input);
-      return schemaRegistry.register(request, {
-        operation: schemaRegistrationOperation(request),
-      });
+      return schemaRegistry.register(request);
     },
 
     async setRegisteredObject(input) {
@@ -129,10 +121,6 @@ export function createWeaverScompService(deps: ScompServiceDeps) {
         request.value,
         {
           ...writeOpts,
-          schemaOperation: registeredObjectWriteOperation(
-            request.anchorPath,
-            request.environment,
-          ),
           schemaRegistry,
         },
       );
@@ -150,10 +138,6 @@ export function createWeaverScompService(deps: ScompServiceDeps) {
         request.value,
         {
           ...writeOpts,
-          schemaOperation: registeredPathPatchOperation(
-            request.path,
-            request.environment,
-          ),
           schemaRegistry,
         },
       );
@@ -168,10 +152,6 @@ export function createWeaverScompService(deps: ScompServiceDeps) {
         schemaRegistry,
         ...(request.environment ? { environment: request.environment } : {}),
         ...(scopePath ? { scopePath } : {}),
-        schemaOperation: effectiveValidationOperation(
-          request.anchorPath,
-          request.environment,
-        ),
       };
       return configService.validateRegisteredEffective(
         request.anchorPath,

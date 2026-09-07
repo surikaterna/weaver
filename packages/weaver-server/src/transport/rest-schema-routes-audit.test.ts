@@ -5,10 +5,7 @@ import type {
 } from "@weaver-conf/config-types";
 import type { AuditService } from "../audit/audit-service";
 import type { AuthContext } from "../auth/auth-middleware";
-import type {
-  SchemaWriteContext,
-  WeaverConfigService,
-} from "../core/config-service";
+import type { WeaverConfigService } from "../core/config-service";
 import type {
   SchemaRegistrationContext,
   SchemaRegistrationRequest,
@@ -37,16 +34,14 @@ const authContext: AuthContext = {
 
 interface Captures {
   readonly registrations: SchemaRegistrationContext[];
-  readonly objectWrites: SchemaWriteContext[];
-  readonly pathPatches: SchemaWriteContext[];
 }
 
-describe("REST schema route authorization/audit hook metadata", () => {
-  it("passes subject and canonical registration metadata to hooks and audit", async () => {
+describe("REST schema route audit metadata", () => {
+  it("records the authenticated subject and canonical registration metadata", async () => {
     const captures = createCaptures();
     const audit = createAuditCapture();
     const adapter = createRestAdapter({
-      configService: createMockConfigService(captures),
+      configService: createMockConfigService(),
       schemaRegistry: createMockSchemaRegistry(captures),
       auditService: audit.service,
     });
@@ -66,23 +61,13 @@ describe("REST schema route authorization/audit hook metadata", () => {
       authContext,
     });
 
-    expect(captures.registrations[0]?.operation).toMatchObject({
-      operation: "schema.register.service",
+    expect(captures.registrations[0]).toEqual({
       subject: "schema-admin-service",
-      serviceId: "checkout",
-      providerId: "checkout",
-      servicePath: "/checkout",
-      environment: "prod",
+      actor: "schema-admin-service",
     });
-    expect(captures.registrations[1]?.operation).toMatchObject({
-      operation: "schema.register.fragment",
+    expect(captures.registrations[1]).toEqual({
       subject: "schema-admin-service",
-      serviceId: "checkout",
-      providerId: "billing-addon",
-      servicePath: "/checkout",
-      canonicalSlotPath: "/checkout/plugins",
-      fragmentPath: "/checkout/plugins/billing-addon",
-      environment: "prod",
+      actor: "schema-admin-service",
     });
     expect(audit.entries.map((entry) => entry.domain)).toEqual([
       "schema",
@@ -91,15 +76,36 @@ describe("REST schema route authorization/audit hook metadata", () => {
     expect(audit.entries[0]).toMatchObject({
       action: "schema.register.service",
       actor: "schema-admin-service",
-      metadata: { subject: "schema-admin-service" },
+      key: "/checkout",
+      environment: "prod",
+      metadata: {
+        subject: "schema-admin-service",
+        serviceId: "checkout",
+        providerId: "checkout",
+        servicePath: "/checkout",
+      },
+    });
+    expect(audit.entries[1]).toMatchObject({
+      action: "schema.register.fragment",
+      actor: "schema-admin-service",
+      key: "/checkout/plugins/billing-addon",
+      environment: "prod",
+      metadata: {
+        subject: "schema-admin-service",
+        serviceId: "checkout",
+        providerId: "billing-addon",
+        servicePath: "/checkout",
+        canonicalSlotPath: "/checkout/plugins",
+        fragmentPath: "/checkout/plugins/billing-addon",
+      },
     });
   });
 
-  it("passes subject and canonical write metadata to hooks and audit", async () => {
+  it("records the authenticated subject and canonical write metadata", async () => {
     const captures = createCaptures();
     const audit = createAuditCapture();
     const adapter = createRestAdapter({
-      configService: createMockConfigService(captures),
+      configService: createMockConfigService(),
       schemaRegistry: createMockSchemaRegistry(captures),
       auditService: audit.service,
     });
@@ -123,29 +129,37 @@ describe("REST schema route authorization/audit hook metadata", () => {
       },
     );
 
-    expect(captures.objectWrites[0]?.schemaOperation).toMatchObject({
-      operation: "schema.write.object",
-      subject: "schema-admin-service",
-      serviceId: "checkout",
-      writePath: "/checkout",
-      environment: "prod",
-    });
-    expect(captures.pathPatches[0]?.schemaOperation).toMatchObject({
-      operation: "schema.patch.path",
-      subject: "schema-admin-service",
-      serviceId: "checkout",
-      writePath: "/checkout/enabled",
-      environment: "prod",
-    });
     expect(audit.entries.map((entry) => entry.action)).toEqual([
       "schema.write.object",
       "schema.patch.path",
     ]);
+    expect(audit.entries[0]).toMatchObject({
+      actor: "schema-admin-service",
+      key: "/checkout",
+      environment: "prod",
+      metadata: {
+        operation: "schema.write.object",
+        subject: "schema-admin-service",
+        serviceId: "checkout",
+        writePath: "/checkout",
+      },
+    });
+    expect(audit.entries[1]).toMatchObject({
+      actor: "schema-admin-service",
+      key: "/checkout/enabled",
+      environment: "prod",
+      metadata: {
+        operation: "schema.patch.path",
+        subject: "schema-admin-service",
+        serviceId: "checkout",
+        writePath: "/checkout/enabled",
+      },
+    });
   });
 });
 
 function createCaptures(): Captures {
-  return { registrations: [], objectWrites: [], pathPatches: [] };
+  return { registrations: [] };
 }
 
 function createAuditCapture(): {
@@ -163,7 +177,7 @@ function createAuditCapture(): {
   };
 }
 
-function createMockConfigService(captures: Captures): WeaverConfigService {
+function createMockConfigService(): WeaverConfigService {
   return {
     providers: [],
     degradedProviders: [],
@@ -188,14 +202,8 @@ function createMockConfigService(captures: Captures): WeaverConfigService {
     onDelta: () => () => {},
     batch: async <T>(fn: () => Promise<T>) => fn(),
     setMany: async () => writeSuccess(),
-    setRegisteredObject: async (_layer, _path, _value, options) => {
-      captures.objectWrites.push(options);
-      return writeSuccess();
-    },
-    patchRegisteredPath: async (_layer, _path, _value, options) => {
-      captures.pathPatches.push(options);
-      return writeSuccess();
-    },
+    setRegisteredObject: async () => writeSuccess(),
+    patchRegisteredPath: async () => writeSuccess(),
     validateRegisteredEffective: async () => ({ valid: true, errors: [] }),
     flush: async () => {},
     refreshProviders: async () => {},

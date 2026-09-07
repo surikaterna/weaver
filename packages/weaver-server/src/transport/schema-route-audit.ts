@@ -1,34 +1,55 @@
+import {
+  deriveFragmentPath,
+  deriveServicePath,
+  parseCanonicalConfigPath,
+} from "@weaver-conf/config-engine";
 import type {
+  FragmentSchemaRegistrationRequest,
   SchemaDomainAuditEntry,
   SchemaRegistrationRequest,
+  ServiceSchemaRegistrationRequest,
   WriteResult,
 } from "@weaver-conf/config-types";
 import type { AuditService } from "../audit/audit-service";
-import type { SchemaOperationContext } from "../core/schema-operation-context";
-import {
-  effectiveValidationOperation,
-  registeredObjectWriteOperation,
-  registeredPathPatchOperation,
-  schemaRegistrationOperation,
-  schemaSubjectFromIdentity,
-} from "../core/schema-operation-context";
-import type { SchemaRegistrationResult } from "../core/schema-registry";
+import type {
+  SchemaRegistrationContext,
+  SchemaRegistrationResult,
+} from "../core/schema-registry";
 import type { RestRequest } from "./rest-adapter";
+
+type SchemaOperationKind =
+  | "schema.register.service"
+  | "schema.register.fragment"
+  | "schema.write.object"
+  | "schema.patch.path"
+  | "schema.validate.effective";
+
+interface SchemaAuditContext {
+  readonly operation: SchemaOperationKind;
+  readonly subject?: string | undefined;
+  readonly serviceId?: string | undefined;
+  readonly providerId?: string | undefined;
+  readonly servicePath?: string | undefined;
+  readonly canonicalSlotPath?: string | undefined;
+  readonly fragmentPath?: string | undefined;
+  readonly writePath?: string | undefined;
+  readonly environment?: string | undefined;
+}
 
 export function schemaRegistrationRouteContext(
   req: RestRequest,
   body: SchemaRegistrationRequest,
-): SchemaOperationContext {
-  return schemaRegistrationOperation(body, subjectFromRequest(req));
+): SchemaAuditContext {
+  return "providerId" in body
+    ? fragmentRegistrationContext(req, body)
+    : serviceRegistrationContext(req, body);
 }
 
 export function schemaRegistrationRequestContext(
   req: RestRequest,
-  operation: SchemaOperationContext,
-) {
+): SchemaRegistrationContext {
   const subject = subjectFromRequest(req);
   return {
-    operation,
     ...(subject ? { subject, actor: subject } : {}),
   };
 }
@@ -36,40 +57,28 @@ export function schemaRegistrationRequestContext(
 export function registeredObjectWriteRouteContext(
   req: RestRequest,
   path: string,
-): SchemaOperationContext {
-  return registeredObjectWriteOperation(
-    path,
-    req.query.env,
-    subjectFromRequest(req),
-  );
+): SchemaAuditContext {
+  return writeContext(req, "schema.write.object", path, req.query.env);
 }
 
 export function registeredPathPatchRouteContext(
   req: RestRequest,
   path: string,
-): SchemaOperationContext {
-  return registeredPathPatchOperation(
-    path,
-    req.query.env,
-    subjectFromRequest(req),
-  );
+): SchemaAuditContext {
+  return writeContext(req, "schema.patch.path", path, req.query.env);
 }
 
 export function effectiveValidationRouteContext(
   req: RestRequest,
   path: string,
   environment?: string | undefined,
-): SchemaOperationContext {
-  return effectiveValidationOperation(
-    path,
-    environment,
-    subjectFromRequest(req),
-  );
+): SchemaAuditContext {
+  return writeContext(req, "schema.validate.effective", path, environment);
 }
 
 export async function auditSchemaRegistration(
   auditService: AuditService | undefined,
-  operation: SchemaOperationContext,
+  operation: SchemaAuditContext,
   result: SchemaRegistrationResult,
 ): Promise<void> {
   await recordSchemaAuditEvent(
@@ -82,7 +91,7 @@ export async function auditSchemaRegistration(
 
 export async function auditSchemaWrite(
   auditService: AuditService | undefined,
-  operation: SchemaOperationContext,
+  operation: SchemaAuditContext,
   result: WriteResult,
   fallback: string,
 ): Promise<void> {
@@ -96,7 +105,7 @@ export async function auditSchemaWrite(
 
 export async function recordSchemaAuditEvent(
   auditService: AuditService | undefined,
-  context: SchemaOperationContext | undefined,
+  context: SchemaAuditContext | undefined,
   success: boolean,
   error?: string | undefined,
 ): Promise<void> {
@@ -105,7 +114,7 @@ export async function recordSchemaAuditEvent(
 }
 
 function toSchemaAuditEntry(
-  context: SchemaOperationContext,
+  context: SchemaAuditContext,
   success: boolean,
   error?: string | undefined,
 ): SchemaDomainAuditEntry {
@@ -122,7 +131,7 @@ function toSchemaAuditEntry(
   };
 }
 
-function auditKey(context: SchemaOperationContext): string {
+function auditKey(context: SchemaAuditContext): string {
   return (
     context.fragmentPath ??
     context.canonicalSlotPath ??
@@ -133,5 +142,61 @@ function auditKey(context: SchemaOperationContext): string {
 }
 
 function subjectFromRequest(req: RestRequest): string | undefined {
-  return schemaSubjectFromIdentity(req.authContext?.identity);
+  const identity = req.authContext?.identity;
+  return identity?.serviceId ?? identity?.userId;
+}
+
+function serviceRegistrationContext(
+  req: RestRequest,
+  body: ServiceSchemaRegistrationRequest,
+): SchemaAuditContext {
+  const { servicePath } = deriveServicePath(body.serviceId);
+  return {
+    operation: "schema.register.service",
+    serviceId: body.serviceId,
+    providerId: body.serviceId,
+    servicePath,
+    environment: body.environment,
+    ...subjectProperty(req),
+  };
+}
+
+function fragmentRegistrationContext(
+  req: RestRequest,
+  body: FragmentSchemaRegistrationRequest,
+): SchemaAuditContext {
+  const paths = deriveFragmentPath(
+    body.serviceId,
+    body.slotPath,
+    body.providerId,
+  );
+  return {
+    operation: "schema.register.fragment",
+    ...paths,
+    environment: body.environment,
+    ...subjectProperty(req),
+  };
+}
+
+function writeContext(
+  req: RestRequest,
+  operation: SchemaOperationKind,
+  path: string,
+  environment?: string,
+): SchemaAuditContext {
+  const writePath = parseCanonicalConfigPath(path).path;
+  return {
+    operation,
+    writePath,
+    serviceId: writePath.slice(1).split("/")[0],
+    environment,
+    ...subjectProperty(req),
+  };
+}
+
+function subjectProperty(req: RestRequest): {
+  readonly subject?: string | undefined;
+} {
+  const subject = subjectFromRequest(req);
+  return subject ? { subject } : {};
 }
