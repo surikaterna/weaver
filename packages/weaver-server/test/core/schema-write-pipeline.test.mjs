@@ -63,6 +63,16 @@ async function makeRegisteredService(entries = {}) {
   return { provider, registry, service };
 }
 
+function deepPrefixEntries(depth, reversed) {
+  const segments = ["chain"];
+  const entries = [];
+  for (let index = 0; index < depth; index++) {
+    entries.push([segments.join("."), index]);
+    segments.push(`level${index}`);
+  }
+  return Object.fromEntries(reversed ? entries.reverse() : entries);
+}
+
 const serviceSchema = {
   type: "object",
   required: ["mode"],
@@ -254,6 +264,44 @@ describe("schema-registered config writes", () => {
 
     expect(first).toEqual(expected);
     expect(reversed).toEqual(expected);
+  });
+
+  test("deep every-prefix batches reject identically before revision or provider work", async () => {
+    const expected = {
+      success: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "Batch contains overlapping configuration paths",
+        details: {
+          ancestorKey: "chain",
+          descendantKey: "chain.level0",
+          paths: ["chain", "chain.level0"],
+        },
+      },
+    };
+
+    for (const reversed of [false, true]) {
+      const initial = { billing: { mode: "test" }, untouched: true };
+      const { provider, service } = await makeRegisteredService(initial);
+      const revision = service.revision;
+      let attemptedWrites = 0;
+      provider.write = async () => {
+        attemptedWrites++;
+        return { success: false, error: { code: "WRITE_FAILED", message: "must not run" } };
+      };
+
+      const result = await service.setMany(
+        "platform",
+        deepPrefixEntries(512, reversed),
+        { expectedRevision: "armed-revision-conflict" },
+      );
+
+      expect(result).toEqual(expected);
+      expect(attemptedWrites).toBe(0);
+      expect(provider.writes).toEqual([]);
+      expect(provider.entries()).toEqual(initial);
+      expect(service.revision).toBe(revision);
+    }
   });
 
   test("creating another registry cannot replace bound enforcement", async () => {

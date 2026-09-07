@@ -32,6 +32,7 @@ export type NormalizedBatchEntries =
 interface BatchPath {
   readonly source: string;
   readonly key: string;
+  readonly path: string;
   readonly segments: readonly string[];
   readonly value: unknown;
 }
@@ -39,9 +40,7 @@ interface BatchPath {
 interface BatchPathTrieNode {
   readonly children: Map<string, BatchPathTrieNode>;
   terminal?: BatchPath;
-  hasTerminal: boolean;
-  overlap: boolean;
-  containsOverlap: boolean;
+  subtreeTerminalCount: number;
 }
 
 interface BatchOverlap {
@@ -202,6 +201,7 @@ function parseBatchPath(source: string, value: unknown): BatchPath | null {
       source,
       value,
       key: parsed.storageKey,
+      path: parsed.path,
       segments: parsed.segments,
     };
   } catch {
@@ -212,83 +212,71 @@ function parseBatchPath(source: string, value: unknown): BatchPath | null {
 function findBatchOverlap(paths: readonly BatchPath[]): BatchOverlap | null {
   const root = createBatchPathTrieNode();
   for (const path of paths) insertBatchPath(root, path);
-  return selectBatchOverlap(root);
+  const ancestor = selectOverlapAncestor(root);
+  if (ancestor === null) return null;
+  const descendant = selectStrictDescendant(ancestor.node);
+  return descendant === null ? null : { ancestor: ancestor.path, descendant };
 }
 
 function insertBatchPath(root: BatchPathTrieNode, path: BatchPath): void {
   let node = root;
-  const visited = [root];
+  node.subtreeTerminalCount++;
   for (const segment of path.segments) {
-    if (node.terminal !== undefined) markBatchOverlap(visited, node);
     let child = node.children.get(segment);
     if (child === undefined) {
       child = createBatchPathTrieNode();
       node.children.set(segment, child);
     }
     node = child;
-    visited.push(node);
+    node.subtreeTerminalCount++;
   }
-  if (node.hasTerminal) markBatchOverlap(visited, node);
   node.terminal = path;
-  for (const visitedNode of visited) visitedNode.hasTerminal = true;
 }
 
-function markBatchOverlap(
-  visited: readonly BatchPathTrieNode[],
-  overlapNode: BatchPathTrieNode,
-): void {
-  overlapNode.overlap = true;
-  for (const visitedNode of visited) visitedNode.containsOverlap = true;
-}
-
-function selectBatchOverlap(root: BatchPathTrieNode): BatchOverlap | null {
-  let node: BatchPathTrieNode | undefined = root;
-  while (node !== undefined) {
-    if (node.overlap && node.terminal !== undefined) {
-      const descendant = firstTrieDescendant(node);
-      return descendant === null
-        ? null
-        : { ancestor: node.terminal, descendant };
-    }
-    node = firstTrieChild(node, (child) => child.containsOverlap);
-  }
-  return null;
-}
-
-function firstTrieDescendant(node: BatchPathTrieNode): BatchPath | null {
-  let descendant = firstTrieChild(node, (child) => child.hasTerminal);
-  while (descendant !== undefined) {
-    if (descendant.terminal !== undefined) return descendant.terminal;
-    descendant = firstTrieChild(descendant, (child) => child.hasTerminal);
-  }
-  return null;
-}
-
-function firstTrieChild(
-  node: BatchPathTrieNode,
-  eligible: (child: BatchPathTrieNode) => boolean,
-): BatchPathTrieNode | undefined {
-  let selected:
-    | { readonly segment: string; readonly node: BatchPathTrieNode }
-    | undefined;
-  for (const [segment, child] of node.children) {
+function selectOverlapAncestor(
+  root: BatchPathTrieNode,
+): { readonly node: BatchPathTrieNode; readonly path: BatchPath } | null {
+  const pending = [root];
+  let selected: {
+    readonly node: BatchPathTrieNode;
+    readonly path: BatchPath;
+  } | null = null;
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (node === undefined) continue;
+    const terminal = node.terminal;
     if (
-      eligible(child) &&
-      (selected === undefined || segment < selected.segment)
+      terminal !== undefined &&
+      node.subtreeTerminalCount > 1 &&
+      (selected === null || terminal.path < selected.path.path)
     ) {
-      selected = { segment, node: child };
+      selected = { node, path: terminal };
     }
+    for (const child of node.children.values()) pending.push(child);
   }
-  return selected?.node;
+  return selected;
+}
+
+function selectStrictDescendant(root: BatchPathTrieNode): BatchPath | null {
+  const pending = [...root.children.values()];
+  let selected: BatchPath | null = null;
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (node === undefined) continue;
+    const terminal = node.terminal;
+    if (
+      terminal !== undefined &&
+      (selected === null || terminal.path < selected.path)
+    ) {
+      selected = terminal;
+    }
+    for (const child of node.children.values()) pending.push(child);
+  }
+  return selected;
 }
 
 function createBatchPathTrieNode(): BatchPathTrieNode {
-  return {
-    children: new Map(),
-    hasTerminal: false,
-    overlap: false,
-    containsOverlap: false,
-  };
+  return { children: new Map(), subtreeTerminalCount: 0 };
 }
 
 function failedBatch(
