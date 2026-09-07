@@ -1,5 +1,3 @@
-// MongoDBStorageProvider — native MongoDB driver for user/device config layers
-
 import {
   buildPath,
   cloneValue,
@@ -42,13 +40,7 @@ const configDocumentSchema = z.object({
   updatedAt: z.string(),
 });
 
-interface ConfigDocument {
-  layer: string;
-  environment: string;
-  key: string;
-  value: unknown;
-  updatedAt: string;
-}
+type ConfigDocument = z.infer<typeof configDocumentSchema>;
 
 /** @see {@link createMongoDBStorageProvider} — prefer the factory function for consistency */
 class MongoDBStorageProvider implements ConfigurationStorageProvider {
@@ -279,14 +271,8 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
     key: string,
   ): Promise<void> {
     try {
-      await this.collection.deleteMany(
-        {
-          layer,
-          environment: this.environment,
-          key: { $regex: descendantKeyPattern(key) },
-        },
-        { maxTimeMS: this.timeoutMs },
-      );
+      const storedKeys = await this.findStoredKeys(layer, key, false);
+      await this.deleteStoredKeys(layer, storedKeys);
     } catch (err) {
       const message = extractErrorMessage(err);
       try {
@@ -303,11 +289,41 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
     layer: string,
     key: string,
   ): Promise<void> {
+    const storedKeys = await this.findStoredKeys(layer, key, true);
+    await this.deleteStoredKeys(layer, storedKeys);
+  }
+
+  private async findStoredKeys(
+    layer: string,
+    key: string,
+    includeCanonicalPath: boolean,
+  ): Promise<string[]> {
+    const rawDocs = await this.collection
+      .find({ layer, environment: this.environment })
+      .maxTimeMS(this.timeoutMs)
+      .toArray();
+    const targetSegments = parsePath(key);
+    const docs = z.array(configDocumentSchema).parse(rawDocs);
+    return docs
+      .filter((doc) => {
+        if (!isSamePathOrDescendant(parsePath(doc.key), targetSegments)) {
+          return false;
+        }
+        return includeCanonicalPath || doc.key !== key;
+      })
+      .map((doc) => doc.key);
+  }
+
+  private async deleteStoredKeys(
+    layer: string,
+    storedKeys: readonly string[],
+  ): Promise<void> {
+    if (storedKeys.length === 0) return;
     await this.collection.deleteMany(
       {
         layer,
         environment: this.environment,
-        $or: [{ key }, { key: { $regex: descendantKeyPattern(key) } }],
+        $or: storedKeys.map((storedKey) => ({ key: storedKey })),
       },
       { maxTimeMS: this.timeoutMs },
     );
@@ -339,24 +355,41 @@ function sortConfigDocuments(
 function selectEffectiveDocuments(
   docs: readonly ConfigDocument[],
 ): ConfigDocument[] {
-  const rootKeys = new Set(
-    docs.filter((doc) => parsePath(doc.key).length === 1).map((doc) => doc.key),
+  const rootIdentities = new Set(
+    docs
+      .filter((doc) => parsePath(doc.key).length === 1)
+      .map((doc) => canonicalPath(doc.key)),
+  );
+  const canonicalRootIdentities = new Set(
+    docs
+      .filter(
+        (doc) =>
+          parsePath(doc.key).length === 1 && doc.key === canonicalPath(doc.key),
+      )
+      .map((doc) => doc.key),
   );
   const effectiveDocs = docs.filter((doc) => {
     const segments = parsePath(doc.key);
-    if (segments.length === 1) return true;
+    if (segments.length === 1) {
+      const identity = canonicalPath(doc.key);
+      return !canonicalRootIdentities.has(identity) || doc.key === identity;
+    }
     const rootKey = buildPath([getRootSegment(segments)]);
-    return !rootKeys.has(rootKey);
+    return !rootIdentities.has(rootKey);
   });
   return sortConfigDocuments(effectiveDocs);
 }
 
-function descendantKeyPattern(key: string): string {
-  return `^${escapeRegex(key)}\\.`;
+function canonicalPath(path: string): string {
+  return buildPath(parsePath(path));
 }
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function isSamePathOrDescendant(
+  candidate: readonly string[],
+  target: readonly string[],
+): boolean {
+  if (candidate.length < target.length) return false;
+  return target.every((segment, index) => candidate[index] === segment);
 }
 
 /** Creates a MongoDB-backed storage provider instance. */

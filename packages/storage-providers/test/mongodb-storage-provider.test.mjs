@@ -154,6 +154,22 @@ test("load() hydrates legacy dotted documents as nested objects", async () => {
   });
 });
 
+test("load() treats noncanonical root aliases as authoritative", async () => {
+  const col = createMockCollection();
+  col.docs.push(
+    { layer: "user", environment: "prod", key: "[billing]", value: { plan: "new" }, updatedAt: "2024-01-01" },
+    { layer: "user", environment: "prod", key: "billing.plan", value: "stale", updatedAt: "9999-01-01" },
+  );
+  const provider = createMongoDBStorageProvider({
+    id: "mongo-user",
+    layer: "user",
+    collection: col,
+    environment: "prod",
+  });
+
+  expect((await provider.load()).entries.billing).toEqual({ plan: "new" });
+});
+
 test("remove() updates MongoDB root object document for nested paths", async () => {
   const col = createMockCollection();
   const provider = createMongoDBStorageProvider({
@@ -221,6 +237,27 @@ test("remove() deletes document", async () => {
   expect(result.success).toBe(true);
   expect(col.docs.length).toBe(0);
 });
+
+for (const key of ["billing", "[billing]"]) {
+  test(`remove(${key}) deletes equivalent root aliases and descendants`, async () => {
+    const col = createMockCollection();
+    col.docs.push(
+      { layer: "user", environment: "prod", key: "[billing]", value: { plan: "new" }, updatedAt: "2024-01-01" },
+      { layer: "user", environment: "prod", key: "billing.plan", value: "stale", updatedAt: "9999-01-01" },
+      { layer: "user", environment: "prod", key: "billing[limits]", value: { seats: 10 }, updatedAt: "9999-01-02" },
+    );
+    const provider = createMongoDBStorageProvider({
+      id: "mongo-user",
+      layer: "user",
+      collection: col,
+      environment: "prod",
+    });
+
+    expect((await provider.remove(key)).success).toBe(true);
+    expect(col.docs).toHaveLength(0);
+    expect((await provider.load()).entries).toEqual({});
+  });
+}
 
 test("read-only provider rejects writes", async () => {
   const col = createMockCollection();
