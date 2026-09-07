@@ -8,6 +8,7 @@ export {
   registeredObjectWriteResponseSchema,
   registeredPathPatchRequestSchema,
   registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
   schemaRegistrationResponseSchema,
   serviceSchemaRegistrationRequestSchema,
 } from "@weaver-conf/config-types";

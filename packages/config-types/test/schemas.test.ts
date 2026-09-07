@@ -5,6 +5,7 @@ import {
   scopeDefinitionSchema,
   scopeInstanceSchema,
 } from "../src/schemas-layers.js";
+import { registeredSchemasResponseSchema } from "../src/schemas-registered-operations.js";
 import {
   providerIdSchema,
   publicConfigPathSchema,
@@ -16,6 +17,21 @@ import {
   schemaRegistrationMetadataSchema,
   serviceSchemaRegistrationRequestSchema,
 } from "../src/schemas-schema-registration.js";
+
+describe("registeredSchemasResponseSchema", () => {
+  it("validates schema maps and rejects malformed property schemas", () => {
+    expect(
+      registeredSchemasResponseSchema.safeParse({
+        schemas: { "/checkout": { type: "object" } },
+      }).success,
+    ).toBe(true);
+    expect(
+      registeredSchemasResponseSchema.safeParse({
+        schemas: { "/checkout": { type: "unsupported" } },
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe("scopeDefinitionSchema", () => {
   it("accepts valid scope definition", () => {

@@ -1,29 +1,41 @@
-import type {
-  ConfigurationPropertySchema,
-  FragmentSchemaRegistrationRequest,
-  RegisteredEffectiveValidationResponse,
-  SchemaRegistrationRequest,
-  SchemaRegistrationResponse,
-  ScopeInstance,
-  ServiceSchemaRegistrationRequest,
+import {
+  type ConfigurationPropertySchema,
+  type FragmentSchemaRegistrationRequest,
+  type RegisteredEffectiveValidationResponse,
+  registeredEffectiveValidationResponseSchema,
+  registeredObjectWriteResponseSchema,
+  registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
+  type SchemaRegistrationRequest,
+  type SchemaRegistrationResponse,
+  type ScopeInstance,
+  type ServiceSchemaRegistrationRequest,
+  schemaRegistrationResponseSchema,
 } from "@weaver-conf/config-types";
+import type { z } from "zod";
+import type { HttpServerError, ValidatedRequestOptions } from "./http-request";
 import type { WriteOptions, WriteResult } from "./transport";
 
 export interface HttpRegisteredContext {
-  readonly baseUrl: string;
-  readonly fetchFn: typeof globalThis.fetch;
-  buildHeaders(): Record<string, string>;
   buildScopeQuery(scopePath?: ScopeInstance[]): string;
   queryString(params: Record<string, string | undefined>): string;
-  request<T>(method: string, path: string, body?: unknown): Promise<T>;
+  requestValidated<T>(
+    method: string,
+    path: string,
+    responseSchema: z.ZodType<T>,
+    body?: unknown,
+    options?: ValidatedRequestOptions<T>,
+  ): Promise<T>;
 }
 
 export async function fetchRegisteredSchemas(
   context: HttpRegisteredContext,
 ): Promise<Record<string, ConfigurationPropertySchema>> {
-  const result = await context.request<{
-    schemas: Record<string, ConfigurationPropertySchema>;
-  }>("GET", "/v1/admin/schemas");
+  const result = await context.requestValidated(
+    "GET",
+    "/v1/admin/schemas",
+    registeredSchemasResponseSchema,
+  );
   return result.schemas;
 }
 
@@ -35,23 +47,13 @@ export async function postSchemaRegistration(
     "providerId" in requestBody
       ? "/v1/admin/schemas/fragments"
       : "/v1/admin/schemas/services";
-  const res = await context.fetchFn(`${context.baseUrl}${path}`, {
-    method: "POST",
-    headers: context.buildHeaders(),
-    body: JSON.stringify(requestBody),
-  });
-  const json = (await res.json()) as {
-    data: SchemaRegistrationResponse | null;
-    error?: {
-      code: string;
-      message: string;
-      details?: Record<string, unknown>;
-    };
-  };
-  if (!res.ok && json.error) return failedRegistration(json.error);
-  if (json.data === null)
-    throw new Error(`Missing schema response for ${path}`);
-  return json.data;
+  return context.requestValidated(
+    "POST",
+    path,
+    schemaRegistrationResponseSchema,
+    requestBody,
+    { mapServerError: failedRegistration },
+  );
 }
 
 export function postServiceSchemaRegistration(
@@ -122,9 +124,10 @@ export function validateRegisteredEffective(
     scope: scope || undefined,
   });
   const path = canonicalPathUrl(options.anchorPath);
-  return context.request<RegisteredEffectiveValidationResponse>(
+  return context.requestValidated(
     "GET",
     `/v1/registered/effective${path}${qs}`,
+    registeredEffectiveValidationResponseSchema,
   );
 }
 
@@ -135,30 +138,38 @@ async function writeRequest(
   value: unknown,
   opts?: WriteOptions,
 ): Promise<WriteResult> {
-  const headers = context.buildHeaders();
+  const headers: Record<string, string> = {};
   if (opts?.ifRevision) headers["If-Match"] = `"${opts.ifRevision}"`;
-  const res = await context.fetchFn(`${context.baseUrl}${path}`, {
+  const responseSchema =
+    method === "PUT"
+      ? registeredObjectWriteResponseSchema
+      : registeredPathPatchResponseSchema;
+  return context.requestValidated<WriteResult>(
     method,
-    headers,
-    body: JSON.stringify({ value }),
-  });
-  const json = (await res.json()) as {
-    data: WriteResult | null;
-    error?: {
-      code: string;
-      message: string;
-      details?: Record<string, unknown>;
-    };
-  };
-  if (!res.ok && json.error) return { success: false, error: json.error };
-  if (json.data === null) throw new Error(`Missing write response for ${path}`);
-  return json.data;
+    path,
+    responseSchema,
+    { value },
+    {
+      headers,
+      mapServerError: failedWrite,
+    },
+  );
 }
 
-function failedRegistration(error: {
-  message: string;
-  details?: Record<string, unknown>;
-}): SchemaRegistrationResponse {
+function failedWrite(error: HttpServerError): WriteResult {
+  return {
+    success: false,
+    error: {
+      code: error.code,
+      message: error.message,
+      ...(error.details !== undefined ? { details: error.details } : {}),
+    },
+  };
+}
+
+function failedRegistration(
+  error: HttpServerError,
+): SchemaRegistrationResponse {
   return {
     success: false,
     isNewSchema: false,

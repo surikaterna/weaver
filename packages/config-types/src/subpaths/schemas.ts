@@ -77,6 +77,7 @@ export {
   registeredObjectWriteResponseSchema,
   registeredPathPatchRequestSchema,
   registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
 } from "../schemas-registered-operations";
 export {
   fragmentSchemaRegistrationRequestSchema,

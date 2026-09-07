@@ -1,5 +1,6 @@
 import {
   registeredObjectWriteRequestSchema,
+  registeredSchemasResponseSchema,
   serviceSchemaRegistrationRequestSchema,
 } from "../src/contract";
 import { createScompTransport, WeaverConfig } from "../src/index";
@@ -28,6 +29,11 @@ describe("transport-scomp", () => {
       registeredObjectWriteRequestSchema.safeParse({
         anchorPath: "/checkout",
         value: { db: { host: "localhost" } },
+      }).success,
+    ).toBe(true);
+    expect(
+      registeredSchemasResponseSchema.safeParse({
+        schemas: { "/checkout": { type: "object" } },
       }).success,
     ).toBe(true);
   });

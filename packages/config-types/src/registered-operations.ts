@@ -1,5 +1,10 @@
+import type { ConfigurationPropertySchema } from "./property-schema";
 import type { WriteResult } from "./providers";
 import type { SchemaValidationResult } from "./schema-validation";
+
+export interface RegisteredSchemasResponse {
+  readonly schemas: Record<string, ConfigurationPropertySchema>;
+}
 
 export interface RegisteredWriteOptions {
   readonly layer?: string | undefined;

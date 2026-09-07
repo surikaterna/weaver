@@ -116,6 +116,7 @@ export type {
   RegisteredObjectWriteResponse,
   RegisteredPathPatchRequest,
   RegisteredPathPatchResponse,
+  RegisteredSchemasResponse,
   RegisteredWriteOptions,
 } from "./registered-operations";
 // result.ts — Discriminated Result<T,E> union for fallible operations
@@ -231,6 +232,7 @@ export {
   registeredObjectWriteResponseSchema,
   registeredPathPatchRequestSchema,
   registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
 } from "./schemas-registered-operations";
 export {
   providerIdPattern,
