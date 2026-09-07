@@ -25,6 +25,8 @@ export interface ResolutionPipeline {
   rebuildMountMap(): void;
   /** Refresh secret cache (fire-and-forget safe). */
   refreshSecrets(entries: Readonly<Record<string, unknown>>): Promise<void>;
+  /** Release context-local resolver resources. */
+  dispose(): void;
   /** Whether a secret resolver is active. */
   readonly hasSecretResolver: boolean;
 }
@@ -130,6 +132,9 @@ export async function createResolutionPipeline(
     resolveEntries,
     rebuildMountMap,
     refreshSecrets,
+    dispose() {
+      secretResolver?.dispose();
+    },
     get hasSecretResolver() {
       return secretResolver !== null;
     },

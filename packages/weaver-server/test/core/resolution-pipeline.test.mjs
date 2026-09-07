@@ -117,7 +117,7 @@ describe("Resolution pipeline", () => {
     expect(snapshot.entries.key).toBe("resolved");
   });
 
-  test("without secretBackend, SecretReference markers pass through", async () => {
+  test("without secretBackend, SecretReference markers stay private", async () => {
     const entries = {
       key: { _weaver: "secret-ref", provider: "vault", uri: "x" },
     };
@@ -128,7 +128,7 @@ describe("Resolution pipeline", () => {
     });
 
     const value = await svc.get("key");
-    expect(value).toEqual({ _weaver: "secret-ref", provider: "vault", uri: "x" });
+    expect(value).toBe(undefined);
   });
 
   test("mount cycle returns undefined gracefully", async () => {

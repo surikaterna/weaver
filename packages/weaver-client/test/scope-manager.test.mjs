@@ -2,10 +2,10 @@ import { createScopeLoader } from "../src/scope-manager.js";
 
 function createMockSnapshot() {
   return {
-    entries: { "db.host": "localhost" },
+    entries: { db: { host: "localhost" } },
     scopes: {
-      "tenant:tenant-a": { "feature.x": true },
-      "tenant:tenant-b": { "feature.y": "hello" },
+      "tenant:tenant-a": { feature: { x: true } },
+      "tenant:tenant-b": { feature: { y: "hello" } },
     },
     revision: "rev-001",
     timestamp: "2026-01-01T00:00:00Z",
@@ -29,8 +29,8 @@ describe("ScopeLoader", () => {
       transport: createMockTransport(),
       initialSnapshot: createMockSnapshot(),
     });
-    expect(sl.getScopeState([{ scopeId: "tenant", value: "tenant-a" }])).toEqual({ "feature.x": true });
-    expect(sl.getScopeState([{ scopeId: "tenant", value: "tenant-b" }])).toEqual({ "feature.y": "hello" });
+    expect(sl.getScopeState([{ scopeId: "tenant", value: "tenant-a" }])).toEqual({ feature: { x: true } });
+    expect(sl.getScopeState([{ scopeId: "tenant", value: "tenant-b" }])).toEqual({ feature: { y: "hello" } });
     expect(sl.loadedScopes().length).toBe(2);
   });
 
@@ -51,7 +51,7 @@ describe("ScopeLoader", () => {
       initialSnapshot: createMockSnapshot(),
     });
     await sl.preloadScope([{ scopeId: "tenant", value: "tenant-a" }]);
-    expect(sl.getScopeState([{ scopeId: "tenant", value: "tenant-a" }])).toEqual({ "feature.x": true });
+    expect(sl.getScopeState([{ scopeId: "tenant", value: "tenant-a" }])).toEqual({ feature: { x: true } });
     expect(sl.loadedScopes().includes("tenant:tenant-a")).toBe(true);
   });
 
@@ -61,7 +61,7 @@ describe("ScopeLoader", () => {
       transport: createMockTransport(),
       initialSnapshot: createMockSnapshot(),
     });
-    expect(sl.getScopeState([{ scopeId: "tenant", value: "tenant-a" }])).toEqual({ "feature.x": true });
+    expect(sl.getScopeState([{ scopeId: "tenant", value: "tenant-a" }])).toEqual({ feature: { x: true } });
     expect(sl.getScopeState([{ scopeId: "tenant", value: "unknown" }])).toBe(undefined);
   });
 
@@ -73,7 +73,20 @@ describe("ScopeLoader", () => {
     });
     const scopeA = [{ scopeId: "tenant", value: "tenant-a" }];
     sl.applyDelta({ action: "set", key: "feature.x", value: false, layer: "tenant:tenant-a", environment: "prod", timestamp: "t1" }, scopeA);
-    expect(sl.getScopeState(scopeA)["feature.x"]).toBe(false);
+    expect(sl.getScopeState(scopeA).feature.x).toBe(false);
+  });
+
+  test("applyDelta uses canonical deep paths for set and remove", () => {
+    const sl = createScopeLoader({
+      mode: "hot",
+      transport: createMockTransport(),
+      initialSnapshot: createMockSnapshot(),
+    });
+    const scopeA = [{ scopeId: "tenant", value: "tenant-a" }];
+    sl.applyDelta({ action: "set", key: "feature[flag]", value: "new", layer: "tenant:tenant-a", environment: "prod", timestamp: "t1" }, scopeA);
+    sl.applyDelta({ action: "remove", key: "feature.x", value: null, layer: "tenant:tenant-a", environment: "prod", timestamp: "t2" }, scopeA);
+
+    expect(sl.getScopeState(scopeA)).toEqual({ feature: { flag: "new" } });
   });
 
   test("loadedScopes tracks which scopes are loaded", async () => {

@@ -156,7 +156,10 @@ export function createSchemaRegistry(
       if (!evaluation.result.success) return evaluation.result;
       applyEvaluation(state, evaluation);
       if (evaluation.entry)
-        notifySchemaRegistration(options.configService, evaluation.entry.path);
+        await notifySchemaRegistration(
+          options.configService,
+          evaluation.entry.path,
+        );
       return evaluation.result;
     },
 
@@ -211,7 +214,10 @@ export async function createPersistentSchemaRegistry(
       if (failure) return failure;
       applyEvaluation(state, evaluation);
       if (evaluation.entry)
-        notifySchemaRegistration(options.configService, evaluation.entry.path);
+        await notifySchemaRegistration(
+          options.configService,
+          evaluation.entry.path,
+        );
       return evaluation.result;
     },
 

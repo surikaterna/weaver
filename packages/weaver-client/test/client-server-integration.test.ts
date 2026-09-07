@@ -157,6 +157,66 @@ describe("client↔server integration (local transport round-trip)", () => {
     });
   });
 
+  it.each([
+    "eager",
+    "hot",
+    "lazy",
+  ] as const)("applies canonical multi-scope effective deltas in %s mode", async (scopeLoading) => {
+    await client.close();
+    const scopePath = [
+      { scopeId: "tenant", value: "acme" },
+      { scopeId: "region", value: "eu" },
+    ];
+    transport = createLocalTransport({
+      snapshot: {
+        entries: { app: { mode: "base", limit: 1, inherited: true } },
+        scopes: {
+          "tenant:acme/region:eu": {
+            app: { mode: "scoped", limit: 2, inherited: true },
+          },
+        },
+        revision: "multi-0",
+        timestamp: new Date().toISOString(),
+      },
+    });
+    client = await createWeaverClient({ transport, scopeLoading });
+    if (scopeLoading === "lazy") await client.preloadScope(scopePath);
+
+    for (const layer of ["weaver-effective", "tenant:acme/region:eu"]) {
+      transport.pushDelta({
+        key: "app.inherited",
+        action: "set",
+        value: false,
+        layer,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    transport.pushDelta({
+      key: "app[limit]",
+      action: "set",
+      value: 3,
+      layer: "tenant:acme/region:eu",
+      timestamp: new Date().toISOString(),
+    });
+    transport.pushDelta({
+      key: "app.mode",
+      action: "remove",
+      value: null,
+      layer: "tenant:acme/region:eu",
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(client.getForScope("app", scopePath)).toEqual({
+      limit: 3,
+      inherited: false,
+    });
+    expect(client.get("app")).toEqual({
+      mode: "base",
+      limit: 1,
+      inherited: false,
+    });
+  });
+
   it("should transition to disconnected on close", async () => {
     await client.close();
     expect(client.connected).toBe(false);

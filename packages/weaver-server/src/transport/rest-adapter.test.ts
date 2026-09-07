@@ -222,6 +222,37 @@ describe("REST body validation", () => {
     expect(JSON.stringify({ exact, ancestor })).not.toContain("_weaver");
   });
 
+  it("returns a complete effective scope snapshot", async () => {
+    const base = createInMemoryStorageProvider({
+      id: "base",
+      layer: "platform",
+      initialEntries: { app: { mode: "base", limit: 1 } },
+    });
+    const tenant = createInMemoryStorageProvider({
+      id: "tenant",
+      layer: "tenant:acme",
+      initialEntries: { app: { limit: 2 } },
+    });
+    const configService = await createWeaverConfigService({
+      providers: [base, tenant],
+      environment: "default",
+    });
+    const adapter = createRestAdapter({ configService });
+
+    const response = await adapter.handleRequest("GET", "/v1/config", {
+      params: {},
+      query: { scope: "tenant:acme" },
+      headers: {},
+    });
+
+    expect(response.body).toMatchObject({
+      data: {
+        entries: { app: { mode: "base", limit: 1 } },
+        scopes: { "tenant:acme": { app: { mode: "base", limit: 2 } } },
+      },
+    });
+  });
+
   it("does not expose protected metadata through REST reads", async () => {
     const provider = createInMemoryStorageProvider({
       id: "platform",

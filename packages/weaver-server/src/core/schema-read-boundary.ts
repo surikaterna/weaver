@@ -4,7 +4,11 @@ import {
   parseCanonicalConfigPath,
   validateEffectiveConfiguration,
 } from "@weaver-conf/config-engine";
-import type { ScopeInstance } from "@weaver-conf/config-types";
+import {
+  isConfigMount,
+  isSecretReference,
+  type ScopeInstance,
+} from "@weaver-conf/config-types";
 import { createWeaverError } from "../types/errors";
 import type { ConfigDelta } from "../types/index";
 import type { WeaverConfigService } from "./config-service-types";
@@ -19,9 +23,10 @@ interface SchemaReadBinding {
   readonly anchors: AnchorEnumerator;
 }
 
-export interface RuntimeProjectionContext {
+export interface ResolvedRuntimeProjectionContext {
   readonly layer: string;
   readonly scopePath?: ScopeInstance[] | undefined;
+  readonly entries: Record<string, unknown>;
 }
 
 interface AnchorGroup {
@@ -29,7 +34,7 @@ interface AnchorGroup {
   readonly members: RegisteredSchemaAnchor[];
 }
 
-type RegistrationProjector = (path: string) => void;
+type RegistrationProjector = (path: string) => Promise<void>;
 
 const bindings = new WeakMap<
   WeaverConfigService,
@@ -61,8 +66,8 @@ export function bindSchemaReadRegistry(
 export function notifySchemaRegistration(
   service: WeaverConfigService,
   path: string,
-): void {
-  registrationProjectors.get(service)?.(path);
+): Promise<void> {
+  return registrationProjectors.get(service)?.(path) ?? Promise.resolve();
 }
 
 export function assertValidRuntimeRead(
@@ -108,24 +113,19 @@ export function assertValidRuntimeScopes(
 export function projectRuntimeMutation(
   service: WeaverConfigService,
   delta: ConfigDelta,
-  contexts: ReadonlyArray<RuntimeProjectionContext>,
-  resolve: (scopePath?: ScopeInstance[]) => Record<string, unknown>,
+  contexts: ReadonlyArray<ResolvedRuntimeProjectionContext>,
 ): ConfigDelta[] {
-  const projections = projectContexts(service, contexts, resolve, delta);
   const deltaPath = runtimePathFromStorageKey(delta.key);
   const replaced = projectionRoots(service).some(
     (root) => deltaPath !== undefined && pathsIntersect(root.path, deltaPath),
   );
-  return replaced
-    ? projections
-    : [...projections, resolvedSourceDelta(delta, resolve)];
+  return projectContexts(service, contexts, delta, undefined, replaced);
 }
 
 export function projectRuntimeRegistration(
   service: WeaverConfigService,
   changedPath: string,
-  contexts: ReadonlyArray<RuntimeProjectionContext>,
-  resolve: (scopePath?: ScopeInstance[]) => Record<string, unknown>,
+  contexts: ReadonlyArray<ResolvedRuntimeProjectionContext>,
 ): ConfigDelta[] {
   const trigger: ConfigDelta = {
     action: "set",
@@ -135,15 +135,15 @@ export function projectRuntimeRegistration(
     environment: environmentFor(service),
     timestamp: new Date().toISOString(),
   };
-  return projectContexts(service, contexts, resolve, trigger, changedPath);
+  return projectContexts(service, contexts, trigger, changedPath, true);
 }
 
 function projectContexts(
   service: WeaverConfigService,
-  contexts: ReadonlyArray<RuntimeProjectionContext>,
-  resolve: (scopePath?: ScopeInstance[]) => Record<string, unknown>,
+  contexts: ReadonlyArray<ResolvedRuntimeProjectionContext>,
   trigger: ConfigDelta,
   changedPath?: string,
+  replaceSource = false,
 ): ConfigDelta[] {
   const groups = projectionGroups(service).filter(
     (group) =>
@@ -151,10 +151,12 @@ function projectContexts(
   );
   const projected: ConfigDelta[] = [];
   for (const context of sortedContexts(contexts)) {
-    const entries = resolve(context.scopePath);
     for (const group of groups) {
-      projected.push(projectGroup(group, entries, context.layer, trigger));
+      projected.push(
+        projectGroup(group, context.entries, context.layer, trigger),
+      );
     }
+    if (!replaceSource) projected.push(resolvedSourceDelta(trigger, context));
   }
   return projected;
 }
@@ -178,15 +180,19 @@ function projectGroup(
 
 function resolvedSourceDelta(
   delta: ConfigDelta,
-  resolve: (scopePath?: ScopeInstance[]) => Record<string, unknown>,
+  context: ResolvedRuntimeProjectionContext,
 ): ConfigDelta {
-  const scopePath = delta.layer.includes(":")
-    ? parseScopeQuery(delta.layer)
-    : undefined;
-  const value = deepGet(resolve(scopePath), delta.key);
-  return value === undefined
-    ? { ...delta, action: "remove", value: null }
-    : { ...delta, action: "set", value };
+  const value = deepGet(context.entries, delta.key);
+  return value === undefined || containsUnresolvedMarker(value)
+    ? { ...delta, action: "remove", value: null, layer: context.layer }
+    : { ...delta, action: "set", value, layer: context.layer };
+}
+
+function containsUnresolvedMarker(value: unknown): boolean {
+  if (isConfigMount(value) || isSecretReference(value)) return true;
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(containsUnresolvedMarker);
+  return Object.values(value).some(containsUnresolvedMarker);
 }
 
 function projectionGroups(service: WeaverConfigService): AnchorGroup[] {
@@ -230,9 +236,9 @@ function validateAnchor(
 }
 
 function sortedContexts(
-  contexts: ReadonlyArray<RuntimeProjectionContext>,
-): RuntimeProjectionContext[] {
-  const byLayer = new Map<string, RuntimeProjectionContext>();
+  contexts: ReadonlyArray<ResolvedRuntimeProjectionContext>,
+): ResolvedRuntimeProjectionContext[] {
+  const byLayer = new Map<string, ResolvedRuntimeProjectionContext>();
   for (const context of contexts) byLayer.set(context.layer, context);
   return [...byLayer.values()].sort((left, right) =>
     left.layer.localeCompare(right.layer),

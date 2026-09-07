@@ -49,6 +49,14 @@ invalid member removes that root, while recovery emits one fully resolved root
 value. Successful schema registration triggers the same projection after the
 registry is applied (and persisted when persistence is configured).
 
+`ConfigSnapshot.entries` and each value in `ConfigSnapshot.scopes` are complete
+effective states. Scoped values already include inherited base configuration;
+clients must not treat them as physical overlays. Each effective context owns
+its mount map and secret cache, and is refreshed before validation and
+publication. Effective deltas use `weaver-effective` for base or the canonical
+scope path for scoped state. Publication is serialized, and a failing delta
+listener is logged without failing an already committed write or registration.
+
 ### Auth
 
 - `createAuthMiddleware(options)` — JWT-based request authentication

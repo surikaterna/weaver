@@ -133,18 +133,11 @@ describe("WeaverConfigService", () => {
     const snapshot = await svc.resolveAll();
     const namespace = await svc.getNamespace("app");
 
-    expect(snapshot.entries).toMatchObject({
-      app: {
-        direct: undefined,
-        chained: undefined,
-        absent: undefined,
-        publicAlias: { enabled: true },
-      },
+    expect(snapshot.entries).toEqual({
+      app: { publicValue: { enabled: true }, publicAlias: { enabled: true } },
     });
-    expect(namespace).toMatchObject({
-      direct: undefined,
-      chained: undefined,
-      absent: undefined,
+    expect(namespace).toEqual({
+      publicValue: { enabled: true },
       publicAlias: { enabled: true },
     });
     expect(await svc.get("app.direct")).toBe(undefined);
@@ -182,21 +175,17 @@ describe("WeaverConfigService", () => {
       scopePath: [{ scopeId: "tenant", value: "acme" }],
     });
 
-    expect(snapshot.entries).toMatchObject({
-      app: { base: true, direct: undefined, chained: undefined },
-    });
+    expect(snapshot.entries).toEqual({ app: { base: true } });
     expect(snapshot.scopes).toEqual({
-      "tenant:acme": { app: { scoped: true } },
+      "tenant:acme": { app: { base: true, scoped: true } },
     });
     expect(
       await svc.getNamespace("app", {
         scopePath: [{ scopeId: "tenant", value: "acme" }],
       }),
-    ).toMatchObject({
+    ).toEqual({
       base: true,
       scoped: true,
-      direct: undefined,
-      chained: undefined,
     });
     expect(JSON.stringify(snapshot)).not.toContain("LEAK");
   });

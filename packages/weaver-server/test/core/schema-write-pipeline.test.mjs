@@ -618,7 +618,7 @@ describe("schema-registered config writes", () => {
     });
     await expect(service.resolveAll({
       scopePath: [{ scopeId: "tenant", value: "acme" }],
-    })).resolves.toMatchObject({ entries: { defaults: {} } });
+    })).rejects.toMatchObject({ details: { anchorPath: "/billing" } });
   });
 
   test("snapshots validate every returned scope against its effective merge", async () => {
@@ -642,6 +642,98 @@ describe("schema-registered config writes", () => {
     await expect(service.resolveAll()).rejects.toMatchObject({
       details: { anchorPath: "/billing" },
     });
+  });
+
+  test("scope snapshots are complete resolved states with isolated resolvers", async () => {
+    const base = createTestProvider("base", "platform", {
+      billing: { mode: "prod", limit: 1, token: "base" },
+    });
+    const acme = createTestProvider("acme", "tenant:acme", {
+      billing: { limit: 2, token: { _weaver: "mount", source: "local.token" } },
+      local: { token: { _weaver: "secret-ref", provider: "vault", uri: "acme" } },
+    });
+    const beta = createTestProvider("beta", "tenant:beta", {
+      billing: { limit: 3, token: { _weaver: "mount", source: "local.token" } },
+      local: { token: { _weaver: "secret-ref", provider: "vault", uri: "beta" } },
+    });
+    const region = createTestProvider("region", "region:eu", {
+      billing: { mode: "regional" },
+    });
+    const service = await createWeaverConfigService({
+      providers: [base, acme, beta, region],
+      environment: "test",
+      secretBackend: {
+        resolve: async (reference) => ({ acme: "A", acme2: "A2", beta: "B" })[reference.uri],
+      },
+    });
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration({
+      type: "object",
+      required: ["mode", "limit", "token"],
+      properties: {
+        mode: { type: "string" },
+        limit: { type: "number" },
+        token: { type: "string" },
+      },
+      additionalProperties: false,
+    }));
+
+    const snapshot = await service.resolveAll();
+    expect(snapshot.scopes["tenant:acme"].billing).toEqual({
+      mode: "prod",
+      limit: 2,
+      token: "A",
+    });
+    expect(snapshot.scopes["tenant:beta"].billing).toEqual({
+      mode: "prod",
+      limit: 3,
+      token: "B",
+    });
+    expect(JSON.stringify(snapshot)).not.toContain("_weaver");
+
+    const scoped = await service.resolveAll({
+      scopePath: [
+        { scopeId: "tenant", value: "acme" },
+        { scopeId: "region", value: "eu" },
+      ],
+    });
+    expect(Object.keys(scoped.scopes)).toEqual(["tenant:acme/region:eu"]);
+    expect(scoped.scopes["tenant:acme/region:eu"].billing).toEqual({
+      mode: "regional",
+      limit: 2,
+      token: "A",
+    });
+
+    const deltas = [];
+    service.onDelta((delta) => deltas.push(delta));
+    await service.set("tenant:acme", "local.token", {
+      _weaver: "secret-ref",
+      provider: "vault",
+      uri: "missing",
+    });
+    expect(deltas.filter((delta) => delta.key === "billing").map((delta) => [
+      delta.action,
+      delta.layer,
+    ])).toEqual([
+      ["remove", "tenant:acme"],
+      ["remove", "tenant:acme/region:eu"],
+    ]);
+    expect(deltas.some((delta) => delta.layer === "tenant:beta")).toBe(false);
+    expect(JSON.stringify(deltas)).not.toContain("secret-ref");
+
+    deltas.length = 0;
+    await service.set("tenant:acme", "local.token", {
+      _weaver: "secret-ref",
+      provider: "vault",
+      uri: "acme2",
+    });
+    expect(deltas.filter((delta) => delta.key === "billing").map((delta) => [
+      delta.layer,
+      delta.value.token,
+    ])).toEqual([
+      ["tenant:acme", "A2"],
+      ["tenant:acme/region:eu", "A2"],
+    ]);
   });
 
   test("overlapping anchors are validated deterministically for intersecting reads", async () => {
@@ -868,6 +960,30 @@ describe("schema-registered config writes", () => {
       "tenant:acme",
       "weaver-effective",
     ]);
+    expect(deltas.filter((delta) => delta.key === "shared.mode").map((delta) => [
+      delta.layer,
+      delta.value,
+    ])).toEqual([
+      ["tenant:acme", "test"],
+      ["weaver-effective", "prod"],
+    ]);
+    deltas.length = 0;
+
+    await service.remove("tenant:acme", "shared.mode");
+    expect(deltas).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "set",
+        key: "shared.mode",
+        layer: "tenant:acme",
+        value: "prod",
+      }),
+      expect.objectContaining({
+        action: "set",
+        key: "billing",
+        layer: "tenant:acme",
+        value: { mode: "prod" },
+      }),
+    ]));
   });
 
   test("protected and unregistered public write paths are rejected", async () => {
@@ -896,6 +1012,31 @@ describe("schema-registered config writes", () => {
     expect(bracketRoot.success).toBe(false);
     expect(unregistered.success).toBe(false);
     expect(unregistered.error?.message).toContain("No registered schema anchor");
+  });
+
+  test("publication is ordered and isolates throwing listeners from committed writes", async () => {
+    const service = await createWeaverConfigService({
+      providers: [createTestProvider("p1", "platform", {})],
+      environment: "test",
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+    });
+    service.onDelta(() => { throw new Error("subscriber boom"); });
+    const delivered = [];
+    service.onDelta((delta) => delivered.push([delta.action, delta.key, delta.value]));
+
+    const results = await Promise.all([
+      service.set("platform", "sequence.first", 1),
+      service.set("platform", "sequence.second", 2),
+    ]);
+    const removed = await service.remove("platform", "sequence.first");
+
+    expect(results.every((result) => result.success)).toBe(true);
+    expect(removed.success).toBe(true);
+    expect(delivered).toEqual([
+      ["set", "sequence.first", 1],
+      ["set", "sequence.second", 2],
+      ["remove", "sequence.first", null],
+    ]);
   });
 
   test("invalid persisted anchor objects are rejected at patch boundaries", async () => {

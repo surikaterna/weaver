@@ -1,4 +1,5 @@
 // SSE transport adapter — three-event model (snapshot/change/checkpoint)
+import { formatScopePath } from "@weaver-conf/config-types";
 import type { WeaverConfigService } from "../core/config-service";
 import { parseScopeQuery } from "../core/scope-utils";
 import type { ConfigDelta } from "../types/index";
@@ -128,8 +129,11 @@ export function createSSEAdapter(options: SSEAdapterOptions): SSEAdapter {
         client.close();
         throw error;
       });
+    const effectiveEntries = scopePath
+      ? (snapshot.scopes[formatScopePath(scopePath)] ?? snapshot.entries)
+      : snapshot.entries;
     const filteredEntries = filterEntriesByPrefix(
-      snapshot.entries,
+      effectiveEntries,
       opts.prefix,
     );
 

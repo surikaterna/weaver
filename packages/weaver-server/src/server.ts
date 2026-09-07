@@ -10,6 +10,7 @@ import { createAuthMiddleware } from "./auth/auth-middleware";
 import { createJwtValidator } from "./auth/jwt-validator";
 import { resolveServerBootstrap } from "./bootstrap/server-bootstrap";
 import { createWeaverConfigService } from "./core/config-service";
+import { disposeRuntimeResolutionContexts } from "./core/runtime-resolution-contexts";
 import { createPersistentSchemaRegistry } from "./core/schema-registry";
 import type { HealthEndpoints } from "./health";
 import { createHealthEndpoints } from "./health";
@@ -415,6 +416,7 @@ export async function startWeaverServerInternal(
       activeSseAdapter.stopCheckpointTimer();
       activeSseAdapter.closeAll();
       await activeServer.stop();
+      await disposeRuntimeResolutionContexts(configService);
       await bootstrapResult.dispose();
     });
 
@@ -437,6 +439,7 @@ export async function startWeaverServerInternal(
     sseAdapter?.stopCheckpointTimer();
     sseAdapter?.closeAll();
     await server?.stop();
+    await disposeRuntimeResolutionContexts(configService);
     await bootstrapResult.dispose();
     throw err;
   }

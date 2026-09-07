@@ -246,6 +246,59 @@ describe("SchemaRegistry", () => {
     expect(JSON.stringify(deltas)).not.toContain("_weaver");
   });
 
+  test("throwing listeners cannot fail committed transient or persistent registration", async () => {
+    for (const persistent of [false, true]) {
+      const errors = [];
+      const configService = await createWeaverConfigService({
+        providers: [createTestProvider("p1", "platform", {})],
+        environment: "dev",
+        logger: { debug() {}, info() {}, warn() {}, error(...args) { errors.push(args); } },
+      });
+      configService.onDelta(() => { throw new Error("subscriber boom"); });
+      const delivered = [];
+      configService.onDelta((delta) => delivered.push(delta));
+      const registry = persistent
+        ? await createPersistentSchemaRegistry({ configService })
+        : createSchemaRegistry({ configService });
+
+      const result = await registry.register(
+        serviceRegistration("billing", "dev", { type: "object" }),
+      );
+
+      expect(result.success).toBe(true);
+      expect(await registry.getSchema("billing", "dev")).toEqual({ type: "object" });
+      expect(delivered).toHaveLength(1);
+      expect(errors).toHaveLength(1);
+    }
+  });
+
+  test("concurrent registration and mutation publish in commit order", async () => {
+    const configService = await createWeaverConfigService({
+      providers: [createTestProvider("p1", "platform", { billing: {} })],
+      environment: "dev",
+    });
+    const registry = createSchemaRegistry({ configService });
+    const delivered = [];
+    configService.onDelta((delta) => delivered.push([delta.action, delta.key]));
+
+    const registration = registry.register(serviceRegistration("billing", "dev", {
+      type: "object",
+      required: ["mode"],
+      properties: { mode: { type: "string" } },
+      additionalProperties: false,
+    }));
+    const mutation = configService.set("platform", "public.ready", true);
+    const [registered, written] = await Promise.all([registration, mutation]);
+
+    expect(registered.success).toBe(true);
+    expect(written.success).toBe(true);
+    expect(delivered).toEqual([
+      ["remove", "billing"],
+      ["remove", "billing"],
+      ["set", "public.ready"],
+    ]);
+  });
+
   test("persistent registry hydrates schemas after restart", async () => {
     const entries = {
       _weaver: {

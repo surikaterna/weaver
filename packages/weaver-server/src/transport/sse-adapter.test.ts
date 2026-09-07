@@ -152,6 +152,30 @@ describe("SSEAdapter", () => {
     client.close();
   });
 
+  it("sends complete inherited state for a scoped snapshot", async () => {
+    const base = createInMemoryStorageProvider({
+      id: "base",
+      layer: "platform",
+      initialEntries: { app: { mode: "base", limit: 1 } },
+    });
+    const tenant = createInMemoryStorageProvider({
+      id: "tenant",
+      layer: "tenant:acme",
+      initialEntries: { app: { limit: 2 } },
+    });
+    const configService = await createWeaverConfigService({
+      providers: [base, tenant],
+      environment: "test",
+    });
+    const realAdapter = createSSEAdapter({ configService });
+
+    const client = await realAdapter.createClient({ scope: "tenant:acme" });
+    const snapshot = msg(parseMessages(client), 0).data;
+
+    expect(snapshot.entries).toEqual({ app: { mode: "base", limit: 2 } });
+    client.close();
+  });
+
   it("filters snapshot entries by prefix", async () => {
     const client = await adapter.createClient({ prefix: "app" });
     const msgs = parseMessages(client);

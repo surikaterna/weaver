@@ -176,6 +176,21 @@ describe("createWeaverScompService", () => {
     expect(result.revision).toBeTruthy();
   });
 
+  test("resolveAll returns inherited effective scope state", async () => {
+    const base = createTestProvider("base", "platform", { app: { mode: "base", limit: 1 } });
+    const tenant = createTestProvider("tenant", "tenant:acme", { app: { limit: 2 } });
+    const svc = await createWeaverConfigService({
+      providers: [base, tenant],
+      environment: "dev",
+    });
+    const service = createWeaverScompService(buildScompDeps(svc));
+
+    const result = await service.router[route("resolveAll")].handler({ scope: "tenant:acme" });
+
+    expect(result.entries.app).toEqual({ mode: "base", limit: 1 });
+    expect(result.scopes["tenant:acme"].app).toEqual({ mode: "base", limit: 2 });
+  });
+
   test("runtime read handlers reject incomplete registered configuration", async () => {
     const provider = createTestProvider("p1", "platform", {
       checkout: { limit: 10 },
@@ -292,9 +307,7 @@ describe("createWeaverScompService", () => {
     const namespace = await service.router[route("getNamespace")].handler({ prefix: "_weaver" });
     const inspection = await service.router[route("inspect")].handler({ key: "_weaver" });
 
-    expect(snapshot.entries).toMatchObject({
-      app: { name: "public", direct: undefined, chained: undefined },
-    });
+    expect(snapshot.entries).toEqual({ app: { name: "public" } });
     expect(direct).toEqual({ value: undefined });
     expect(mounted).toEqual({ value: undefined });
     expect(chained).toEqual({ value: undefined });

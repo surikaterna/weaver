@@ -31,22 +31,17 @@ import {
   effectiveWriteState,
   hasScopedLayerIo,
 } from "./config-service-write-state";
-import {
-  filterProtectedConfigEntries,
-  filterProtectedConfigScopes,
-  isProtectedConfigPath,
-} from "./protected-config-paths";
+import { isProtectedConfigPath } from "./protected-config-paths";
 import {
   type ConfigInspectionLayer,
   inspectPublicConfig,
 } from "./public-config-inspection";
-import { createResolutionPipeline } from "./resolution-pipeline";
+import {
+  bindRuntimeResolutionContexts,
+  createRuntimeResolutionContexts,
+} from "./runtime-resolution-contexts";
 import {
   assertValidRuntimeRead,
-  assertValidRuntimeScopes,
-  projectRuntimeMutation,
-  projectRuntimeRegistration,
-  type RuntimeProjectionContext,
   registerSchemaReadHost,
 } from "./schema-read-boundary";
 import {
@@ -75,7 +70,6 @@ export type {
 };
 
 const SIZE_WARNING = 1_048_576; // 1MB
-const EFFECTIVE_BASE_LAYER = "weaver-effective";
 const internalWriteToken: unique symbol = Symbol("weaver.internalWrite");
 const validatedWriteToken: unique symbol = Symbol("weaver.validatedWrite");
 
@@ -93,10 +87,8 @@ export async function createWeaverConfigService(
 
   const layerData = new Map<string, Record<string, unknown>>();
   const dynamicScopeEntries = new Map<string, Record<string, unknown>>();
-  const materializedScopePaths = new Map<string, ScopeInstance[]>();
   const degradedProviders: string[] = [];
   let revision = "";
-  const deltaHandlers = new Set<(delta: ConfigDelta) => void>();
   let batchDepth = 0;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -203,7 +195,6 @@ export async function createWeaverConfigService(
 
   async function warmScopeLayers(scopePath?: ScopeInstance[]): Promise<void> {
     if (!scopePath?.length) return;
-    materializedScopePaths.set(buildScopePathString(scopePath), scopePath);
 
     for (const scope of scopePath) {
       const normalizedScopeLayer = `${scope.scopeId}:${scope.value}`;
@@ -217,6 +208,7 @@ export async function createWeaverConfigService(
         dynamicScopeEntries.set(normalizedScopeLayer, data.entries);
       }
     }
+    runtime.materialize(scopePath);
   }
 
   function getRevisionState(): Record<string, unknown> {
@@ -232,61 +224,11 @@ export async function createWeaverConfigService(
 
   updateRevision();
 
-  // --- Mount + Secret resolution pipeline ---
-  const pipeline = await createResolutionPipeline({
-    getMergedState: () => filterProtectedConfigEntries(getMergedState()),
-    getBaseEntries: () => filterProtectedConfigEntries(getBaseEntries()),
-    secretBackend: options.secretBackend,
+  const runtime = createRuntimeResolutionContexts({
+    getMergedState,
+    ...(options.secretBackend ? { secretBackend: options.secretBackend } : {}),
+    logger,
   });
-
-  function fireDelta(delta: ConfigDelta): void {
-    const published = projectRuntimeMutation(
-      service,
-      delta,
-      projectionContexts(delta.layer),
-      resolvedEffectiveState,
-    );
-    for (const next of published) {
-      for (const handler of deltaHandlers) handler(next);
-    }
-  }
-
-  function projectionContexts(layer?: string): RuntimeProjectionContext[] {
-    const scope = layer ? parseScopeLayer(layer) : null;
-    const contexts: RuntimeProjectionContext[] = [];
-    if (scope === null) contexts.push({ layer: EFFECTIVE_BASE_LAYER });
-    for (const [scopeLayer, scopePath] of materializedScopePaths) {
-      if (
-        scope &&
-        !scopePath.some(
-          (item) =>
-            item.scopeId === scope.scopeId && item.value === scope.value,
-        )
-      )
-        continue;
-      contexts.push({ layer: scopeLayer, scopePath });
-    }
-    return contexts;
-  }
-
-  function fireRegistrationProjection(path: string): void {
-    const projected = projectRuntimeRegistration(
-      service,
-      path,
-      projectionContexts(),
-      resolvedEffectiveState,
-    );
-    for (const delta of projected) {
-      for (const handler of deltaHandlers) handler(delta);
-    }
-  }
-
-  function resolvedEffectiveState(
-    scopePath?: ScopeInstance[],
-  ): Record<string, unknown> {
-    const state = filterProtectedConfigEntries(getMergedState(scopePath));
-    return pipeline.resolveEntries(state, "", state);
-  }
 
   const service: WeaverConfigService = {
     get providers() {
@@ -305,8 +247,6 @@ export async function createWeaverConfigService(
       scopePath?: ScopeInstance[];
     }): Promise<ConfigSnapshot> {
       await warmScopeLayers(opts?.scopePath);
-      const rawEntries = filterProtectedConfigEntries(getBaseEntries());
-      const entries = pipeline.resolveEntries(rawEntries);
       const rawScopes = opts?.scopePath?.length
         ? {
             [buildScopePathString(opts.scopePath)]: getScopeState(
@@ -314,17 +254,23 @@ export async function createWeaverConfigService(
             ),
           }
         : getAllScopes();
-      for (const scope of Object.keys(rawScopes)) {
-        const scopePath = parseScopeQuery(scope);
-        if (scopePath) materializedScopePaths.set(scope, scopePath);
+      const scopePaths = Object.keys(rawScopes)
+        .map(parseScopeQuery)
+        .filter(
+          (scopePath): scopePath is ScopeInstance[] => scopePath !== undefined,
+        );
+      for (const scopePath of scopePaths) runtime.materialize(scopePath);
+      const { base, scopes: resolvedScopes } =
+        await runtime.resolveSnapshot(scopePaths);
+      assertValidRuntimeRead(service, base.entries);
+      const scopes: Record<string, Record<string, unknown>> = {};
+      for (const context of resolvedScopes) {
+        assertValidRuntimeRead(service, context.entries);
+        scopes[context.layer] = context.entries;
       }
-      const scopes = filterProtectedConfigScopes(rawScopes);
-
-      assertValidRuntimeRead(service, resolvedEffectiveState(opts?.scopePath));
-      assertValidRuntimeScopes(service, scopes, resolvedEffectiveState);
 
       return {
-        entries,
+        entries: base.entries,
         scopes,
         revision,
         timestamp: new Date().toISOString(),
@@ -337,7 +283,7 @@ export async function createWeaverConfigService(
     ): Promise<unknown> {
       if (isProtectedConfigPath(key)) return undefined;
       await warmScopeLayers(opts?.scopePath);
-      const resolvedState = resolvedEffectiveState(opts?.scopePath);
+      const resolvedState = await runtime.resolve(opts?.scopePath);
       assertValidRuntimeRead(service, resolvedState, key);
       return deepGet(resolvedState, key);
     },
@@ -348,7 +294,7 @@ export async function createWeaverConfigService(
     ): Promise<Record<string, unknown>> {
       if (isProtectedConfigPath(prefix)) return {};
       await warmScopeLayers(opts?.scopePath);
-      const resolvedState = resolvedEffectiveState(opts?.scopePath);
+      const resolvedState = await runtime.resolve(opts?.scopePath);
       assertValidRuntimeRead(service, resolvedState, prefix);
       const value = deepGet(resolvedState, prefix);
       if (
@@ -468,10 +414,6 @@ export async function createWeaverConfigService(
         layerData.set(provider.id, entries);
       }
       updateRevision();
-      pipeline.rebuildMountMap();
-      if (pipeline.hasSecretResolver) {
-        await pipeline.refreshSecrets(getBaseEntries());
-      }
 
       const delta: ConfigDelta = {
         action: "set",
@@ -481,7 +423,7 @@ export async function createWeaverConfigService(
         environment: opts?.environment ?? environment,
         timestamp: new Date().toISOString(),
       };
-      if (!isInternalWrite(opts)) fireDelta(delta);
+      if (!isInternalWrite(opts)) await runtime.publishMutation(service, delta);
 
       autoFlush();
       return result;
@@ -580,10 +522,6 @@ export async function createWeaverConfigService(
         layerData.set(provider.id, entries);
       }
       updateRevision();
-      pipeline.rebuildMountMap();
-      if (pipeline.hasSecretResolver) {
-        await pipeline.refreshSecrets(getBaseEntries());
-      }
 
       const delta: ConfigDelta = {
         action: "remove",
@@ -593,17 +531,14 @@ export async function createWeaverConfigService(
         environment: opts?.environment ?? environment,
         timestamp: new Date().toISOString(),
       };
-      if (!isInternalWrite(opts)) fireDelta(delta);
+      if (!isInternalWrite(opts)) await runtime.publishMutation(service, delta);
 
       autoFlush();
       return result;
     },
 
     onDelta(handler: (delta: ConfigDelta) => void) {
-      deltaHandlers.add(handler);
-      return () => {
-        deltaHandlers.delete(handler);
-      };
+      return runtime.onDelta(handler);
     },
 
     async batch<T>(fn: () => Promise<T>): Promise<T> {
@@ -748,7 +683,7 @@ export async function createWeaverConfigService(
 
     async validateRegisteredEffective(path, opts) {
       await warmScopeLayers(opts.scopePath);
-      const effectiveState = resolvedEffectiveState(opts.scopePath);
+      const effectiveState = await runtime.resolve(opts.scopePath);
       return validateRegisteredEffectiveConfiguration(
         path,
         opts,
@@ -766,7 +701,10 @@ export async function createWeaverConfigService(
       service.remove(layer, key, withInternalWrite(opts)),
   });
   registerSchemaBoundaryHost(service, environment);
-  registerSchemaReadHost(service, environment, fireRegistrationProjection);
+  bindRuntimeResolutionContexts(service, runtime);
+  registerSchemaReadHost(service, environment, (path) =>
+    runtime.publishRegistration(service, path),
+  );
 
   return service;
 }
