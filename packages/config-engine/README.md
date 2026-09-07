@@ -1,6 +1,6 @@
 # @weaver-conf/config-engine
 
-> Deep merge, layer resolution, key inspection, scope chains, schema registry, and codegen for Weaver configuration.
+> Deep merge, layer resolution, key inspection, scope chains, and schema codegen for Weaver configuration.
 
 ## Installation
 
@@ -12,7 +12,7 @@ pnpm add @weaver-conf/config-engine
 
 `@weaver-conf/config-engine` is the resolution core of the Weaver configuration system. It takes a stack of configuration layers and produces a single resolved output via deep merge, with full provenance tracking (which layer set each key).
 
-The package also provides namespace utilities for the `{namespace}.{category}.{setting}` key format, a scope chain builder for dynamic tenant hierarchies, a schema registry for aggregating property declarations across modules, and codegen utilities for generating JSON Schema and Zod source from property schemas.
+The package also provides namespace utilities for the `{namespace}.{category}.{setting}` key format, a scope chain builder for dynamic tenant hierarchies, and codegen utilities for generating JSON Schema and Zod source from property schemas. Path-first schema registration is owned by the server, transport, and client contracts rather than this resolution engine.
 
 ## Usage
 

@@ -78,9 +78,6 @@ importers:
       '@weaver-conf/config-types':
         specifier: workspace:*
         version: link:../../packages/config-types
-      '@weaver-conf/storage-provider-static-json':
-        specifier: workspace:*
-        version: link:../../packages/storage-provider-static-json
       '@weaver-conf/weaver-client':
         specifier: workspace:*
         version: link:../../packages/weaver-client

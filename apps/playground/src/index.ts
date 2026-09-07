@@ -1,7 +1,6 @@
 // Full-stack integration smoke test for Weaver
 // Boots weaver-server, connects weaver-client via HTTP transport, and exercises major surfaces.
 
-import { createStaticJsonStorageProvider } from "@weaver-conf/storage-provider-static-json";
 import type { ConfigDelta } from "@weaver-conf/weaver-client";
 import {
   createHttpTransport,
@@ -65,10 +64,10 @@ async function main() {
   const server = await startWeaverServer({
     port: 0,
     providers: [
-      createStaticJsonStorageProvider({
+      createInMemoryStorageProvider({
         id: "base",
         layer: "platform",
-        data: SEED_CONFIG,
+        initialEntries: SEED_CONFIG,
       }),
       createInMemoryStorageProvider({
         id: "default",
@@ -178,6 +177,13 @@ async function main() {
     fragmentSlots: [],
   });
   assert(regResult.success, "path-first service schema registered");
+  const protectedWrite = await client.set("_weaver.registry.schemas", {}, {
+    layer: "platform",
+  });
+  assert(
+    protectedWrite.success === false,
+    "public writes cannot bypass protected schema persistence",
+  );
 
   // ─── 8. Server Auth (optional gate) ───────────────────────
   section("8. Server Auth (optional gate)");

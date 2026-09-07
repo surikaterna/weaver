@@ -11,7 +11,6 @@
     "@weaver-conf/weaver-server": "workspace:*",
     "@weaver-conf/weaver-client": "workspace:*",
     "@weaver-conf/config-types": "workspace:*",
-    "@weaver-conf/storage-provider-static-json": "workspace:*",
     "zod": "^4.0.0"
   },
   "devDependencies": {

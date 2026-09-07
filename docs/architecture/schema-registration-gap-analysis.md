@@ -76,12 +76,12 @@ The near-term enforcement goal is schema validation:
 
 Write authorization enforcement is important but secondary. The model should record accountability and declaration metadata now so future policy can answer questions such as “can this caller write this path?”, but initial delivery should not block on a complete write authorization system.
 
-## Current Gaps
+## Resolved Model and Remaining Gaps
 
-| Concern | Current behavior | Gap |
-|---------|------------------|-----|
+| Concern | Current behavior | Status or gap |
+|---------|------------------|---------------|
 | Path terminology | Current code and docs use `key`, `namespace`, `prefix`, and `serviceId` inconsistently. | Contracts do not make the config tree location explicit and stable. |
-| Schema registry anchoring | Client and engine registries largely compose property schemas by fully qualified key or namespace prefix. Server registration persists declarations by `serviceId:environment`. | Registry entries are not fully anchored to concrete object paths or fragment slots. |
+| Schema registry anchoring | The server registry derives canonical service and fragment paths from explicit path-first requests. Client registration uses the same request union; config-engine has no registration registry. | Resolved for service anchors and declared fragment slots. |
 | Fragment model | Existing helper names and comments derive namespace values from plugin IDs. | The model over-specializes around plugins instead of generic fragments. |
 | Server validation | Server registration validates schema declarations, but config writes are not consistently validated as full objects against registered schemas. | Invalid persisted objects can pass through server-side write paths. |
 | Transport consistency | Earlier HTTP, SCOMP, and client contracts exposed different registration concepts. | Resolved by the path-first service/fragment registration contracts shared across transports. |
