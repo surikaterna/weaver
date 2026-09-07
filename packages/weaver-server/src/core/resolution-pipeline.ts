@@ -111,8 +111,11 @@ export async function createResolutionPipeline(
     lookupEntries: Record<string, unknown>,
     state: ResolutionState,
   ): unknown {
-    if (isConfigMount(value)) {
-      return resolveMount(path, lookupEntries, state);
+    if (hasMountDiscriminant(value)) {
+      const key = buildPath(path);
+      return isConfigMount(value) && mountMap.has(key)
+        ? resolveMount(path, lookupEntries, state)
+        : undefined;
     }
     if (isSecretReference(value)) {
       return secretResolver?.getResolved(buildPath(path)) ?? value;
@@ -182,4 +185,8 @@ export async function createResolutionPipeline(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasMountDiscriminant(value: unknown): boolean {
+  return isRecord(value) && value._weaver === "mount";
 }

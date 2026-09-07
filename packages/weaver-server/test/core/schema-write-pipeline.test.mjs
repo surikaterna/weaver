@@ -883,6 +883,110 @@ describe("schema-registered config writes", () => {
     );
   });
 
+  test("malformed mount sources fail closed during registration and mutation projection", async () => {
+    const mount = (source) => ({ _weaver: "mount", source });
+    const base = createTestProvider("base", "platform", {
+      billing: { token: mount("shared.token") },
+      shared: { token: { _weaver: "mount" } },
+    });
+    const tenant = createTestProvider("tenant", "tenant:acme", {
+      shared: { token: mount(42) },
+    });
+    const service = await createWeaverConfigService({
+      providers: [base, tenant],
+      environment: "test",
+    });
+    const registry = createSchemaRegistry({ configService: service });
+    const scopePath = [{ scopeId: "tenant", value: "acme" }];
+    await service.get("shared.token", { scopePath });
+    const deltas = [];
+    service.onDelta((delta) => deltas.push(delta));
+
+    const registration = await registry.register(serviceRegistration({
+      type: "object",
+      required: ["token"],
+      properties: { token: { type: "string" } },
+      additionalProperties: false,
+    }));
+    expect(registration.success).toBe(true);
+    expect(deltas.map((delta) => [delta.action, delta.layer, delta.key])).toEqual([
+      ["remove", "tenant:acme", "billing"],
+      ["remove", "weaver-effective", "billing"],
+    ]);
+    expect(JSON.stringify(deltas)).not.toContain('"_weaver":"mount"');
+    await expect(service.get("billing.token")).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    await expect(
+      service.resolveAll({ scopePath }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    deltas.length = 0;
+
+    expect((await service.set("platform", "shared.token", "BASE")).success).toBe(
+      true,
+    );
+    expect(deltas).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "set",
+        key: "billing",
+        layer: "weaver-effective",
+        value: { token: "BASE" },
+      }),
+    ]));
+    deltas.length = 0;
+
+    expect((await service.set("tenant:acme", "shared.token", "SCOPE")).success).toBe(
+      true,
+    );
+    expect(deltas).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "set",
+        key: "billing",
+        layer: "tenant:acme",
+        value: { token: "SCOPE" },
+      }),
+    ]));
+    deltas.length = 0;
+
+    expect(
+      (await service.set("platform", "shared.token", mount("shared["))).success,
+    ).toBe(true);
+    expect(deltas).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "remove",
+        key: "billing",
+        layer: "weaver-effective",
+      }),
+    ]));
+    expect(JSON.stringify(deltas)).not.toContain('"_weaver":"mount"');
+    deltas.length = 0;
+
+    expect(
+      (await service.set("tenant:acme", "shared.token", mount(42))).success,
+    ).toBe(true);
+    expect(deltas).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "remove",
+        key: "billing",
+        layer: "tenant:acme",
+      }),
+    ]));
+    expect(JSON.stringify(deltas)).not.toContain('"_weaver":"mount"');
+    deltas.length = 0;
+
+    expect(
+      (await service.set("tenant:acme", "shared.token", "SCOPE-2")).success,
+    ).toBe(true);
+    expect(deltas).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "set",
+        key: "billing",
+        layer: "tenant:acme",
+        value: { token: "SCOPE-2" },
+      }),
+    ]));
+  });
+
   test("overlapping anchors are validated deterministically for intersecting reads", async () => {
     const provider = createTestProvider("p1", "platform", {
       billing: { mode: "safe", plugins: { tax: {} } },

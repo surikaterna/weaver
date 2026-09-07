@@ -23,8 +23,9 @@ export function buildMountMap(
   const active = new WeakSet<object>();
 
   function scan(value: unknown, path: readonly string[]): void {
-    if (isConfigMount(value)) {
-      map.set(buildPath(path), buildPath(parsePath(value.source)));
+    if (hasMountDiscriminant(value)) {
+      const source = validMountSource(value);
+      if (source !== undefined) map.set(buildPath(path), source);
       return;
     }
     if (value === null || typeof value !== "object") return;
@@ -87,7 +88,11 @@ export function resolveMountedNamespace(
 
   for (const [k, v] of Object.entries(entries)) {
     const fullKey = buildPath([...(prefix ? parsePath(prefix) : []), k]);
-    if (isConfigMount(v)) {
+    if (hasMountDiscriminant(v)) {
+      if (!isConfigMount(v) || !mountMap.has(fullKey)) {
+        result[k] = undefined;
+        continue;
+      }
       const resolved = resolveMountedValue(
         fullKey,
         mountMap,
@@ -101,4 +106,22 @@ export function resolveMountedNamespace(
   }
 
   return result;
+}
+
+function hasMountDiscriminant(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "_weaver" in value &&
+    value._weaver === "mount"
+  );
+}
+
+function validMountSource(value: unknown): string | undefined {
+  if (!isConfigMount(value)) return undefined;
+  try {
+    return buildPath(parsePath(value.source));
+  } catch {
+    return undefined;
+  }
 }

@@ -1,3 +1,4 @@
+import { isConfigMount } from "@weaver-conf/config-types";
 import {
   buildMountMap,
   resolveMountedNamespace,
@@ -49,6 +50,32 @@ describe("buildMountMap", () => {
 
     expect(map.get("[group.one].0")).toBe("shared[value.one]");
     expect(map.get("group.one.0")).toBe("shared.value");
+  });
+
+  test("rejects malformed mount candidates without throwing", () => {
+    const malformed = {
+      missing: { _weaver: "mount" },
+      number: { _weaver: "mount", source: 42 },
+      null: { _weaver: "mount", source: null },
+      empty: { _weaver: "mount", source: "" },
+      syntax: { _weaver: "mount", source: "shared[" },
+      unsafe: { _weaver: "mount", source: "shared.__proto__" },
+      ordinary: {
+        _weaver: "metadata",
+        nested: { _weaver: "mount", source: "shared.value" },
+      },
+      valid: { _weaver: "mount", source: "shared.value" },
+    };
+
+    expect(() => buildMountMap(malformed)).not.toThrow();
+    const map = buildMountMap(malformed);
+    expect([...map.entries()]).toEqual([
+      ["ordinary.nested", "shared.value"],
+      ["valid", "shared.value"],
+    ]);
+    expect(isConfigMount(malformed.missing)).toBe(false);
+    expect(isConfigMount(malformed.number)).toBe(false);
+    expect(isConfigMount(malformed.valid)).toBe(true);
   });
 });
 
@@ -175,5 +202,30 @@ describe("resolveMountedNamespace", () => {
     );
 
     expect(result.bad).toBe(undefined);
+  });
+
+  test("does not return malformed mount candidates", () => {
+    const entries = {
+      missing: { _weaver: "mount" },
+      number: { _weaver: "mount", source: 42 },
+      empty: { _weaver: "mount", source: "" },
+      syntax: { _weaver: "mount", source: "shared[" },
+      ordinary: { _weaver: "metadata", value: "kept" },
+    };
+
+    const result = resolveMountedNamespace(
+      "app",
+      buildMountMap({ app: entries }),
+      () => entries,
+      () => undefined,
+    );
+
+    expect(result).toEqual({
+      missing: undefined,
+      number: undefined,
+      empty: undefined,
+      syntax: undefined,
+      ordinary: { _weaver: "metadata", value: "kept" },
+    });
   });
 });

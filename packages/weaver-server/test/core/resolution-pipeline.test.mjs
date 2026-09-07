@@ -196,6 +196,69 @@ describe("Resolution pipeline", () => {
     expect(JSON.stringify(await service.resolveAll())).not.toContain("_weaver");
   });
 
+  test("malformed mount candidates fail closed in base and scoped reads", async () => {
+    const base = createTestProvider("base", "platform", {
+      shared: { value: "resolved" },
+      app: {
+        missing: { _weaver: "mount" },
+        number: { _weaver: "mount", source: 42 },
+        null: { _weaver: "mount", source: null },
+        empty: { _weaver: "mount", source: "" },
+        syntax: { _weaver: "mount", source: "shared[" },
+        unsafe: { _weaver: "mount", source: "shared.__proto__" },
+        protected: { _weaver: "mount", source: "_weaver.registry" },
+        ordinary: { _weaver: "metadata", value: "base-kept" },
+        valid: { _weaver: "mount", source: "shared.value" },
+      },
+      _weaver: { registry: "private" },
+    });
+    const scoped = createTestProvider("scope", "tenant:acme", {
+      app: {
+        scopedMissing: { _weaver: "mount" },
+        scopedMalformed: { _weaver: "mount", source: ".bad" },
+        ordinary: { _weaver: "metadata", value: "scope-kept" },
+      },
+    });
+    const service = await createWeaverConfigService({
+      providers: [base, scoped],
+      environment: "dev",
+    });
+    const scopePath = [{ scopeId: "tenant", value: "acme" }];
+    const malformedKeys = [
+      "missing",
+      "number",
+      "null",
+      "empty",
+      "syntax",
+      "unsafe",
+      "protected",
+    ];
+
+    for (const key of malformedKeys) {
+      expect(await service.get(`app.${key}`)).toBe(undefined);
+    }
+    expect(await service.get("app.valid")).toBe("resolved");
+    expect(await service.get("app.ordinary")).toEqual({
+      _weaver: "metadata",
+      value: "base-kept",
+    });
+    expect(await service.get("app.scopedMissing", { scopePath })).toBe(
+      undefined,
+    );
+    expect(await service.get("app.scopedMalformed", { scopePath })).toBe(
+      undefined,
+    );
+
+    const namespace = await service.getNamespace("app", { scopePath });
+    expect(namespace).toMatchObject({
+      ordinary: { _weaver: "metadata", value: "scope-kept" },
+      valid: "resolved",
+    });
+    const snapshot = await service.resolveAll({ scopePath });
+    expect(snapshot.scopes["tenant:acme"].app).toEqual(namespace);
+    expect(JSON.stringify(snapshot)).not.toContain('"_weaver":"mount"');
+  });
+
   test("mount map rebuilds after set", async () => {
     const entries = {
       shared: { value: "original" },
