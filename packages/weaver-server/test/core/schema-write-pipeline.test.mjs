@@ -131,6 +131,30 @@ describe("schema-registered config writes", () => {
     expect(await service.get("billing")).toEqual({ mode: "prod", limit: 4 });
   });
 
+  test("provider failures remain fail-fast after atomic schema preflight", async () => {
+    const provider = createTestProvider("p1", "platform", {});
+    const write = provider.write;
+    provider.write = async (key, value) => {
+      if (key === "billing.limit") {
+        return { success: false, error: { code: "WRITE_FAILED", message: "failed" } };
+      }
+      return write(key, value);
+    };
+    const service = await createWeaverConfigService({ providers: [provider], environment: "test" });
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration(serviceSchema));
+
+    const result = await service.setMany("platform", {
+      "billing.mode": "prod",
+      "billing.limit": 4,
+    });
+
+    expect(result.success).toBe(false);
+    expect(provider.writes).toEqual([{ key: "billing.mode", value: "prod" }]);
+    expect(await service.get("billing.mode")).toBe("prod");
+    expect(await service.get("billing.limit")).toBe(undefined);
+  });
+
   test("removes reject an invalid effective result but permit a valid fallback", async () => {
     const base = createTestProvider("base", "platform", { billing: { mode: "prod" } });
     const override = createTestProvider("override", "tenant:acme", {
