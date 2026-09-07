@@ -129,9 +129,6 @@ importers:
 
   packages/config-policy:
     dependencies:
-      '@weaver-conf/config-engine':
-        specifier: workspace:*
-        version: link:../config-engine
       '@weaver-conf/config-types':
         specifier: workspace:*
         version: link:../config-types

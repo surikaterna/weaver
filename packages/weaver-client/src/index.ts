@@ -30,8 +30,6 @@ export type {
 } from "./namespace";
 export { defineNamespace } from "./namespace";
 export type { WeaverClientPersistence } from "./persistence";
-export type { SchemaRegistrationResult } from "./registration";
-export { registerNamespaces, zodShapeToJsonSchema } from "./registration";
 export type { ClientSchemaRegistry, ValidationResult } from "./schema-registry";
 export { createClientSchemaRegistry } from "./schema-registry";
 export type {

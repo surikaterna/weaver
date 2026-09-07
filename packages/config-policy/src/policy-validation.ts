@@ -1,6 +1,6 @@
 // Policy validation — checks changePolicy assignments for security conventions
 
-import type { ComposedSchemaEntry } from "@weaver-conf/config-engine";
+import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 
 /** A detected policy violation with severity and suggested fix. */
 export interface PolicyViolation {
@@ -10,6 +10,9 @@ export interface PolicyViolation {
   readonly currentPolicy: string;
   readonly suggestedPolicy?: string | undefined;
 }
+
+/** Property schema input keyed by its full configuration path. */
+export type PolicySchemaMap = ReadonlyMap<string, ConfigurationPropertySchema>;
 
 const SECURITY_SENSITIVE_PATTERN = /password|secret|apiKey|token|credential/i;
 
@@ -22,12 +25,12 @@ const SECURITY_SENSITIVE_PATTERN = /password|secret|apiKey|token|credential/i;
  * 3. Restart-required reload behavior with direct-allowed → warning
  */
 export function validateChangePolicies(
-  schemas: Map<string, ComposedSchemaEntry>,
+  schemas: PolicySchemaMap,
 ): PolicyViolation[] {
   const violations: PolicyViolation[] = [];
 
-  for (const [key, entry] of schemas) {
-    const policy = entry.schema["x-weaver"]?.changePolicy ?? "direct-allowed";
+  for (const [key, schema] of schemas) {
+    const policy = schema["x-weaver"]?.changePolicy ?? "direct-allowed";
 
     // Rule 1: Security-sensitive key names should not use direct-allowed
     if (SECURITY_SENSITIVE_PATTERN.test(key) && policy === "direct-allowed") {
@@ -42,7 +45,7 @@ export function validateChangePolicies(
 
     // Rule 2: Internal visibility with direct-allowed
     if (
-      entry.schema["x-weaver"]?.visibility === "internal" &&
+      schema["x-weaver"]?.visibility === "internal" &&
       policy === "direct-allowed"
     ) {
       violations.push({
@@ -56,7 +59,7 @@ export function validateChangePolicies(
 
     // Rule 3: Restart-required reload behavior with direct-allowed
     if (
-      entry.schema["x-weaver"]?.reloadBehavior === "restart-required" &&
+      schema["x-weaver"]?.reloadBehavior === "restart-required" &&
       policy === "direct-allowed"
     ) {
       violations.push({
@@ -70,8 +73,8 @@ export function validateChangePolicies(
 
     // Rule 4: Sensitive keys must not have public visibility
     if (
-      entry.schema["x-weaver"]?.sensitive === true &&
-      entry.schema["x-weaver"]?.visibility === "public"
+      schema["x-weaver"]?.sensitive === true &&
+      schema["x-weaver"]?.visibility === "public"
     ) {
       violations.push({
         key,

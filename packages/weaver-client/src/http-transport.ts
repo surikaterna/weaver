@@ -3,9 +3,7 @@ import { formatScopePath } from "@weaver-conf/config-types";
 import {
   fetchRegisteredSchemas,
   patchRegisteredPath as patchRegisteredPathRequest,
-  postFragmentSchemaRegistration,
   postSchemaRegistration,
-  postServiceSchemaRegistration,
   putRegisteredObject,
   validateRegisteredEffective as validateRegisteredEffectiveRequest,
 } from "./http-registered-transport";
@@ -295,14 +293,6 @@ export function createHttpTransport(
 
     async registerSchema(requestBody) {
       return postSchemaRegistration(registeredContext, requestBody);
-    },
-
-    async registerServiceSchema(requestBody) {
-      return postServiceSchemaRegistration(registeredContext, requestBody);
-    },
-
-    async registerFragmentSchema(requestBody) {
-      return postFragmentSchemaRegistration(registeredContext, requestBody);
     },
 
     async setRegisteredObject(anchorPath, value, opts?) {

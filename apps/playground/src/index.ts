@@ -167,16 +167,17 @@ async function main() {
   // ─── 7. Schema Registration ────────────────────────────────
   section("7. Schema Registration");
 
-  const metricsDef = defineNamespace("metrics", { enabled: z.boolean() });
-  const regResult = await client.registerNamespaces([metricsDef]);
-
-  // Transport may not support registerSchema — in that case it skips
-  const registered =
-    regResult.registered.length > 0 || regResult.skipped.length > 0;
-  assert(
-    registered,
-    `registerNamespaces completed (registered=${regResult.registered.length}, skipped=${regResult.skipped.length})`,
-  );
+  const regResult = await client.registerSchema({
+    serviceId: "metrics",
+    environment: "default",
+    owner: { name: "metrics", contact: "metrics@example.com" },
+    schema: {
+      type: "object",
+      properties: { enabled: { type: "boolean" } },
+    },
+    fragmentSlots: [],
+  });
+  assert(regResult.success, "path-first service schema registered");
 
   // ─── 8. Server Auth (optional gate) ───────────────────────
   section("8. Server Auth (optional gate)");

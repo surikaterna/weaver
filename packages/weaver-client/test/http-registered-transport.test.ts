@@ -57,7 +57,7 @@ const operations: readonly OperationCase[] = [
     data: successfulRegistration,
     expected: successfulRegistration,
     run: (transport) =>
-      requireResult(transport.registerServiceSchema?.(serviceRequest)),
+      requireResult(transport.registerSchema?.(serviceRequest)),
   },
   {
     name: "fragment registration",
@@ -65,7 +65,7 @@ const operations: readonly OperationCase[] = [
     data: successfulRegistration,
     expected: successfulRegistration,
     run: (transport) =>
-      requireResult(transport.registerFragmentSchema?.(fragmentRequest)),
+      requireResult(transport.registerSchema?.(fragmentRequest)),
   },
   {
     name: "registered object write",
@@ -383,12 +383,12 @@ describe("registered HTTP transport failures", () => {
     {
       name: "service registration",
       run: (transport: HttpTransport) =>
-        requireResult(transport.registerServiceSchema?.(serviceRequest)),
+        requireResult(transport.registerSchema?.(serviceRequest)),
     },
     {
       name: "fragment registration",
       run: (transport: HttpTransport) =>
-        requireResult(transport.registerFragmentSchema?.(fragmentRequest)),
+        requireResult(transport.registerSchema?.(fragmentRequest)),
     },
   ])("preserves $name Weaver error codes", async (operation) => {
     const mock = sequenceFetch([errorResponse(409, "SCHEMA_CONFLICT")]);

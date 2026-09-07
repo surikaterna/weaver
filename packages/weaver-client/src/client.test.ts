@@ -121,9 +121,9 @@ describe("WeaverClient", () => {
     expect(calls).toEqual(["/checkout", "/checkout/db/host", "/checkout"]);
   });
 
-  it("path-first registration methods return canonical metadata", async () => {
+  it("path-first registration returns canonical metadata", async () => {
     const transport = createLocalTransport({ snapshot: makeSnapshot() });
-    transport.registerServiceSchema = async (request) => ({
+    transport.registerSchema = async (request) => ({
       success: true,
       isNewSchema: true,
       hasBreakingChanges: false,
@@ -131,12 +131,13 @@ describe("WeaverClient", () => {
         serviceId: request.serviceId,
         servicePath: `/${request.serviceId}`,
         environment: request.environment,
-        providerId: request.serviceId,
+        providerId:
+          "providerId" in request ? request.providerId : request.serviceId,
         owner: request.owner,
       },
     });
     const client = await createWeaverClient({ transport });
-    const response = await client.registerServiceSchema({
+    const response = await client.registerSchema({
       serviceId: "checkout",
       environment: "default",
       owner: { name: "Checkout", contact: "checkout@example.com" },

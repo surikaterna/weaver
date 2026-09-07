@@ -1,20 +1,18 @@
-import { createSchemaRegistry } from "@weaver-conf/config-engine";
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 
-export const schemaRegistry = createSchemaRegistry();
-
-// Register UI namespace schemas
-schemaRegistry.register({
-  ownerId: "demo",
-  namespace: "app.ui",
-  properties: {
-    theme: {
+const schemas = new Map<string, ConfigurationPropertySchema>([
+  [
+    "app.ui.theme",
+    {
       type: "string",
       description: "UI theme preference",
       enum: ["light", "dark", "system"],
       "x-weaver": { changePolicy: "direct-allowed", visibility: "public" },
     },
-    language: {
+  ],
+  [
+    "app.ui.language",
+    {
       type: "string",
       description: "Interface language — locked at tenant",
       "x-weaver": {
@@ -23,19 +21,28 @@ schemaRegistry.register({
         visibility: "public",
       },
     },
-    "sidebar.collapsed": {
+  ],
+  [
+    "app.ui.sidebar.collapsed",
+    {
       type: "boolean",
       description: "Sidebar collapsed state",
       "x-weaver": { changePolicy: "direct-allowed", visibility: "public" },
     },
-    "font.size": {
+  ],
+  [
+    "app.ui.font.size",
+    {
       type: "number",
       description: "Font size in pixels",
       minimum: 8,
       maximum: 32,
       "x-weaver": { changePolicy: "direct-allowed", visibility: "public" },
     },
-    "font.family": {
+  ],
+  [
+    "app.ui.font.family",
+    {
       type: "string",
       description: "Font family — platform locked",
       "x-weaver": {
@@ -44,15 +51,10 @@ schemaRegistry.register({
         visibility: "admin",
       },
     },
-  },
-});
-
-// Register feature namespace schemas
-schemaRegistry.register({
-  ownerId: "demo",
-  namespace: "app.feature",
-  properties: {
-    "analytics.enabled": {
+  ],
+  [
+    "app.feature.analytics.enabled",
+    {
       type: "boolean",
       description: "Analytics toggle — requires staging",
       "x-weaver": {
@@ -61,26 +63,27 @@ schemaRegistry.register({
         visibility: "admin",
       },
     },
-    "notifications.enabled": {
+  ],
+  [
+    "app.feature.notifications.enabled",
+    {
       type: "boolean",
       description: "Notification toggle",
       "x-weaver": { changePolicy: "direct-allowed", visibility: "public" },
     },
-    "notifications.frequency": {
+  ],
+  [
+    "app.feature.notifications.frequency",
+    {
       type: "string",
       description: "Notification frequency",
       enum: ["realtime", "hourly", "daily", "weekly"],
       "x-weaver": { changePolicy: "direct-allowed", visibility: "public" },
     },
-  },
-});
-
-// Register network namespace schemas
-schemaRegistry.register({
-  ownerId: "demo",
-  namespace: "app.network",
-  properties: {
-    "timeout.ms": {
+  ],
+  [
+    "app.network.timeout.ms",
+    {
       type: "number",
       description: "Timeout — emergency only",
       minimum: 1000,
@@ -91,7 +94,10 @@ schemaRegistry.register({
         visibility: "internal",
       },
     },
-    "retry.count": {
+  ],
+  [
+    "app.network.retry.count",
+    {
       type: "number",
       description: "Retry count — pipeline locked",
       minimum: 0,
@@ -102,8 +108,8 @@ schemaRegistry.register({
         visibility: "internal",
       },
     },
-  },
-});
+  ],
+]);
 
 /** Schema metadata with weaver extensions flattened for UI convenience. */
 export interface DemoSchemaInfo {
@@ -114,14 +120,13 @@ export interface DemoSchemaInfo {
 }
 
 export function getSchemaForKey(key: string): DemoSchemaInfo | undefined {
-  const entry = schemaRegistry.getSchema(key);
-  if (!entry) return undefined;
-  const s = entry.schema;
+  const schema = schemas.get(key);
+  if (!schema) return undefined;
   return {
-    description: s.description,
-    changePolicy: s["x-weaver"]?.changePolicy,
-    maxOverrideLayer: s["x-weaver"]?.maxOverrideLayer,
-    visibility: s["x-weaver"]?.visibility,
+    description: schema.description,
+    changePolicy: schema["x-weaver"]?.changePolicy,
+    maxOverrideLayer: schema["x-weaver"]?.maxOverrideLayer,
+    visibility: schema["x-weaver"]?.visibility,
   };
 }
 
@@ -129,5 +134,5 @@ export function getSchemaForKey(key: string): DemoSchemaInfo | undefined {
 export function getFullSchemaForKey(
   key: string,
 ): ConfigurationPropertySchema | undefined {
-  return schemaRegistry.getSchema(key)?.schema;
+  return schemas.get(key);
 }

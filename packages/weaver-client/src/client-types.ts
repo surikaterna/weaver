@@ -1,10 +1,9 @@
 import type {
-  FragmentSchemaRegistrationRequest,
   RegisteredEffectiveValidationResponse,
+  SchemaRegistrationRequest,
   SchemaRegistrationResponse,
   ScopeDefinition,
   ScopeInstance,
-  ServiceSchemaRegistrationRequest,
 } from "@weaver-conf/config-types";
 import type { ZodRawShape } from "zod";
 import type {
@@ -14,7 +13,6 @@ import type {
   UntypedNamespaceClient,
 } from "./namespace";
 import type { WeaverClientPersistence } from "./persistence";
-import type { SchemaRegistrationResult } from "./registration";
 import type { ValidationResult } from "./schema-registry";
 import type { ScopeLoadingMode } from "./scope-manager";
 import type { StalenessConfig } from "./staleness";
@@ -134,14 +132,8 @@ export interface WeaverClient {
   namespace(prefix: string): UntypedNamespaceClient;
 
   // ── Registration ──
-  registerNamespaces(
-    definitions: ReadonlyArray<NamespaceDefinition>,
-  ): Promise<SchemaRegistrationResult>;
-  registerServiceSchema(
-    request: ServiceSchemaRegistrationRequest,
-  ): Promise<SchemaRegistrationResponse>;
-  registerFragmentSchema(
-    request: FragmentSchemaRegistrationRequest,
+  registerSchema(
+    request: SchemaRegistrationRequest,
   ): Promise<SchemaRegistrationResponse>;
 
   // ── Instances ──

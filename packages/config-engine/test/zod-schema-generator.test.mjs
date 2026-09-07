@@ -5,8 +5,8 @@ import {
 } from "../dist/zod-schema-generator.js";
 
 /** @param {object} schema */
-function entry(ownerId, schema) {
-  return { ownerId, fullyQualifiedKey: "test.key", schema };
+function entry(_source, schema) {
+  return { schema };
 }
 
 describe("sanitizeKeyToIdentifier", () => {
@@ -130,8 +130,6 @@ describe("generateZodSchemaSource", () => {
   it("produces valid header with import", () => {
     const schemas = new Map();
     schemas.set("ghost.shell.theme", {
-      ownerId: "ghost.shell",
-      fullyQualifiedKey: "ghost.shell.theme",
       schema: { type: "string", default: "dark" },
     });
 
@@ -142,13 +140,9 @@ describe("generateZodSchemaSource", () => {
   it("produces configSchemas record", () => {
     const schemas = new Map();
     schemas.set("ghost.shell.theme", {
-      ownerId: "ghost.shell",
-      fullyQualifiedKey: "ghost.shell.theme",
       schema: { type: "string", default: "dark" },
     });
     schemas.set("ghost.map.zoom", {
-      ownerId: "ghost.map",
-      fullyQualifiedKey: "ghost.map.zoom",
       schema: { type: "number", minimum: 1, maximum: 20 },
     });
 
@@ -162,8 +156,6 @@ describe("generateZodSchemaSource", () => {
   it("produces individual exports with correct identifiers", () => {
     const schemas = new Map();
     schemas.set("ghost.shell.theme", {
-      ownerId: "ghost.shell",
-      fullyQualifiedKey: "ghost.shell.theme",
       schema: { type: "string", default: "dark" },
     });
 

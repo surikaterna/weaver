@@ -1,8 +1,7 @@
 import { validateChangePolicies } from "../dist/index.js";
 
-/** Helper to create a ComposedSchemaEntry */
 function entry(key, schema) {
-  return [key, { ownerId: "test-plugin", fullyQualifiedKey: key, schema }];
+  return [key, schema];
 }
 
 test("security-sensitive key with direct-allowed produces error", () => {

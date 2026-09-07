@@ -145,7 +145,7 @@ export interface WeaverClient {
   withScope(scope: ScopeInstance[]): ScopedClient;
   instance(basePath: string, instanceId: string): InstanceClient;
 
-  registerNamespaces(defs: NamespaceDefinition<z.ZodRawShape>[]): Promise<void>;
+  registerSchema(request: SchemaRegistrationRequest): Promise<SchemaRegistrationResponse>;
   isSensitive(key: string): boolean;
 
   onMode(handler: (mode: "live" | "cached" | "degraded") => void): () => void;
@@ -363,7 +363,7 @@ await client.set("app.ui.theme", "light");
 ### Risks
 
 - Zod version coupling between client and server packages
-- Schema drift between local `defineNamespace` and server-persisted schemas (mitigated by `registerNamespaces()` + server-side validation)
+- Schema drift between local `defineNamespace` validation and server-persisted schemas (mitigated by explicit path-first service/fragment registration and server-side validation)
 
 ## Related
 

@@ -1,12 +1,10 @@
 import type {
   ConfigurationPropertySchema,
-  FragmentSchemaRegistrationRequest,
   RegisteredEffectiveValidationResponse,
   SchemaRegistrationRequest,
   SchemaRegistrationResponse,
   ScopeDefinition,
   ScopeInstance,
-  ServiceSchemaRegistrationRequest,
   WriteResult,
 } from "@weaver-conf/config-types";
 import type {
@@ -70,12 +68,6 @@ export interface WeaverTransport {
   fetchSchemas?(): Promise<Record<string, ConfigurationPropertySchema>>;
   registerSchema?(
     request: SchemaRegistrationRequest,
-  ): Promise<SchemaRegistrationResponse>;
-  registerServiceSchema?(
-    request: ServiceSchemaRegistrationRequest,
-  ): Promise<SchemaRegistrationResponse>;
-  registerFragmentSchema?(
-    request: FragmentSchemaRegistrationRequest,
   ): Promise<SchemaRegistrationResponse>;
   setRegisteredObject?(
     anchorPath: string,

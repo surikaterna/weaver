@@ -1,6 +1,5 @@
 import {
   type ConfigurationPropertySchema,
-  type FragmentSchemaRegistrationRequest,
   type RegisteredEffectiveValidationResponse,
   registeredEffectiveValidationResponseSchema,
   registeredObjectWriteResponseSchema,
@@ -9,7 +8,6 @@ import {
   type SchemaRegistrationRequest,
   type SchemaRegistrationResponse,
   type ScopeInstance,
-  type ServiceSchemaRegistrationRequest,
   schemaRegistrationResponseSchema,
 } from "@weaver-conf/config-types";
 import type { z } from "zod";
@@ -56,20 +54,6 @@ export async function postSchemaRegistration(
     requestBody,
     { mapServerError: failedRegistration },
   );
-}
-
-export function postServiceSchemaRegistration(
-  context: HttpRegisteredContext,
-  requestBody: ServiceSchemaRegistrationRequest,
-): Promise<SchemaRegistrationResponse> {
-  return postSchemaRegistration(context, requestBody);
-}
-
-export function postFragmentSchemaRegistration(
-  context: HttpRegisteredContext,
-  requestBody: FragmentSchemaRegistrationRequest,
-): Promise<SchemaRegistrationResponse> {
-  return postSchemaRegistration(context, requestBody);
 }
 
 export function putRegisteredObject(

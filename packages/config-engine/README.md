@@ -53,23 +53,6 @@ inspection.effectiveLayer; // "tenant"
 inspection.layerValues;    // { core: "light", tenant: "dark" }
 ```
 
-### Schema registry
-
-```typescript
-import { createSchemaRegistry } from "@weaver-conf/config-engine";
-
-const registry = createSchemaRegistry();
-registry.register({
-  ownerId: "my-plugin",
-  namespace: "app.myPlugin",
-  properties: {
-    "display.maxItems": { type: "number", defaultValue: 25 },
-  },
-});
-
-registry.getSchema("app.myPlugin.display.maxItems");
-```
-
 ### Namespace utilities
 
 ```typescript
@@ -87,8 +70,6 @@ deriveNamespace("@weaver-conf/vessel-view-plugin"); // "weaver.vesselView"
 | `deepMerge(base, override)` | Deep merge two config objects |
 | `resolveConfiguration(stack)` | Resolve a layer stack into merged entries + provenance |
 | `inspectKey(stack, key)` | Inspect a key's value across all layers |
-| `createSchemaRegistry()` | Create an incremental schema registry |
-| `composeConfigurationSchemas(declarations)` | One-shot schema composition |
 | `qualifyKey(namespace, relativeKey)` | Join namespace + key with dot separator |
 | `validateKeyFormat(key)` | Validate 3-5 segment camelCase key format |
 | `deriveNamespace(pluginId)` | Derive namespace from package/plugin ID |

@@ -16,7 +16,6 @@ import type {
   TypedNamespaceClient,
   UntypedNamespaceClient,
 } from "./namespace";
-import { registerNamespaces } from "./registration";
 import type { ValidationResult } from "./schema-registry";
 import {
   type ClientSchemaRegistry,
@@ -366,22 +365,11 @@ export async function createWeaverClient(
 
     namespace: namespaceClient,
 
-    async registerNamespaces(definitions: ReadonlyArray<NamespaceDefinition>) {
-      return registerNamespaces(definitions, transport);
-    },
-
-    async registerServiceSchema(request) {
-      const method =
-        transport.registerServiceSchema ?? transport.registerSchema;
-      if (!method) return unsupportedRegistration("registerServiceSchema");
-      return method(request);
-    },
-
-    async registerFragmentSchema(request) {
-      const method =
-        transport.registerFragmentSchema ?? transport.registerSchema;
-      if (!method) return unsupportedRegistration("registerFragmentSchema");
-      return method(request);
+    async registerSchema(request) {
+      if (!transport.registerSchema) {
+        return unsupportedRegistration("registerSchema");
+      }
+      return transport.registerSchema(request);
     },
   };
 

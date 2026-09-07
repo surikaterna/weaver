@@ -84,7 +84,7 @@ Write authorization enforcement is important but secondary. The model should rec
 | Schema registry anchoring | Client and engine registries largely compose property schemas by fully qualified key or namespace prefix. Server registration persists declarations by `serviceId:environment`. | Registry entries are not fully anchored to concrete object paths or fragment slots. |
 | Fragment model | Existing helper names and comments derive namespace values from plugin IDs. | The model over-specializes around plugins instead of generic fragments. |
 | Server validation | Server registration validates schema declarations, but config writes are not consistently validated as full objects against registered schemas. | Invalid persisted objects can pass through server-side write paths. |
-| Transport consistency | HTTP config routes are key/path-write oriented; SCOMP uses `registerSchema(input.namespace)` and `set(input.key)`; client registration APIs use namespace language. | HTTP, SCOMP, and client contracts expose different concepts for the same registration model. |
+| Transport consistency | Earlier HTTP, SCOMP, and client contracts exposed different registration concepts. | Resolved by the path-first service/fragment registration contracts shared across transports. |
 | Persistence shape | Some providers write flattened keys while others can persist nested object values. | Nested object schemas can mismatch provider persistence semantics. |
 | Layer semantics | Sparse overrides are natural for layered config, but object schema validation requires whole-object context. | Weaver needs explicit rules for validating partial per-layer objects and effective merged objects. |
 

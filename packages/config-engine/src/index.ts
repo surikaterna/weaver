@@ -48,17 +48,6 @@ export {
   getSchemaPropertyType,
   schemasEqual,
 } from "./schema-diff";
-// schema-registry.ts — Schema aggregation
-export type {
-  ComposedSchemaEntry,
-  ComposeResult,
-  ConfigurationSchemaDeclaration,
-  ConfigurationSchemaRegistry,
-  RegisterSchemaResult,
-  SchemaCompositionError,
-  UnregisterSchemaResult,
-} from "./schema-registry";
-export { createSchemaRegistry } from "./schema-registry";
 export type {
   SchemaValidationError,
   SchemaValidationErrorCode,
