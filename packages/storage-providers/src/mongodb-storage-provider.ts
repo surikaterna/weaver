@@ -17,6 +17,11 @@ import type {
 } from "@weaver-conf/config-types";
 import type { ChangeStream, Collection } from "mongodb";
 import { z } from "zod";
+import {
+  canonicalMongoPath,
+  isSameMongoPathOrDescendant,
+  mongoPathCandidatePattern,
+} from "./mongodb-path-identity.js";
 
 const MAX_BACKOFF_MS = 30_000;
 const BASE_BACKOFF_MS = 1_000;
@@ -39,10 +44,10 @@ const configDocumentSchema = z.object({
   value: z.unknown(),
   updatedAt: z.string(),
 });
+const storedKeyDocumentSchema = z.object({ key: z.string() });
 
 type ConfigDocument = z.infer<typeof configDocumentSchema>;
 
-/** @see {@link createMongoDBStorageProvider} — prefer the factory function for consistency */
 class MongoDBStorageProvider implements ConfigurationStorageProvider {
   readonly id: string;
   readonly layer: string;
@@ -299,14 +304,21 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
     includeCanonicalPath: boolean,
   ): Promise<string[]> {
     const rawDocs = await this.collection
-      .find({ layer, environment: this.environment })
+      .find(
+        {
+          layer,
+          environment: this.environment,
+          key: { $regex: mongoPathCandidatePattern(key) },
+        },
+        { projection: { _id: 0, key: 1 } },
+      )
       .maxTimeMS(this.timeoutMs)
       .toArray();
     const targetSegments = parsePath(key);
-    const docs = z.array(configDocumentSchema).parse(rawDocs);
+    const docs = z.array(storedKeyDocumentSchema).parse(rawDocs);
     return docs
       .filter((doc) => {
-        if (!isSamePathOrDescendant(parsePath(doc.key), targetSegments)) {
+        if (!isSameMongoPathOrDescendant(parsePath(doc.key), targetSegments)) {
           return false;
         }
         return includeCanonicalPath || doc.key !== key;
@@ -358,20 +370,21 @@ function selectEffectiveDocuments(
   const rootIdentities = new Set(
     docs
       .filter((doc) => parsePath(doc.key).length === 1)
-      .map((doc) => canonicalPath(doc.key)),
+      .map((doc) => canonicalMongoPath(doc.key)),
   );
   const canonicalRootIdentities = new Set(
     docs
       .filter(
         (doc) =>
-          parsePath(doc.key).length === 1 && doc.key === canonicalPath(doc.key),
+          parsePath(doc.key).length === 1 &&
+          doc.key === canonicalMongoPath(doc.key),
       )
       .map((doc) => doc.key),
   );
   const effectiveDocs = docs.filter((doc) => {
     const segments = parsePath(doc.key);
     if (segments.length === 1) {
-      const identity = canonicalPath(doc.key);
+      const identity = canonicalMongoPath(doc.key);
       return !canonicalRootIdentities.has(identity) || doc.key === identity;
     }
     const rootKey = buildPath([getRootSegment(segments)]);
@@ -380,19 +393,6 @@ function selectEffectiveDocuments(
   return sortConfigDocuments(effectiveDocs);
 }
 
-function canonicalPath(path: string): string {
-  return buildPath(parsePath(path));
-}
-
-function isSamePathOrDescendant(
-  candidate: readonly string[],
-  target: readonly string[],
-): boolean {
-  if (candidate.length < target.length) return false;
-  return target.every((segment, index) => candidate[index] === segment);
-}
-
-/** Creates a MongoDB-backed storage provider instance. */
 export function createMongoDBStorageProvider(
   options: MongoDBStorageProviderOptions,
 ): ConfigurationStorageProvider {

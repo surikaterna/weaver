@@ -5,10 +5,15 @@ function createMockCollection() {
 
   return {
     docs,
-    find(filter) {
-      const results = docs.filter(
-        (d) => d.layer === filter.layer && d.environment === filter.environment,
-      );
+    find(filter, options) {
+      const results = docs
+        .filter(
+          (d) =>
+            d.layer === filter.layer &&
+            d.environment === filter.environment &&
+            (filter.key === undefined || new RegExp(filter.key.$regex).test(d.key)),
+        )
+        .map((doc) => options?.projection ? { key: doc.key } : doc);
       return {
         maxTimeMS() { return this; },
         toArray: () => Promise.resolve(results),
@@ -132,6 +137,30 @@ test("write() succeeds when stale descendant cleanup fails", async () => {
     limits: { seats: 10 },
   });
   expect(col.docs.some((doc) => doc.key === "billing.plan")).toBe(true);
+});
+
+test("cleanup discovers candidates with a narrowed key-only query", async () => {
+  const col = createMockCollection();
+  const queries = [];
+  const find = col.find;
+  col.find = (filter, options) => {
+    queries.push({ filter, options });
+    return find(filter, options);
+  };
+  const provider = createMongoDBStorageProvider({
+    id: "mongo-user",
+    layer: "user",
+    collection: col,
+    environment: "prod",
+  });
+
+  expect((await provider.write("billing", { plan: "pro" })).success).toBe(true);
+  expect(queries).toHaveLength(1);
+  const cleanupQuery = queries.at(-1);
+  expect(cleanupQuery.filter.key.$regex).toMatch(/^\^/);
+  expect(cleanupQuery.filter.key.$regex).toContain("billing");
+  expect(cleanupQuery.options).toEqual({ projection: { _id: 0, key: 1 } });
+  expect(cleanupQuery.filter).not.toEqual({ layer: "user", environment: "prod" });
 });
 
 test("load() hydrates legacy dotted documents as nested objects", async () => {
