@@ -8,7 +8,6 @@ import {
   deepSet,
 } from "@weaver-conf/config-engine";
 import type {
-  ConfigurationInspection,
   ConfigurationStorageProvider,
   ScopeInstance,
   WriteResult,
@@ -33,6 +32,10 @@ import {
   isProtectedConfigPath,
   protectedConfigMutationError,
 } from "./protected-config-paths";
+import {
+  type ConfigInspectionLayer,
+  inspectPublicConfig,
+} from "./public-config-inspection";
 import { createResolutionPipeline } from "./resolution-pipeline";
 import {
   buildScopePathString,
@@ -377,42 +380,15 @@ export async function createWeaverConfigService(
       return {};
     },
 
-    async inspect(key: string): Promise<ConfigurationInspection<unknown>> {
-      if (isProtectedConfigPath(key)) {
-        return {
-          key,
-          effectiveValue: undefined,
-          effectiveLayer: undefined,
-          layerValues: {},
-        };
-      }
-      const layerValues: Record<string, unknown> = {};
-      let effectiveValue: unknown;
-      let effectiveLayer: string | undefined;
-
-      for (const provider of providers) {
-        const entries = filterProtectedConfigEntries(
-          layerData.get(provider.id) ?? {},
-        );
-        const value = deepGet(entries, key);
-        if (value !== undefined) {
-          layerValues[provider.layer] = value;
-          effectiveValue = value;
-          effectiveLayer = provider.layer;
-        }
-      }
-
+    async inspect(key: string) {
+      const layers: ConfigInspectionLayer[] = providers.map((provider) => ({
+        layer: provider.layer,
+        entries: layerData.get(provider.id) ?? {},
+      }));
       for (const [layer, entries] of dynamicScopeEntries) {
-        const value = deepGet(entries, key);
-        if (value !== undefined) {
-          const normalizedLayer = normalizeScopeLayer(layer);
-          layerValues[normalizedLayer] = value;
-          effectiveValue = value;
-          effectiveLayer = normalizedLayer;
-        }
+        layers.push({ layer: normalizeScopeLayer(layer), entries });
       }
-
-      return { key, effectiveValue, effectiveLayer, layerValues };
+      return inspectPublicConfig(key, layers);
     },
 
     async reloadProvider(providerId: string): Promise<void> {
