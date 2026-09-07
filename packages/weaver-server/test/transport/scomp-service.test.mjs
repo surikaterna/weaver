@@ -12,16 +12,22 @@ function route(name) {
 
 function createTestProvider(id, layer, entries, writable = true) {
   let data = JSON.parse(JSON.stringify(entries));
+  const writes = [];
+  const removes = [];
   return {
     id,
     layer,
     writable,
+    writes,
+    removes,
     async load() { return { entries: JSON.parse(JSON.stringify(data)) }; },
     async write(key, value) {
+      writes.push({ key, value });
       deepSet(data, key, value);
       return { success: true };
     },
     async remove(key) {
+      removes.push(key);
       deepRemove(data, key);
       return { success: true };
     },
@@ -35,6 +41,45 @@ function buildScompDeps(configService) {
 }
 
 describe("createWeaverScompService", () => {
+  test("normal SCOMP writes cannot bypass a bound registered schema", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      checkout: { mode: "prod" },
+    });
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "default" });
+    const deps = buildScompDeps(svc);
+    await deps.schemaRegistry.register({
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema: {
+        type: "object",
+        required: ["mode"],
+        properties: { mode: { type: "string", enum: ["prod", "test"] } },
+        additionalProperties: false,
+      },
+      fragmentSlots: [],
+    });
+    const service = createWeaverScompService(deps);
+
+    const direct = await service.router[route("set")].handler({
+      layer: "platform",
+      key: "checkout.mode",
+      value: "invalid",
+    });
+    const batch = await service.router[route("setMany")].handler({
+      layer: "platform",
+      entries: { "safe.value": true, "checkout.mode": "invalid" },
+    });
+    const remove = await service.router[route("remove")].handler({
+      layer: "platform",
+      key: "checkout.mode",
+    });
+
+    expect([direct.success, batch.success, remove.success]).toEqual([false, false, false]);
+    expect(provider.writes).toEqual([]);
+    expect(provider.removes).toEqual([]);
+  });
+
   test("returns a ServiceDefinition with name and router", async () => {
     const provider = createTestProvider("p1", "platform", { app: { name: "test" } });
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });

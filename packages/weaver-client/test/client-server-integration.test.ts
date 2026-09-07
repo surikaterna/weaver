@@ -114,4 +114,29 @@ describe("client↔server integration (local transport round-trip)", () => {
     expect(result.success).toBe(true);
     expect(result.revision).toBeTruthy();
   });
+
+  it("propagates schema rejections for every client write operation", async () => {
+    const rejected = {
+      success: false,
+      error: {
+        code: "VALIDATION_ERROR" as const,
+        message: "registered schema",
+      },
+    };
+    const set = vi.spyOn(transport, "set").mockResolvedValue(rejected);
+    const setMany = vi.spyOn(transport, "setMany").mockResolvedValue(rejected);
+    const remove = vi.spyOn(transport, "remove").mockResolvedValue(rejected);
+
+    const results = await Promise.all([
+      client.set("checkout.mode", "invalid"),
+      client.setMany({ "checkout.mode": "invalid" }),
+      client.remove("checkout.mode"),
+    ]);
+
+    expect(results.every((result) => !result.success)).toBe(true);
+    expect(set).toHaveBeenCalledOnce();
+    expect(setMany).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledOnce();
+    expect(client.get("checkout.mode")).toBe(undefined);
+  });
 });

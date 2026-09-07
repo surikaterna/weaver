@@ -35,6 +35,7 @@ import {
   type SchemaEntry,
   schemaKey,
 } from "./schema-registry-state";
+import { bindSchemaRegistry } from "./schema-write-boundary";
 
 export type SchemaRegistrationRequest = PathSchemaRegistrationRequest;
 
@@ -144,10 +145,10 @@ function persistenceWriter(
 }
 
 export function createSchemaRegistry(
-  _options: SchemaRegistryOptions,
+  options: SchemaRegistryOptions,
 ): SchemaRegistry {
   const state = createEmptyState();
-  return {
+  const registry: SchemaRegistry = {
     async register(request, context) {
       const evaluation = evaluateRegistration(state, request, context);
       applyEvaluation(state, evaluation);
@@ -173,6 +174,8 @@ export function createSchemaRegistry(
       return listSchemas(state);
     },
   };
+  bindRegistry(options.configService, registry, () => state.schemas.values());
+  return registry;
 }
 
 export async function createPersistentSchemaRegistry(
@@ -186,7 +189,7 @@ export async function createPersistentSchemaRegistry(
   );
   const persist = createSchemaPersistenceWriter(options, layer, key);
 
-  return {
+  const registry: SchemaRegistry = {
     async register(request, context) {
       const environment = request.environment || defaultEnvironment || "";
       const normalizedRequest = { ...request, environment };
@@ -224,6 +227,37 @@ export async function createPersistentSchemaRegistry(
       return listSchemas(state);
     },
   };
+  bindRegistry(options.configService, registry, () => state.schemas.values());
+  return registry;
+}
+
+function bindRegistry(
+  service: WeaverConfigService,
+  registry: SchemaRegistry,
+  entries: () => Iterable<SchemaEntry>,
+): void {
+  bindSchemaRegistry(service, registry, (path, environment) =>
+    findAffectedAnchors(entries(), path, environment),
+  );
+}
+
+function findAffectedAnchors(
+  entries: Iterable<SchemaEntry>,
+  path: string,
+  environment: string,
+): RegisteredSchemaAnchor[] {
+  const ancestors: RegisteredSchemaAnchor[] = [];
+  const descendants: RegisteredSchemaAnchor[] = [];
+  for (const entry of entries) {
+    const anchor = registeredAnchorFromEntry(entry);
+    if (anchor.environment !== environment) continue;
+    if (isAnchorPathMatch(anchor.path, path)) ancestors.push(anchor);
+    else if (isAnchorPathMatch(path, anchor.path)) descendants.push(anchor);
+  }
+  const deepest = ancestors.sort(
+    (left, right) => right.path.length - left.path.length,
+  )[0];
+  return [...(deepest ? [deepest] : []), ...descendants];
 }
 
 function findRegisteredAnchor(

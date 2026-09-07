@@ -49,6 +49,43 @@ function mockConfigService(): WeaverConfigService {
 }
 
 describe("REST body validation", () => {
+  it("normal config routes cannot bypass a bound registered schema", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: { checkout: { db: { host: "db", port: 5432 } } },
+    });
+    const write = vi.spyOn(provider, "write");
+    const configService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+    });
+    const schemaRegistry = createSchemaRegistry({ configService });
+    await schemaRegistry.register({
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema: settingsSchema,
+      fragmentSlots: [],
+    });
+    const adapter = createRestAdapter({ configService, schemaRegistry });
+
+    const response = await adapter.handleRequest(
+      "PUT",
+      "/v1/config/checkout/db/port",
+      {
+        params: {},
+        query: { layer: "platform" },
+        body: { value: "invalid" },
+        headers: {},
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(write).not.toHaveBeenCalled();
+    expect(await configService.get("checkout.db.port")).toBe(5432);
+  });
+
   it("does not expose protected metadata through REST reads", async () => {
     const provider = createInMemoryStorageProvider({
       id: "platform",

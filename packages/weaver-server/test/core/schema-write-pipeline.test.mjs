@@ -9,11 +9,13 @@ function clone(value) {
 function createTestProvider(id, layer, entries = {}, writable = true) {
   let data = clone(entries);
   const writes = [];
+  const removes = [];
   return {
     id,
     layer,
     writable,
     writes,
+    removes,
     async load() {
       return { entries: clone(data) };
     },
@@ -25,6 +27,7 @@ function createTestProvider(id, layer, entries = {}, writable = true) {
     },
     async remove(key) {
       if (!writable) return { success: false, error: { code: "READONLY", message: "read-only" } };
+      removes.push(key);
       deepRemove(data, key);
       return { success: true };
     },
@@ -86,6 +89,99 @@ const extensibleServiceSchema = {
 };
 
 describe("schema-registered config writes", () => {
+  test("normal direct and batch writes validate before provider mutation", async () => {
+    const { provider, service } = await makeRegisteredService({
+      billing: { mode: "test", limit: 1 },
+    });
+
+    const direct = await service.set("platform", "billing.mode", "qa");
+    const batch = await service.setMany("platform", {
+      "unregistered.safe": true,
+      "billing.limit": "many",
+    });
+
+    expect(direct.success).toBe(false);
+    expect(batch.success).toBe(false);
+    expect(provider.writes).toEqual([]);
+    expect(await service.get("unregistered.safe")).toBe(undefined);
+  });
+
+  test("creating another registry cannot replace bound enforcement", async () => {
+    const { provider, service } = await makeRegisteredService({
+      billing: { mode: "test" },
+    });
+    createSchemaRegistry({ configService: service });
+
+    const result = await service.set("platform", "billing.mode", "invalid");
+
+    expect(result.success).toBe(false);
+    expect(provider.writes).toEqual([]);
+  });
+
+  test("batch validation uses the combined candidate and valid layer partials remain writable", async () => {
+    const { provider, service } = await makeRegisteredService();
+
+    const result = await service.setMany("platform", {
+      "billing.mode": "prod",
+      "billing.limit": 4,
+    });
+
+    expect(result.success).toBe(true);
+    expect(provider.writes).toHaveLength(2);
+    expect(await service.get("billing")).toEqual({ mode: "prod", limit: 4 });
+  });
+
+  test("removes reject an invalid effective result but permit a valid fallback", async () => {
+    const base = createTestProvider("base", "platform", { billing: { mode: "prod" } });
+    const override = createTestProvider("override", "tenant:acme", {
+      billing: { mode: "test" },
+    });
+    const service = await createWeaverConfigService({
+      providers: [base, override],
+      environment: "test",
+    });
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration(serviceSchema));
+
+    const fallback = await service.remove("tenant:acme", "billing.mode");
+    const invalid = await service.remove("platform", "billing.mode");
+
+    expect(fallback.success).toBe(true);
+    expect(invalid.success).toBe(false);
+    expect(base.removes).toEqual([]);
+    expect(override.removes).toEqual(["billing.mode"]);
+  });
+
+  test("ancestor writes validate contained anchors and descendants use the deepest anchor", async () => {
+    const provider = createTestProvider("p1", "platform", {});
+    const service = await createWeaverConfigService({ providers: [provider], environment: "test" });
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration(extensibleServiceSchema, [{ slotPath: "/plugins", accepts: "object" }]));
+    await registry.register({
+      serviceId: "billing",
+      providerId: "tax",
+      slotPath: "/plugins",
+      environment: "test",
+      owner: owner("tax"),
+      schema: fragmentSchema,
+    });
+
+    const ancestor = await service.set("platform", "billing", {
+      plugins: { tax: { providerEnabled: "yes" } },
+    });
+    const descendant = await service.set(
+      "platform",
+      "billing.plugins.tax.providerEnabled",
+      true,
+    );
+
+    expect(ancestor.success).toBe(false);
+    expect(descendant.success).toBe(true);
+    expect(provider.writes).toEqual([
+      { key: "billing.plugins.tax.providerEnabled", value: true },
+    ]);
+  });
+
   test("object writes at registered service anchors validate partial compatibility", async () => {
     const { provider, registry, service } = await makeRegisteredService();
 
