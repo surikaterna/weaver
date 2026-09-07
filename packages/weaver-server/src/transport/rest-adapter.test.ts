@@ -121,6 +121,56 @@ describe("REST body validation", () => {
     expect(await configService.get("checkout.db.port")).toBe(5432);
   });
 
+  it("maps invalid effective runtime reads to 422 without registry metadata", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {
+        checkout: { db: { host: "db" } },
+        public: { ready: true },
+      },
+    });
+    const configService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+    });
+    const schemaRegistry = createSchemaRegistry({ configService });
+    await schemaRegistry.register({
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Private Owner", contact: "private@example.com" },
+      schema: settingsSchema,
+      fragmentSlots: [],
+    });
+    const adapter = createRestAdapter({ configService, schemaRegistry });
+
+    const snapshot = await adapter.handleRequest("GET", "/v1/config", {
+      params: {},
+      query: {},
+      headers: {},
+    });
+    const registered = await adapter.handleRequest(
+      "GET",
+      "/v1/config/checkout/db/host",
+      { params: {}, query: {}, headers: {} },
+    );
+    const unrelated = await adapter.handleRequest(
+      "GET",
+      "/v1/config/public/ready",
+      { params: {}, query: {}, headers: {} },
+    );
+
+    expect(snapshot.status).toBe(422);
+    expect(registered.status).toBe(422);
+    expect(unrelated.status).toBe(200);
+    expect(JSON.stringify({ snapshot, registered })).toContain(
+      "effective-configuration-invalid",
+    );
+    expect(JSON.stringify({ snapshot, registered })).not.toContain(
+      "private@example.com",
+    );
+  });
+
   it("does not expose protected metadata through REST reads", async () => {
     const provider = createInMemoryStorageProvider({
       id: "platform",

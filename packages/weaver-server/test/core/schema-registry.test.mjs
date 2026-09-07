@@ -217,6 +217,13 @@ describe("SchemaRegistry", () => {
       type: "object",
       properties: { enabled: { type: "boolean" } },
     });
+    await expect(restartedService.get("billing")).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      details: { anchorPath: "/billing" },
+    });
+    const completed = await restartedService.set("custom", "billing.enabled", true);
+    expect(completed.success).toBe(true);
+    expect(await restartedService.get("billing")).toEqual({ enabled: true });
   });
 
   test("internal registry persistence does not emit public config deltas", async () => {

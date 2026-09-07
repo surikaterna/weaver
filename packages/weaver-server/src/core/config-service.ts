@@ -42,6 +42,12 @@ import {
 } from "./public-config-inspection";
 import { createResolutionPipeline } from "./resolution-pipeline";
 import {
+  assertValidRuntimeRead,
+  assertValidRuntimeScopes,
+  canPublishRuntimeDelta,
+  registerSchemaReadHost,
+} from "./schema-read-boundary";
+import {
   normalizeBatchEntries,
   registerSchemaBoundaryHost,
   validateBoundRemove,
@@ -228,9 +234,17 @@ export async function createWeaverConfigService(
   });
 
   function fireDelta(delta: ConfigDelta): void {
+    if (!canPublishRuntimeDelta(service, delta, resolvedEffectiveState)) return;
     for (const handler of deltaHandlers) {
       handler(delta);
     }
+  }
+
+  function resolvedEffectiveState(
+    scopePath?: ScopeInstance[],
+  ): Record<string, unknown> {
+    const state = filterProtectedConfigEntries(getMergedState(scopePath));
+    return pipeline.resolveEntries(state);
   }
 
   const service: WeaverConfigService = {
@@ -261,6 +275,9 @@ export async function createWeaverConfigService(
         : getAllScopes();
       const scopes = filterProtectedConfigScopes(rawScopes);
 
+      assertValidRuntimeRead(service, resolvedEffectiveState(opts?.scopePath));
+      assertValidRuntimeScopes(service, scopes, resolvedEffectiveState);
+
       return {
         entries,
         scopes,
@@ -278,6 +295,8 @@ export async function createWeaverConfigService(
       const state = filterProtectedConfigEntries(
         getMergedState(opts?.scopePath),
       );
+      const resolvedState = resolvedEffectiveState(opts?.scopePath);
+      assertValidRuntimeRead(service, resolvedState, key);
       const rawValue = deepGet(state, key);
       return pipeline.resolveValue(key, rawValue);
     },
@@ -291,6 +310,8 @@ export async function createWeaverConfigService(
       const state = filterProtectedConfigEntries(
         getMergedState(opts?.scopePath),
       );
+      const resolvedState = resolvedEffectiveState(opts?.scopePath);
+      assertValidRuntimeRead(service, resolvedState, prefix);
       const value = deepGet(state, prefix);
       if (
         value !== null &&
@@ -695,14 +716,13 @@ export async function createWeaverConfigService(
     },
 
     async validateRegisteredEffective(path, opts) {
-      const getOptions = opts.scopePath
-        ? { scopePath: opts.scopePath }
-        : undefined;
+      await warmScopeLayers(opts.scopePath);
+      const effectiveState = resolvedEffectiveState(opts.scopePath);
       return validateRegisteredEffectiveConfiguration(
         path,
         opts,
         environment,
-        (key) => service.get(key, getOptions),
+        async (key) => deepGet(effectiveState, key),
       );
     },
   };
@@ -715,6 +735,7 @@ export async function createWeaverConfigService(
       service.remove(layer, key, withInternalWrite(opts)),
   });
   registerSchemaBoundaryHost(service, environment);
+  registerSchemaReadHost(service, environment);
 
   return service;
 }

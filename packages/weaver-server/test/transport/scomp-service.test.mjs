@@ -176,6 +176,45 @@ describe("createWeaverScompService", () => {
     expect(result.revision).toBeTruthy();
   });
 
+  test("runtime read handlers reject incomplete registered configuration", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      checkout: { limit: 10 },
+      public: { ready: true },
+    });
+    const svc = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+    });
+    const deps = buildScompDeps(svc);
+    await deps.schemaRegistry.register({
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema: {
+        type: "object",
+        required: ["mode"],
+        properties: {
+          mode: { type: "string" },
+          limit: { type: "number" },
+        },
+        additionalProperties: false,
+      },
+      fragmentSlots: [],
+    });
+    const service = createWeaverScompService(deps);
+
+    await expect(service.router[route("resolveAll")].handler({})).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    await expect(service.router[route("get")].handler({ key: "checkout.limit" })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    await expect(service.router[route("getNamespace")].handler({ prefix: "checkout" })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    await expect(service.router[route("get")].handler({ key: "public.ready" })).resolves.toEqual({ value: true });
+  });
+
   test("public read handlers do not expose protected metadata", async () => {
     const provider = createTestProvider("p1", "platform", {
       app: {

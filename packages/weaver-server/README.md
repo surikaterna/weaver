@@ -30,11 +30,19 @@ const server = await bootstrap({
 ### Core Services
 
 - `WeaverConfigService` — Central service for reads, writes, and resolution
-- `SchemaRegistry` — Namespace schema registration and validation
+- `SchemaRegistry` — Path-first schema registration and validation
 - `ScopeManager` — Scope provisioning and hierarchy management
 - `SessionManager` — Override session lifecycle (create, expire, audit)
 - `PromotionEngine` — Promotes values between layers with approval workflows
 - `RollbackService` — Reverts configuration to previous revisions
+
+Registered schemas are enforced at the effective runtime read boundary. Public
+`resolveAll`, `get`, and `getNamespace` calls validate values after layer and
+scope merging plus mount and secret resolution. Reads that contain, target, or
+descend from an invalid registered anchor fail with `VALIDATION_ERROR`; REST
+maps this runtime condition to HTTP 422. Unrelated unregistered reads and
+schema-compatible partial layer writes remain available, but an incomplete
+effective value is not served until later layers or writes complete it.
 
 ### Auth
 

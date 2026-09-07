@@ -1,3 +1,4 @@
+import { WeaverErrorInstance } from "@weaver-conf/config-types";
 import type { WeaverClient } from "../src/client.js";
 import { createWeaverClient } from "../src/client.js";
 import type { LocalTransport } from "../src/local-transport.js";
@@ -88,6 +89,36 @@ describe("client↔server integration (local transport round-trip)", () => {
   it("should report connected mode after boot", () => {
     expect(client.mode).toBe("live");
     expect(client.connected).toBe(true);
+  });
+
+  it("fails client boot when the server rejects an invalid effective snapshot", async () => {
+    await client.close();
+    const invalidTransport = createLocalTransport({
+      snapshot: {
+        entries: {},
+        scopes: {},
+        revision: "invalid",
+        timestamp: new Date().toISOString(),
+      },
+    });
+    vi.spyOn(invalidTransport, "resolveAll").mockRejectedValue(
+      new WeaverErrorInstance(
+        "VALIDATION_ERROR",
+        "Effective configuration does not match registered schema",
+        {
+          kind: "effective-configuration-invalid",
+          anchorPath: "/checkout",
+        },
+      ),
+    );
+
+    await expect(
+      createWeaverClient({ transport: invalidTransport }),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      details: { anchorPath: "/checkout" },
+    });
+    client = await createWeaverClient({ transport });
   });
 
   it("should transition to disconnected on close", async () => {

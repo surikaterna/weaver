@@ -540,6 +540,171 @@ describe("schema-registered config writes", () => {
     });
   });
 
+  test("runtime reads fail closed only when they intersect an incomplete anchor", async () => {
+    const { provider, service } = await makeRegisteredService({
+      billing: { limit: 10 },
+      public: { ready: true },
+    });
+
+    await expect(service.resolveAll()).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      details: {
+        kind: "effective-configuration-invalid",
+        anchorPath: "/billing",
+      },
+    });
+    await expect(service.get("billing.limit")).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    await expect(service.getNamespace("billing")).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    expect(await service.get("public.ready")).toBe(true);
+    expect(await service.getNamespace("public")).toEqual({ ready: true });
+
+    const partial = await service.set("platform", "billing.limit", 20);
+    expect(partial.success).toBe(true);
+    expect(provider.writes).toHaveLength(1);
+    await expect(service.get("billing.limit")).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+
+    const completed = await service.set("platform", "billing.mode", "prod");
+    expect(completed.success).toBe(true);
+    expect(await service.get("billing.limit")).toBe(20);
+    expect((await service.resolveAll()).entries.billing).toEqual({
+      limit: 20,
+      mode: "prod",
+    });
+  });
+
+  test("effective reads validate defaults, mounts, and requested scope merges", async () => {
+    const base = createTestProvider("base", "platform", {
+      billing: { limit: 10 },
+      mounted: {
+        limit: 10,
+        mode: { _weaver: "mount", source: "shared.mode" },
+      },
+      defaults: {},
+      shared: { mode: "prod" },
+    });
+    const tenant = createTestProvider("tenant", "tenant:acme", {
+      billing: { mode: "test" },
+    });
+    const service = await createWeaverConfigService({
+      providers: [base, tenant],
+      environment: "test",
+    });
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration(serviceSchema));
+    await registry.register(serviceRegistration(serviceSchema, [], "mounted"));
+    await registry.register(serviceRegistration({
+      type: "object",
+      required: ["region"],
+      properties: { region: { type: "string", default: "eu" } },
+      additionalProperties: false,
+    }, [], "defaults"));
+
+    await expect(service.get("billing.limit")).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    expect(await service.get("mounted.mode")).toBe("prod");
+    expect(await service.get("defaults")).toEqual({});
+    expect(await service.get("billing.mode", {
+      scopePath: [{ scopeId: "tenant", value: "acme" }],
+    })).toBe("test");
+    await expect(service.resolveAll()).rejects.toMatchObject({
+      details: { anchorPath: "/billing" },
+    });
+    await expect(service.resolveAll({
+      scopePath: [{ scopeId: "tenant", value: "acme" }],
+    })).resolves.toMatchObject({ entries: { defaults: {} } });
+  });
+
+  test("snapshots validate every returned scope against its effective merge", async () => {
+    const base = createTestProvider("base", "platform", {
+      billing: { mode: "prod" },
+    });
+    const tenant = createTestProvider("tenant", "tenant:acme", {
+      billing: { mode: "invalid" },
+    });
+    const service = await createWeaverConfigService({
+      providers: [base, tenant],
+      environment: "test",
+    });
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration(serviceSchema));
+
+    expect(await service.get("billing.mode")).toBe("prod");
+    await expect(service.get("billing.mode", {
+      scopePath: [{ scopeId: "tenant", value: "acme" }],
+    })).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await expect(service.resolveAll()).rejects.toMatchObject({
+      details: { anchorPath: "/billing" },
+    });
+  });
+
+  test("overlapping anchors are validated deterministically for intersecting reads", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      billing: { mode: "safe", plugins: { tax: {} } },
+    });
+    const service = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration(
+      extensibleServiceSchema,
+      [{ slotPath: "/plugins", accepts: "object" }],
+    ));
+    await registry.register({
+      serviceId: "billing",
+      providerId: "tax",
+      slotPath: "/plugins",
+      environment: "test",
+      owner: owner("tax"),
+      schema: {
+        ...fragmentSchema,
+        required: ["providerEnabled"],
+      },
+    });
+
+    expect(await service.get("billing.mode")).toBe("safe");
+    await expect(service.get("billing")).rejects.toMatchObject({
+      details: { anchorPath: "/billing/plugins/tax" },
+    });
+    await expect(service.getNamespace("billing.plugins")).rejects.toMatchObject({
+      details: { anchorPath: "/billing/plugins/tax" },
+    });
+    await expect(service.resolveAll()).rejects.toMatchObject({
+      details: { anchorPath: "/billing/plugins/tax" },
+    });
+  });
+
+  test("whole snapshots report invalid anchors in canonical path order", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      alpha: {},
+      zeta: {},
+    });
+    const service = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const registry = createSchemaRegistry({ configService: service });
+    const requiredSchema = {
+      type: "object",
+      required: ["enabled"],
+      properties: { enabled: { type: "boolean" } },
+      additionalProperties: false,
+    };
+    await registry.register(serviceRegistration(requiredSchema, [], "zeta"));
+    await registry.register(serviceRegistration(requiredSchema, [], "alpha"));
+
+    await expect(service.resolveAll()).rejects.toMatchObject({
+      details: { anchorPath: "/alpha" },
+    });
+  });
+
   test("protected and unregistered public write paths are rejected", async () => {
     const { registry, service } = await makeRegisteredService();
 
@@ -569,7 +734,7 @@ describe("schema-registered config writes", () => {
   });
 
   test("invalid persisted anchor objects are rejected at patch boundaries", async () => {
-    const { registry, service } = await makeRegisteredService({
+    const { provider, registry, service } = await makeRegisteredService({
       billing: { mode: "test", limit: "bad" },
     });
 
@@ -585,6 +750,9 @@ describe("schema-registered config writes", () => {
       code: "invalid-type",
       path: "$.billing.limit",
     });
-    expect(await service.get("billing.mode")).toBe("test");
+    await expect(service.get("billing.mode")).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    expect(provider.entries().billing.mode).toBe("test");
   });
 });

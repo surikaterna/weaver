@@ -21,6 +21,7 @@ import {
   writeInternalConfig,
 } from "./config-service-internal";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
+import { bindSchemaReadRegistry } from "./schema-read-boundary";
 import {
   parsePersistedRegistry,
   serializeRegistry,
@@ -237,6 +238,21 @@ function bindRegistry(
   bindSchemaRegistry(service, registry, (path, environment) =>
     findAffectedAnchors(entries(), path, environment),
   );
+  bindSchemaReadRegistry(service, (environment) =>
+    listRegisteredAnchors(entries(), environment),
+  );
+}
+
+function listRegisteredAnchors(
+  entries: Iterable<SchemaEntry>,
+  environment: string,
+): RegisteredSchemaAnchor[] {
+  const anchors: RegisteredSchemaAnchor[] = [];
+  for (const entry of entries) {
+    const anchor = registeredAnchorFromEntry(entry);
+    if (anchor.environment === environment) anchors.push(anchor);
+  }
+  return anchors;
 }
 
 function findAffectedAnchors(

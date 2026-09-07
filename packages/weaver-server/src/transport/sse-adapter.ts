@@ -122,9 +122,12 @@ export function createSSEAdapter(options: SSEAdapterOptions): SSEAdapter {
     clients.add(client);
 
     // v1: always send snapshot (delta history not tracked, so `since` is ignored)
-    const snapshot = await configService.resolveAll(
-      scopePath ? { scopePath } : undefined,
-    );
+    const snapshot = await configService
+      .resolveAll(scopePath ? { scopePath } : undefined)
+      .catch((error: unknown) => {
+        client.close();
+        throw error;
+      });
     const filteredEntries = filterEntriesByPrefix(
       snapshot.entries,
       opts.prefix,
