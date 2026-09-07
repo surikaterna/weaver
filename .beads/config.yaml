@@ -53,4 +53,4 @@
 # - github.org
 # - github.repo
 
-# sync.remote: "git+https://github.com/spralle/weaver"
+sync.remote: "git+https://github.com/surikaterna/weaver"
