@@ -16,7 +16,10 @@ import {
 import { z } from "zod";
 import type { WeaverError } from "../types/errors";
 import { createWeaverError } from "../types/errors";
-import { writeInternalConfig } from "./config-service-internal";
+import {
+  readInternalConfig,
+  writeInternalConfig,
+} from "./config-service-internal";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
 import type { SchemaOperationContext } from "./schema-operation-context";
 import {
@@ -178,7 +181,9 @@ export async function createPersistentSchemaRegistry(
   const layer = options.layer ?? defaultPersistenceLayer;
   const key = options.key ?? defaultPersistenceKey;
   const defaultEnvironment = options.environment;
-  const state = parsePersistedRegistry(await options.configService.get(key));
+  const state = parsePersistedRegistry(
+    await readInternalConfig(options.configService, key),
+  );
   const persist = createSchemaPersistenceWriter(options, layer, key);
 
   return {

@@ -1,4 +1,6 @@
+import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import type { WeaverConfigService } from "../core/config-service";
+import { createWeaverConfigService } from "../core/config-service";
 import type { ConfigDelta } from "../types/index";
 import type { SSEAdapter } from "./sse-adapter";
 import { createSSEAdapter } from "./sse-adapter";
@@ -118,6 +120,28 @@ describe("SSEAdapter", () => {
       "db.host": "localhost",
     });
     expect(msg(msgs, 0).data.revision).toBe("rev-1");
+    client.close();
+  });
+
+  it("does not expose protected metadata in snapshots", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {
+        app: { name: "public" },
+        _weaver: { registry: { schemas: "private" } },
+      },
+    });
+    const configService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const realAdapter = createSSEAdapter({ configService });
+
+    const client = await realAdapter.createClient({ prefix: "_weaver" });
+    const messages = parseMessages(client);
+
+    expect(msg(messages, 0).data.entries).toEqual({});
     client.close();
   });
 

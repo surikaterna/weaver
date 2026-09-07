@@ -109,6 +109,26 @@ describe("createWeaverScompService", () => {
     expect(result.revision).toBeTruthy();
   });
 
+  test("public read handlers do not expose protected metadata", async () => {
+    const provider = createTestProvider("p1", "platform", {
+      app: { name: "public" },
+      _weaver: { registry: { schemas: "private" } },
+    });
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+    const service = createWeaverScompService(buildScompDeps(svc));
+
+    const snapshot = await service.router[route("resolveAll")].handler({});
+    const direct = await service.router[route("get")].handler({ key: "_weaver.registry.schemas" });
+    const namespace = await service.router[route("getNamespace")].handler({ prefix: "_weaver" });
+    const inspection = await service.router[route("inspect")].handler({ key: "_weaver" });
+
+    expect(snapshot.entries).toEqual({ app: { name: "public" } });
+    expect(direct).toEqual({ value: undefined });
+    expect(namespace).toEqual({ entries: {} });
+    expect(inspection.effectiveValue).toBe(undefined);
+    expect(inspection.layerValues).toEqual({});
+  });
+
   test("get handler returns value", async () => {
     const provider = createTestProvider("p1", "platform", { db: { host: "localhost" } });
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });

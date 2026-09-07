@@ -49,6 +49,47 @@ function mockConfigService(): WeaverConfigService {
 }
 
 describe("REST body validation", () => {
+  it("does not expose protected metadata through REST reads", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {
+        app: { name: "public" },
+        _weaver: { registry: { schemas: "private" } },
+      },
+    });
+    const configService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+    });
+    const adapter = createRestAdapter({ configService });
+
+    const snapshot = await adapter.handleRequest("GET", "/v1/config", {
+      params: {},
+      query: {},
+      headers: {},
+    });
+    const direct = await adapter.handleRequest(
+      "GET",
+      "/v1/config/_weaver/registry/schemas",
+      { params: {}, query: {}, headers: {} },
+    );
+    const inspection = await adapter.handleRequest(
+      "GET",
+      "/v1/config/_weaver?inspect",
+      { params: {}, query: { inspect: "" }, headers: {} },
+    );
+
+    expect(snapshot.body).toMatchObject({
+      data: { entries: { app: { name: "public" } } },
+    });
+    expect(snapshot.body).not.toHaveProperty("data.entries._weaver");
+    expect(direct.body).toMatchObject({ data: { value: undefined } });
+    expect(inspection.body).toMatchObject({
+      data: { effectiveValue: undefined, layerValues: {} },
+    });
+  });
+
   it("PUT /v1/config/key rejects body without value field", async () => {
     const adapter = createRestAdapter({ configService: mockConfigService() });
     const res = await adapter.handleRequest("PUT", "/v1/config/app/name", {

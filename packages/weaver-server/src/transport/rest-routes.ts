@@ -122,10 +122,13 @@ export function buildRoutes(deps: RouteFactoryDeps): RestRoute[] {
           const accessCtx = authGate.toAccessContext(req.authContext);
           const filtered = authGate.filterVisible(
             accessCtx,
-            snapshot,
+            snapshot.entries,
             req.schemaMap ?? new Map(),
           );
-          return v1Response(configService, 200, filtered);
+          return v1Response(configService, 200, {
+            ...snapshot,
+            entries: filtered,
+          });
         }
         return v1Response(configService, 200, snapshot);
       },

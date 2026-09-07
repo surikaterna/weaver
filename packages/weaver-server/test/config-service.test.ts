@@ -86,8 +86,66 @@ describe("WeaverConfigService", () => {
       expect(batchResult.success).toBe(false);
       expect(batchResult.error?.code).toBe("VALIDATION_ERROR");
       expect(await svc.get("app.safe")).toBe(undefined);
-      expect(await svc.get("_weaver.registry.schemas")).toBe("internal");
+      expect(await svc.get("_weaver.registry.schemas")).toBe(undefined);
     }
+  });
+
+  it("filters protected metadata from every public read shape", async () => {
+    const svc = await makeService({
+      app: { name: "public" },
+      _weaver: { registry: { schemas: { private: true } } },
+    });
+
+    const snapshot = await svc.resolveAll();
+    expect(snapshot.entries).toEqual({ app: { name: "public" } });
+
+    for (const path of [
+      "_weaver",
+      "_weaver.registry.schemas",
+      "/_weaver",
+      "/_weaver/registry/schemas",
+      "[_weaver].registry.schemas",
+    ]) {
+      expect(await svc.get(path)).toBe(undefined);
+      expect(await svc.getNamespace(path)).toEqual({});
+      expect(await svc.inspect(path)).toEqual({
+        key: path,
+        effectiveValue: undefined,
+        effectiveLayer: undefined,
+        layerValues: {},
+      });
+    }
+  });
+
+  it("filters protected metadata from nested scoped snapshots", async () => {
+    const platform = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: { app: { base: true }, _weaver: { base: "private" } },
+    });
+    const tenant = createInMemoryStorageProvider({
+      id: "tenant-acme",
+      layer: "tenant:acme",
+      initialEntries: { app: { scoped: true }, _weaver: { scoped: "private" } },
+    });
+    const svc = await createWeaverConfigService({
+      providers: [platform, tenant],
+      environment: "test",
+    });
+
+    const snapshot = await svc.resolveAll({
+      scopePath: [{ scopeId: "tenant", value: "acme" }],
+    });
+
+    expect(snapshot.entries).toEqual({ app: { base: true } });
+    expect(snapshot.scopes).toEqual({
+      "tenant:acme": { app: { scoped: true } },
+    });
+    expect(
+      await svc.get("app", {
+        scopePath: [{ scopeId: "tenant", value: "acme" }],
+      }),
+    ).toEqual({ base: true, scoped: true });
   });
 
   it("removes a value", async () => {

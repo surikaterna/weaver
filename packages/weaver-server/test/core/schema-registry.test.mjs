@@ -203,29 +203,33 @@ describe("SchemaRegistry", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(await configService.get("_weaver.registry.schemas")).toEqual({
-      environments: {
-        dev: {
-          schemas: {
-            "/billing": {
-              kind: "service",
-              schema: {
-                type: "object",
-                properties: { enabled: { type: "boolean" } },
-              },
-              metadata: {
-                serviceId: "billing",
-                servicePath: "/billing",
-                environment: "dev",
-                providerId: "billing",
-                owner: { name: "billing", contact: "billing@example.com" },
-              },
-            },
-          },
-          slots: {},
-        },
-      },
+    expect(await configService.get("_weaver.registry.schemas")).toBe(undefined);
+
+    const restartedService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "dev",
     });
+    const restartedRegistry = await createPersistentSchemaRegistry({
+      configService: restartedService,
+      layer: "custom",
+    });
+    expect(await restartedRegistry.getSchema("billing", "dev")).toEqual({
+      type: "object",
+      properties: { enabled: { type: "boolean" } },
+    });
+  });
+
+  test("internal registry persistence does not emit public config deltas", async () => {
+    const opts = await makeOptions();
+    const deltas = [];
+    opts.configService.onDelta((delta) => deltas.push(delta));
+    const registry = await createPersistentSchemaRegistry(opts);
+
+    await registry.register(
+      serviceRegistration("billing", "dev", { type: "object" }),
+    );
+
+    expect(deltas).toEqual([]);
   });
 
   test("persistent registry hydrates schemas after restart", async () => {
