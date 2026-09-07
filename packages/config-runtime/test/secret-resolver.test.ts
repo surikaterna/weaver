@@ -101,6 +101,24 @@ describe("createSecretResolver", () => {
     resolver.dispose();
   });
 
+  test("scans arrays without colliding with dotted object keys", async () => {
+    const backend: SecretBackend = {
+      resolve: async (ref) => `resolved:${ref.uri}`,
+    };
+    const resolver = await createSecretResolver(
+      {
+        "group.one": [makeRef("vault", "compound")],
+        group: { one: [makeRef("vault", "nested")] },
+      },
+      { backend },
+    );
+
+    expect(resolver.getResolved("[group.one].0")).toBe("resolved:compound");
+    expect(resolver.getResolved("group.one.0")).toBe("resolved:nested");
+    expect(resolver.getResolved("group.one[0]")).toBe("resolved:nested");
+    resolver.dispose();
+  });
+
   test("dispose stops timer", async () => {
     const backend: SecretBackend = {
       resolve: async () => "value",

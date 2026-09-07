@@ -36,6 +36,20 @@ describe("buildMountMap", () => {
     const map = buildMountMap({});
     expect(map.size).toBe(0);
   });
+
+  test("scans arrays with canonical unambiguous path identities", () => {
+    const entries = {
+      "group.one": [{ _weaver: "mount" as const, source: "shared[value.one]" }],
+      group: {
+        one: [{ _weaver: "mount" as const, source: "shared.value" }],
+      },
+    };
+
+    const map = buildMountMap(entries);
+
+    expect(map.get("[group.one].0")).toBe("shared[value.one]");
+    expect(map.get("group.one.0")).toBe("shared.value");
+  });
 });
 
 describe("resolveMountedValue", () => {

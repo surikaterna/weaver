@@ -736,6 +736,153 @@ describe("schema-registered config writes", () => {
     ]);
   });
 
+  test("mounted object arrays invalidate and recover isolated scoped projections", async () => {
+    const secret = (uri) => ({ _weaver: "secret-ref", provider: "vault", uri });
+    const mount = (source) => ({ _weaver: "mount", source });
+    const base = createTestProvider("base", "platform", {
+      billing: { payload: mount("local.bundle") },
+      local: {
+        label: "base-label",
+        bundle: {
+          password: secret("base-password"),
+          values: [secret("base-array"), mount("local.label")],
+        },
+      },
+    });
+    const tenant = createTestProvider("tenant", "tenant:acme", {
+      local: {
+        label: "scope-label",
+        bundle: {
+          password: secret("scope-password"),
+          values: [secret("scope-array"), mount("local.label")],
+        },
+      },
+    });
+    const secrets = new Map([
+      ["base-password", "BASE-PASSWORD"],
+      ["base-array", "BASE-ARRAY"],
+      ["scope-password", "SCOPE-PASSWORD"],
+      ["scope-array", "SCOPE-ARRAY"],
+      ["scope-recovered", "SCOPE-RECOVERED"],
+    ]);
+    const service = await createWeaverConfigService({
+      providers: [base, tenant],
+      environment: "test",
+      secretBackend: { resolve: async (ref) => secrets.get(ref.uri) },
+    });
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration({
+      type: "object",
+      required: ["payload"],
+      properties: {
+        payload: {
+          type: "object",
+          required: ["password", "values"],
+          properties: {
+            password: { type: "string" },
+            values: { type: "array", items: { type: "string" } },
+          },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    }));
+    const scopePath = [{ scopeId: "tenant", value: "acme" }];
+
+    expect(await service.get("billing.payload")).toEqual({
+      password: "BASE-PASSWORD",
+      values: ["BASE-ARRAY", "base-label"],
+    });
+    expect(await service.getNamespace("billing", { scopePath })).toEqual({
+      payload: {
+        password: "SCOPE-PASSWORD",
+        values: ["SCOPE-ARRAY", "scope-label"],
+      },
+    });
+    const snapshot = await service.resolveAll({ scopePath });
+    expect(snapshot.scopes["tenant:acme"].billing.payload.values).toEqual([
+      "SCOPE-ARRAY",
+      "scope-label",
+    ]);
+
+    const deltas = [];
+    service.onDelta((delta) => deltas.push(delta));
+    await service.set("platform", "local.bundle.values", [
+      secret("missing"),
+      mount("local.label"),
+    ]);
+    expect(deltas).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "remove",
+        key: "billing",
+        layer: "weaver-effective",
+      }),
+    ]));
+    expect(JSON.stringify(deltas)).not.toContain("secret-ref");
+    await expect(service.get("billing.payload")).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    deltas.length = 0;
+
+    await service.set("platform", "local.bundle.values", [
+      secret("base-array"),
+      mount("local.label"),
+    ]);
+    expect(deltas).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "set",
+        key: "billing",
+        layer: "weaver-effective",
+        value: {
+          payload: {
+            password: "BASE-PASSWORD",
+            values: ["BASE-ARRAY", "base-label"],
+          },
+        },
+      }),
+    ]));
+    deltas.length = 0;
+
+    await service.set("tenant:acme", "local.bundle.values", [
+      secret("missing"),
+      mount("local.label"),
+    ]);
+    expect(deltas).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "remove",
+        key: "billing",
+        layer: "tenant:acme",
+      }),
+    ]));
+    expect(JSON.stringify(deltas)).not.toContain("secret-ref");
+    await expect(
+      service.get("billing.payload", { scopePath }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    deltas.length = 0;
+
+    await service.set(
+      "tenant:acme",
+      "local.bundle.values",
+      [secret("scope-recovered"), mount("local.label")],
+    );
+    expect(deltas).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "set",
+        key: "billing",
+        layer: "tenant:acme",
+        value: {
+          payload: {
+            password: "SCOPE-PASSWORD",
+            values: ["SCOPE-RECOVERED", "scope-label"],
+          },
+        },
+      }),
+    ]));
+    expect(await service.get("billing.payload.values[0]", { scopePath })).toBe(
+      "SCOPE-RECOVERED",
+    );
+  });
+
   test("overlapping anchors are validated deterministically for intersecting reads", async () => {
     const provider = createTestProvider("p1", "platform", {
       billing: { mode: "safe", plugins: { tax: {} } },

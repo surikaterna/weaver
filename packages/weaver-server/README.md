@@ -53,9 +53,12 @@ registry is applied (and persisted when persistence is configured).
 effective states. Scoped values already include inherited base configuration;
 clients must not treat them as physical overlays. Each effective context owns
 its mount map and secret cache, and is refreshed before validation and
-publication. Effective deltas use `weaver-effective` for base or the canonical
-scope path for scoped state. Publication is serialized, and a failing delta
-listener is logged without failing an already committed write or registration.
+publication. Mounted terminal objects and arrays are resolved recursively;
+array indexes and dotted object keys use canonical, unambiguous secret-cache
+paths, and recursive mount cycles fail closed. Effective deltas use
+`weaver-effective` for base or the canonical scope path for scoped state.
+Publication is serialized, and a failing delta listener is logged without
+failing an already committed write or registration.
 
 ### Auth
 

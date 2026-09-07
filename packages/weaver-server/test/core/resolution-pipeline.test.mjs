@@ -146,6 +146,56 @@ describe("Resolution pipeline", () => {
     expect(value).toBe(undefined);
   });
 
+  test("recursively resolves mounted objects and array markers", async () => {
+    const secret = (uri) => ({ _weaver: "secret-ref", provider: "vault", uri });
+    const mount = (source) => ({ _weaver: "mount", source });
+    const entries = {
+      shared: {
+        label: "mounted-label",
+        bundle: {
+          credentials: { password: secret("password") },
+          values: [
+            secret("first"),
+            mount("shared.label"),
+            { nested: secret("nested") },
+          ],
+        },
+        cycle: { nested: mount("app.cycle") },
+      },
+      app: {
+        config: mount("shared.bundle"),
+        direct: [secret("direct"), mount("shared.label")],
+        arrayCycle: [mount("app.arrayCycle[1]"), mount("app.arrayCycle[0]")],
+        cycle: mount("shared.cycle"),
+      },
+    };
+    const service = await createWeaverConfigService({
+      providers: [createTestProvider("p1", "platform", entries)],
+      environment: "dev",
+      secretBackend: { resolve: async (ref) => `resolved:${ref.uri}` },
+    });
+    const expected = {
+      credentials: { password: "resolved:password" },
+      values: [
+        "resolved:first",
+        "mounted-label",
+        { nested: "resolved:nested" },
+      ],
+    };
+
+    expect(await service.get("app.config")).toEqual(expected);
+    expect(await service.get("app.direct[0]")).toBe("resolved:direct");
+    expect(await service.get("app.direct.1")).toBe("mounted-label");
+    expect(await service.get("app.arrayCycle[0]")).toBe(undefined);
+    expect(await service.getNamespace("app")).toMatchObject({
+      config: expected,
+      direct: ["resolved:direct", "mounted-label"],
+    });
+    expect((await service.resolveAll()).entries.app.config).toEqual(expected);
+    expect(await service.get("app.cycle")).toEqual({});
+    expect(JSON.stringify(await service.resolveAll())).not.toContain("_weaver");
+  });
+
   test("mount map rebuilds after set", async () => {
     const entries = {
       shared: { value: "original" },

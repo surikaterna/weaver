@@ -147,13 +147,18 @@ describe("client↔server integration (local transport round-trip)", () => {
     transport.pushDelta({
       key: "checkout",
       action: "set",
-      value: { mode: "recovered", plugins: { tax: { rate: 0.2 } } },
+      value: {
+        mode: "recovered",
+        plugins: { tax: { rate: 0.2 } },
+        credentials: ["resolved-secret", { token: "nested-secret" }],
+      },
       layer: "tenant:acme",
       timestamp: new Date().toISOString(),
     });
     expect(client.getForScope("checkout", scopePath)).toEqual({
       mode: "recovered",
       plugins: { tax: { rate: 0.2 } },
+      credentials: ["resolved-secret", { token: "nested-secret" }],
     });
   });
 
