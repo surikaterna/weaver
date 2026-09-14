@@ -45,7 +45,7 @@
     "@weaver-conf/config-types": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "25.6.0",
+    "@types/node": "26.5.1",
     "typescript": "^5.8.3"
   }
 }
