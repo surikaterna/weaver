@@ -1,6 +1,6 @@
 {
   "name": "@weaver-conf/storage-provider-local-storage",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Browser localStorage storage provider for Weaver",
   "license": "MIT",
   "repository": {

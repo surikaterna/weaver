@@ -1,5 +1,12 @@
 # @weaver-conf/config-sync
 
+## 0.1.3
+
+### Patch Changes
+
+- Updated dependencies [[`dc99c56`](https://github.com/surikaterna/weaver/commit/dc99c56222bdd67ebe7f3409ad5057db3926a9ff)]:
+  - @weaver-conf/config-engine@0.1.3
+
 ## 0.1.2
 
 ### Patch Changes

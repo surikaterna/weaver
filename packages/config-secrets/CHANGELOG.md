@@ -1,5 +1,11 @@
 # @weaver-conf/config-secrets
 
+## 0.1.3
+
+### Patch Changes
+
+- [`dc99c56`](https://github.com/surikaterna/weaver/commit/dc99c56222bdd67ebe7f3409ad5057db3926a9ff) Thanks [@kennyek](https://github.com/kennyek)! - Update development types to Node.js 26.
+
 ## 0.1.2
 
 ### Patch Changes

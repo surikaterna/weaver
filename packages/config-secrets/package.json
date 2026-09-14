@@ -1,6 +1,6 @@
 {
   "name": "@weaver-conf/config-secrets",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Server-side secret resolution for Weaver configuration",
   "license": "MIT",
   "repository": {

@@ -1,6 +1,6 @@
 {
   "name": "@weaver-conf/weaver-client",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Configuration client SDK for Weaver",
   "license": "MIT",
   "repository": {
