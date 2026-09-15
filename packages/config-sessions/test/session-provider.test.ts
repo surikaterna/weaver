@@ -73,20 +73,16 @@ describe("OverrideSessionProvider", () => {
     const billing = { plan: "pro", limits: { seats: 10 } };
 
     await provider.write("billing", billing);
-    await provider.write("_weaver.registry.schemas", {
-      environments: { default: { schemas: { "/lynx": { kind: "service" } } } },
+    await provider.write("_weaver.scopeInventory", {
+      version: 1,
+      revision: "0",
+      contexts: {},
     });
 
     const data = await provider.load();
     expect(data.entries.billing).toEqual(billing);
     expect(data.entries._weaver).toEqual({
-      registry: {
-        schemas: {
-          environments: {
-            default: { schemas: { "/lynx": { kind: "service" } } },
-          },
-        },
-      },
+      scopeInventory: { version: 1, revision: "0", contexts: {} },
     });
   });
 

@@ -14,6 +14,24 @@
     "test": {
       "dependsOn": ["build", "^build"]
     },
+    "@weaver-conf/weaver-server#test": {
+      "dependsOn": ["build", "^build", "test:node"]
+    },
+    "test:pipeline": {
+      "dependsOn": ["build", "^build"]
+    },
+    "test:vitest": {
+      "dependsOn": ["build", "^build"]
+    },
+    "test:schemas": {
+      "dependsOn": ["build", "^build"]
+    },
+    "test:node": {
+      "dependsOn": ["build", "^build"]
+    },
+    "test:bootstrap": {
+      "dependsOn": ["build", "^build"]
+    },
     "start": {
       "dependsOn": ["^build"],
       "cache": false

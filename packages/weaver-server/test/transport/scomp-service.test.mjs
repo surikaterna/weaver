@@ -1,401 +1,171 @@
 import { createWeaverScompService } from "../../src/transport/scomp-service.ts";
-import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { createSchemaRegistry } from "../../src/core/schema-registry.ts";
 import { createScopeManager } from "../../src/core/scope-manager.ts";
-import { deepSet, deepRemove } from "@weaver-conf/config-engine";
+import { initialized, record } from "../validated-fixtures.mjs";
 
 const PREFIX = "weaver-config-v1";
+const route = (name) => `${PREFIX}.${name}`;
+const admin = { identity: { userId: "admin", roles: ["admin"], claims: {} }, isAdmin: true, isService: false, isUser: true };
+const appSchema = { type: "object", properties: { name: { type: "string" }, x: { type: "number" } }, additionalProperties: false };
+const dbSchema = { type: "object", properties: { host: { type: "string" }, port: { type: "integer" } }, additionalProperties: false };
+const checkoutSchema = { type: "object", required: ["db"], properties: { db: { ...dbSchema, required: ["host", "port"] } }, additionalProperties: false };
 
-function route(name) {
-  return `${PREFIX}.${name}`;
-}
-
-function createTestProvider(id, layer, entries, writable = true) {
-  let data = JSON.parse(JSON.stringify(entries));
-  const writes = [];
-  const removes = [];
-  return {
-    id,
-    layer,
-    writable,
-    writes,
-    removes,
-    async load() { return { entries: JSON.parse(JSON.stringify(data)) }; },
-    async write(key, value) {
-      writes.push({ key, value });
-      deepSet(data, key, value);
-      return { success: true };
-    },
-    async remove(key) {
-      removes.push(key);
-      deepRemove(data, key);
-      return { success: true };
-    },
-  };
-}
-
-function buildScompDeps(configService) {
-  const schemaRegistry = createSchemaRegistry({ configService });
-  const scopeManager = createScopeManager({ configService, schemaRegistry });
-  return { configService, scopeManager, schemaRegistry };
+async function fixture(options = {}) {
+  const f = await initialized({ records: [record("app", appSchema), record("db", dbSchema)], data: { app: { name: "test" }, db: { host: "localhost" } }, ...options });
+  const schemaRegistry = createSchemaRegistry({ configService: f.service });
+  const deps = { configService: f.service, schemaRegistry, scopeManager: createScopeManager({ configService: f.service }), getAuthContext: () => admin };
+  const definition = createWeaverScompService(deps);
+  return { ...f, deps, definition, call: (name, input) => definition.router[route(name)].handler(input) };
 }
 
 describe("createWeaverScompService", () => {
-  test("normal SCOMP writes cannot bypass a bound registered schema", async () => {
-    const provider = createTestProvider("p1", "platform", {
-      checkout: { mode: "prod" },
-    });
-    const svc = await createWeaverConfigService({ providers: [provider], environment: "default" });
-    const deps = buildScompDeps(svc);
-    await deps.schemaRegistry.register({
-      serviceId: "checkout",
-      environment: "default",
-      owner: { name: "Checkout", contact: "checkout@example.com" },
-      schema: {
-        type: "object",
-        required: ["mode"],
-        properties: { mode: { type: "string", enum: ["prod", "test"] } },
-        additionalProperties: false,
-      },
-      fragmentSlots: [],
-    });
-    const service = createWeaverScompService(deps);
-
-    const direct = await service.router[route("set")].handler({
-      layer: "platform",
-      key: "checkout.mode",
-      value: "invalid",
-    });
-    const batch = await service.router[route("setMany")].handler({
-      layer: "platform",
-      entries: { "safe.value": true, "checkout.mode": "invalid" },
-    });
-    const remove = await service.router[route("remove")].handler({
-      layer: "platform",
-      key: "checkout.mode",
-    });
-    const wrongEnvironment = await service.router[route("set")].handler({
-      layer: "platform",
-      key: "checkout.mode",
-      value: "invalid",
-      environment: "other",
-    });
-    const wrongEnvironmentRemove = await service.router[route("remove")].handler({
-      layer: "platform",
-      key: "checkout.mode",
-      environment: "other",
-    });
-    const duplicateBatch = await service.router[route("setMany")].handler({
-      layer: "platform",
-      entries: { "checkout.mode": "invalid", "checkout[mode]": "prod" },
-    });
-
-    expect([
-      direct.success,
-      batch.success,
-      remove.success,
-      wrongEnvironment.success,
-      wrongEnvironmentRemove.success,
-      duplicateBatch.success,
-    ]).toEqual([false, false, false, false, false, false]);
-    expect(provider.writes).toEqual([]);
-    expect(provider.removes).toEqual([]);
+  test("normal SCOMP writes cannot bypass a registered schema", async () => {
+    const f = await fixture({ records: [record("checkout", checkoutSchema)], data: { checkout: { db: { host: "db", port: 5432 } } } });
+    try {
+      const before = f.service.revision;
+      for (const environment of [undefined, "other"]) {
+        expect((await f.call("set", { key: "checkout.db.port", value: "bad", layer: "platform", environment })).success).toBe(false);
+        expect((await f.call("remove", { key: "checkout.db.port", layer: "platform", environment })).success).toBe(false);
+      }
+      expect((await f.call("setMany", { entries: { "checkout.db.port": "bad" }, layer: "platform" })).success).toBe(false);
+      expect(f.service.revision).toBe(before);
+    } finally { await f.service.close(); }
   });
 
   test("returns a ServiceDefinition with name and router", async () => {
-    const provider = createTestProvider("p1", "platform", { app: { name: "test" } });
-    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-    const service = createWeaverScompService(buildScompDeps(svc));
-    expect(service).toBeTruthy();
-    expect(service.name).toBe(PREFIX);
-    expect(service.router).toBeTruthy();
+    const f = await fixture();
+    try { expect(f.definition.name).toBe(PREFIX); expect(f.definition.router).toBeTruthy(); }
+    finally { await f.service.close(); }
   });
 
-  test("router contains all contract method routes", async () => {
-    const provider = createTestProvider("p1", "platform", {});
-    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-    const service = createWeaverScompService(buildScompDeps(svc));
-    const routes = Object.keys(service.router);
-    const expected = [
-      "resolveAll", "get", "getNamespace", "inspect", "set", "setMany",
-      "remove", "listScopes", "listScopeValues", "fetchSchemas",
-      "registerSchema", "setRegisteredObject", "patchRegisteredPath",
-      "validateRegisteredEffective", "subscribe",
-    ];
-    for (const name of expected) {
-      expect(routes.includes(route(name))).toBeTruthy();
-    }
-    expect(routes.length).toBe(expected.length);
+  test("router contains every contract method", async () => {
+    const f = await fixture();
+    try {
+      const names = ["resolveAll", "get", "getNamespace", "inspect", "set", "setMany", "remove", "listScopes", "listScopeValues", "fetchSchemas", "registerSchema", "setRegisteredObject", "patchRegisteredPath", "validateRegisteredEffective", "subscribe"];
+      expect(Object.keys(f.definition.router).sort()).toEqual(names.map(route).sort());
+    } finally { await f.service.close(); }
   });
 
-  test("registered operations preserve canonical metadata and anchor objects", async () => {
-    const provider = createTestProvider("p1", "platform", {});
-    const svc = await createWeaverConfigService({ providers: [provider], environment: "default" });
-    const service = createWeaverScompService(buildScompDeps(svc));
-    const schema = {
-      type: "object",
-      properties: {
-        db: {
-          type: "object",
-          properties: { host: { type: "string" }, port: { type: "integer" } },
-          required: ["host", "port"],
-        },
-      },
-      required: ["db"],
-    };
-    const registered = await service.router[route("registerSchema")].handler({
-      serviceId: "checkout",
-      environment: "default",
-      owner: { name: "Checkout", contact: "checkout@example.com" },
-      schema,
-      fragmentSlots: [],
-    });
-    expect(registered.metadata.servicePath).toBe("/checkout");
-
-    await service.router[route("setRegisteredObject")].handler({
-      anchorPath: "/checkout",
-      value: { db: { host: "localhost", port: 5432 } },
-      layer: "platform",
-    });
-    await service.router[route("patchRegisteredPath")].handler({
-      path: "/checkout/db/host",
-      value: "db.internal",
-      layer: "platform",
-    });
-    const value = await svc.get("checkout");
-    expect(value).toEqual({ db: { host: "db.internal", port: 5432 } });
+  test("registered operations retain canonical metadata and complete anchor objects", async () => {
+    const f = await fixture({ records: [], data: {} });
+    try {
+      const result = await f.call("registerSchema", record("checkout", checkoutSchema).request);
+      expect(result.metadata.servicePath).toBe("/checkout");
+      expect((await f.call("setRegisteredObject", { anchorPath: "/checkout", value: { db: { host: "localhost", port: 5432 } }, layer: "platform" })).success).toBe(true);
+      expect((await f.call("patchRegisteredPath", { path: "/checkout/db/host", value: "db.internal", layer: "platform" })).success).toBe(true);
+      expect(await f.service.get("checkout")).toEqual({ db: { host: "db.internal", port: 5432 } });
+    } finally { await f.service.close(); }
   });
 
-  test("registerSchema returns typed validation failures for unsafe environments", async () => {
-    const provider = createTestProvider("p1", "platform", {});
-    const svc = await createWeaverConfigService({ providers: [provider], environment: "default" });
-    const deps = buildScompDeps(svc);
-    const service = createWeaverScompService(deps);
-    const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
-
-    for (const environment of [
-      "__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod", 42,
-    ]) {
-      const result = await service.router[route("registerSchema")].handler({
-        serviceId: "checkout",
-        environment,
-        owner: { name: "Checkout", contact: "checkout@example.com" },
-        schema: { type: "object" },
-        fragmentSlots: [],
-      });
-      expect(result).toMatchObject({
-        success: false,
-        error: { code: "VALIDATION_ERROR" },
-      });
-    }
-
-    expect(deps.schemaRegistry.listAll()).toEqual({});
-    expect(provider.writes).toEqual([]);
-    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(prototypeBefore);
+  test("registerSchema returns typed failures for unsafe environments", async () => {
+    const f = await fixture({ records: [], data: {} });
+    const before = Object.getOwnPropertyDescriptors(Object.prototype);
+    try {
+      for (const environment of ["__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod", 42]) {
+        expect(await f.call("registerSchema", { ...record("checkout", checkoutSchema).request, environment })).toMatchObject({ success: false, error: { code: "VALIDATION_ERROR" } });
+      }
+      expect(f.deps.schemaRegistry.listAll()).toEqual({});
+      expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(before);
+    } finally { await f.service.close(); }
   });
 
-  test("resolveAll handler returns snapshot", async () => {
-    const provider = createTestProvider("p1", "platform", { app: { port: 3000 } });
-    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-    const service = createWeaverScompService(buildScompDeps(svc));
-    const result = await service.router[route("resolveAll")].handler({});
-    expect(result.entries).toBeTruthy();
-    expect(result.entries.app.port).toBe(3000);
-    expect(result.revision).toBeTruthy();
+  test("resolveAll returns a validated snapshot", async () => {
+    const f = await fixture();
+    try { expect((await f.call("resolveAll", {})).entries).toEqual({ app: { name: "test" }, db: { host: "localhost" } }); }
+    finally { await f.service.close(); }
   });
 
   test("resolveAll returns inherited effective scope state", async () => {
-    const base = createTestProvider("base", "platform", { app: { mode: "base", limit: 1 } });
-    const tenant = createTestProvider("tenant", "tenant:acme", { app: { limit: 2 } });
-    const svc = await createWeaverConfigService({
-      providers: [base, tenant],
-      environment: "dev",
-    });
-    const service = createWeaverScompService(buildScompDeps(svc));
-
-    const result = await service.router[route("resolveAll")].handler({ scope: "tenant:acme" });
-
-    expect(result.entries.app).toEqual({ mode: "base", limit: 1 });
-    expect(result.scopes["tenant:acme"].app).toEqual({ mode: "base", limit: 2 });
+    const path = [{ scopeId: "tenant", value: "acme" }];
+    const f = await fixture({ scopes: [{ id: "tenant", label: "Tenant" }], contexts: [{ scopePath: path, state: "active" }], scoped: { "tenant:acme": { app: { x: 1 } } } });
+    try { expect((await f.call("resolveAll", { scope: "tenant:acme" })).scopes["tenant:acme"].app).toEqual({ name: "test", x: 1 }); }
+    finally { await f.service.close(); }
   });
 
-  test("runtime read handlers reject incomplete registered configuration", async () => {
-    const provider = createTestProvider("p1", "platform", {
-      checkout: { limit: 10 },
-      public: { ready: true },
-    });
-    const svc = await createWeaverConfigService({
-      providers: [provider],
-      environment: "default",
-    });
-    const deps = buildScompDeps(svc);
-    await deps.schemaRegistry.register({
-      serviceId: "checkout",
-      environment: "default",
-      owner: { name: "Checkout", contact: "checkout@example.com" },
-      schema: {
-        type: "object",
-        required: ["mode"],
-        properties: {
-          mode: { type: "string" },
-          limit: { type: "number" },
-        },
-        additionalProperties: false,
-      },
-      fragmentSlots: [],
-    });
-    const service = createWeaverScompService(deps);
-
-    await expect(service.router[route("resolveAll")].handler({})).rejects.toMatchObject({
-      code: "VALIDATION_ERROR",
-    });
-    await expect(service.router[route("get")].handler({ key: "checkout.limit" })).rejects.toMatchObject({
-      code: "VALIDATION_ERROR",
-    });
-    await expect(service.router[route("getNamespace")].handler({ prefix: "checkout" })).rejects.toMatchObject({
-      code: "VALIDATION_ERROR",
-    });
-    await expect(service.router[route("get")].handler({ key: "public.ready" })).resolves.toEqual({ value: true });
+  test("incomplete registered writes are refused before invalid read state exists", async () => {
+    const f = await fixture({ records: [record("checkout", checkoutSchema)], data: { checkout: { db: { host: "db", port: 5432 } } } });
+    try {
+      expect((await f.call("setRegisteredObject", { anchorPath: "/checkout", layer: "platform", value: { db: { host: "db" } } })).success).toBe(false);
+      expect((await f.call("get", { key: "checkout.db.port" })).value).toBe(5432);
+    } finally { await f.service.close(); }
   });
 
-  test("registered object reads and feed projections are fully resolved", async () => {
-    const provider = createTestProvider("p1", "platform", {
-      checkout: { token: { _weaver: "mount", source: "shared.token" } },
-      shared: { token: "A" },
+  test("registered object reads and feed projections are resolved", async () => {
+    const f = await fixture({ records: [record("checkout", checkoutSchema), record("shared", { type: "object", additionalProperties: true })],
+      data: { checkout: { db: { host: { _weaver: "mount", source: "shared.host" }, port: 5432 } }, shared: { host: { _weaver: "secret-ref", provider: "vault", uri: "host" } } },
+      secretBackend: { resolve: async () => "db.internal" },
     });
-    const svc = await createWeaverConfigService({
-      providers: [provider],
-      environment: "default",
-    });
-    const deps = buildScompDeps(svc);
-    const service = createWeaverScompService(deps);
-    const feed = service.router[route("subscribe")].handler({});
-    let registration;
-    setTimeout(() => {
-      registration = deps.schemaRegistry.register({
-        serviceId: "checkout",
-        environment: "default",
-        owner: { name: "Checkout", contact: "checkout@example.com" },
-        schema: {
-          type: "object",
-          required: ["token", "mode"],
-          properties: { token: { type: "string" }, mode: { type: "string" } },
-          additionalProperties: false,
-        },
-        fragmentSlots: [],
-      });
-    }, 10);
-    expect((await feed.next()).value).toMatchObject({
-      action: "remove",
-      key: "checkout",
-    });
-    await registration;
-
-    const recovery = feed.next();
-    await deps.schemaRegistry.register({
-      serviceId: "checkout",
-      environment: "default",
-      owner: { name: "Checkout", contact: "checkout@example.com" },
-      schema: {
-        type: "object",
-        required: ["token"],
-        properties: { token: { type: "string" } },
-        additionalProperties: false,
-      },
-      fragmentSlots: [],
-    });
-    expect((await recovery).value).toMatchObject({
-      action: "set",
-      key: "checkout",
-      value: { token: "A" },
-    });
-    await expect(service.router[route("get")].handler({ key: "checkout" })).resolves.toEqual({
-      value: { token: "A" },
-    });
-    await feed.return();
+    try {
+      expect((await f.call("get", { key: "checkout" })).value).toEqual({ db: { host: "db.internal", port: 5432 } });
+      expect(JSON.stringify(await f.call("resolveAll", {}))).not.toContain("_weaver");
+    } finally { await f.service.close(); }
   });
 
-  test("public read handlers do not expose protected metadata", async () => {
-    const provider = createTestProvider("p1", "platform", {
-      app: {
-        name: "public",
-        direct: { _weaver: "mount", source: "_weaver.registry.schemas" },
-        bridge: { _weaver: "mount", source: "_weaver.registry.schemas" },
-        chained: { _weaver: "mount", source: "app.bridge" },
-      },
-      _weaver: { registry: { schemas: "LEAK" } },
-    });
-    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-    const service = createWeaverScompService(buildScompDeps(svc));
-
-    const snapshot = await service.router[route("resolveAll")].handler({});
-    const direct = await service.router[route("get")].handler({ key: "_weaver.registry.schemas" });
-    const mounted = await service.router[route("get")].handler({ key: "app.direct" });
-    const chained = await service.router[route("get")].handler({ key: "app.chained" });
-    const namespace = await service.router[route("getNamespace")].handler({ prefix: "_weaver" });
-    const inspection = await service.router[route("inspect")].handler({ key: "_weaver" });
-
-    expect(snapshot.entries).toEqual({ app: { name: "public" } });
-    expect(direct).toEqual({ value: undefined });
-    expect(mounted).toEqual({ value: undefined });
-    expect(chained).toEqual({ value: undefined });
-    expect(namespace).toEqual({ entries: {} });
-    expect(inspection.effectiveValue).toBe(undefined);
-    expect(inspection.layerValues).toEqual({});
-    expect(JSON.stringify({ snapshot, mounted, chained })).not.toContain("LEAK");
+  test("public reads cannot expose protected control state or aliases", async () => {
+    const f = await fixture({ records: [record("app", { type: "object", additionalProperties: true, description: "LEAK" })], data: { app: { name: "public", alias: { _weaver: "mount", source: "_weaver.catalog.registrations" } } } });
+    try {
+      expect((await f.call("get", { key: "_weaver.catalog.registrations" })).value).toBeUndefined();
+      expect((await f.call("get", { key: "app.alias" })).value).toBeUndefined();
+      expect(JSON.stringify(await f.call("resolveAll", {}))).not.toContain("LEAK");
+    } finally { await f.service.close(); }
   });
 
-  test("get handler returns value", async () => {
-    const provider = createTestProvider("p1", "platform", { db: { host: "localhost" } });
-    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-    const service = createWeaverScompService(buildScompDeps(svc));
-    const result = await service.router[route("get")].handler({ key: "db.host" });
-    expect(result).toEqual({ value: "localhost" });
+  test("get handler returns a declared value", async () => {
+    const f = await fixture();
+    try { expect(await f.call("get", { key: "db.host" })).toEqual({ value: "localhost" }); }
+    finally { await f.service.close(); }
   });
 
-  test("set handler writes and succeeds", async () => {
-    const provider = createTestProvider("p1", "platform", {});
-    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-    const service = createWeaverScompService(buildScompDeps(svc));
-    const result = await service.router[route("set")].handler({ key: "app.name", value: "hello", layer: "platform" });
-    expect(result.success).toBe(true);
-    const get = await service.router[route("get")].handler({ key: "app.name" });
-    expect(get).toEqual({ value: "hello" });
+  test("set handler writes valid declared values", async () => {
+    const f = await fixture();
+    try {
+      expect((await f.call("set", { key: "app.name", value: "hello", layer: "platform" })).success).toBe(true);
+      expect((await f.call("get", { key: "app.name" })).value).toBe("hello");
+    } finally { await f.service.close(); }
   });
 
-  test("remove handler deletes key", async () => {
-    const provider = createTestProvider("p1", "platform", { x: 1 });
-    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-    const service = createWeaverScompService(buildScompDeps(svc));
-    const result = await service.router[route("remove")].handler({ key: "x", layer: "platform" });
-    expect(result.success).toBe(true);
-    const get = await service.router[route("get")].handler({ key: "x" });
-    expect(get).toEqual({ value: undefined });
+  test("remove handler removes an optional declared value", async () => {
+    const f = await fixture();
+    try {
+      expect((await f.call("remove", { key: "app.name", layer: "platform" })).success).toBe(true);
+      expect((await f.call("get", { key: "app.name" })).value).toBeUndefined();
+    } finally { await f.service.close(); }
   });
 
-  test("subscribe handler yields deltas", async () => {
-    const provider = createTestProvider("p1", "platform", {});
-    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-    const service = createWeaverScompService(buildScompDeps(svc));
-    const feed = service.router[route("subscribe")].handler({});
-
-    setTimeout(() => svc.set("platform", "key1", "val1"), 10);
-
-    const iterator = feed[Symbol.asyncIterator]();
-    const first = await iterator.next();
-    expect(first.done).toBe(false);
-    expect(first.value.key).toBe("key1");
-    expect(first.value.value).toBe("val1");
-    await iterator.return();
+  test("subscribe yields validated root projections", async () => {
+    const f = await fixture();
+    const iterator = f.call("subscribe", {})[Symbol.asyncIterator]();
+    try {
+      const next = iterator.next();
+      await f.service.set("platform", "app.name", "updated");
+      expect((await next).value).toMatchObject({ key: "app", value: { name: "updated" } });
+    } finally { await iterator.return(); await f.service.close(); }
   });
 
-  test("route kinds are classified correctly", async () => {
-    const provider = createTestProvider("p1", "platform", {});
-    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-    const service = createWeaverScompService(buildScompDeps(svc));
-    expect(service.router[route("resolveAll")].kind).toBe("request");
-    expect(service.router[route("get")].kind).toBe("request");
-    expect(service.router[route("set")].kind).toBe("request");
-    expect(service.router[route("subscribe")].kind).toBe("request"); // scomp handles feed semantics at proxy layer
+  test("route kinds retain request/feed proxy classification", async () => {
+    const f = await fixture();
+    try { for (const name of ["get", "set", "resolveAll", "subscribe"]) expect(f.definition.router[route(name)].kind).toBe("request"); }
+    finally { await f.service.close(); }
+  });
+
+  test("schema administration fails closed without host-authenticated admin identity", async () => {
+    const f = await fixture();
+    const denied = createWeaverScompService({ ...f.deps, getAuthContext: () => undefined });
+    try {
+      const before = f.service.revision;
+      expect(await denied.router[route("registerSchema")].handler({ ...record("forged", appSchema).request, isAdmin: true })).toMatchObject({ success: false, error: { code: "FORBIDDEN" } });
+      await expect(denied.router[route("fetchSchemas")].handler({})).rejects.toMatchObject({ code: "FORBIDDEN" });
+      expect(f.service.revision).toBe(before);
+    } finally { await f.service.close(); }
+  });
+
+  test("conditional schema revision reaches the canonical registry without being persisted in the request", async () => {
+    const f = await fixture();
+    try {
+      const request = record("app", { ...appSchema, additionalProperties: true }).request;
+      expect((await f.call("registerSchema", request)).error.code).toBe("REVISION_CONFLICT");
+      expect((await f.call("registerSchema", { ...request, ifRevision: f.service.revision })).success).toBe(true);
+      expect(JSON.stringify((await f.platform.load()).entries._weaver.catalog)).not.toContain("ifRevision");
+    } finally { await f.service.close(); }
   });
 });

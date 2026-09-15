@@ -6,9 +6,8 @@ import type {
 import {
   assertPublicConfigPath,
   parseCanonicalConfigPath,
-  validateConfigurationPatch,
-  validateEffectiveConfiguration,
-  validatePartialConfiguration,
+  validateLayerPatch as validateConfigurationPatch,
+  validateLayerConfiguration as validatePartialConfiguration,
 } from "@weaver-conf/config-engine";
 import type { WriteResult } from "@weaver-conf/config-types";
 import type {
@@ -107,19 +106,17 @@ export async function prepareRegisteredPatchWrite(
   );
   if (!resultValidation.valid)
     return validationFailure(resultValidation, resolved);
-  return {
-    success: true,
-    anchorPath: resolved.anchor.path,
-    key: anchorKey,
-    value: nextValue,
-  };
+  return preparedWrite(resolved.anchor.path, nextValue);
 }
 
 export async function validateRegisteredEffectiveConfiguration(
   path: string,
   options: EffectiveValidationContext,
   defaultEnvironment: string,
-  getEffectiveValue: (key: string) => Promise<unknown>,
+  validateEffective: (
+    anchor: RegisteredSchemaAnchor,
+    environment: string,
+  ) => SchemaValidationResult,
 ): Promise<SchemaValidationResult> {
   const environment = options.environment ?? defaultEnvironment;
   const normalized = normalizeCanonicalPath(path);
@@ -136,12 +133,7 @@ export async function validateRegisteredEffectiveConfiguration(
     );
   }
 
-  const value = await getEffectiveValue(
-    parseCanonicalConfigPath(anchor.path).storageKey,
-  );
-  return validateEffectiveConfiguration(anchor.schema, value, {
-    path: normalized.segments,
-  });
+  return validateEffective(anchor, environment);
 }
 
 interface ResolvedWriteAnchor {

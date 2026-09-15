@@ -9,17 +9,24 @@ export type {
   ServiceAccessPolicy,
   ServiceConfigurationDeclaration,
 } from "./access";
+export {
+  type BootstrapSeed,
+  bootstrapSeedSchema,
+  bootstrapStoreSchema,
+  type InitializeWeaverRequest,
+  initializeWeaverRequestSchema,
+  type WeaverInspection,
+  type WeaverRuntimeState,
+  type WeaverRuntimeStatus,
+  weaverInspectionSchema,
+  weaverRuntimeStateSchema,
+  weaverRuntimeStatusSchema,
+} from "./bootstrap-seed";
 // cache.ts — Scope resolution cache interface
 export type { ScopeResolutionCache } from "./cache";
 export { formatScopePath, serializeScopePath } from "./cache";
 // environment.ts — Environment-aware provider types and provenance tracking
-export type {
-  ConfigValueSource,
-  EnvironmentAwareStorageProvider,
-  EnvironmentName,
-  LayerValueDetail,
-  MergedLayerResult,
-} from "./environment";
+export type { EnvironmentName } from "./environment";
 export { environmentNamePattern, environmentNameSchema } from "./environment";
 export type { WeaverError, WeaverErrorCode } from "./errors";
 // errors.ts — Shared error taxonomy
@@ -35,6 +42,7 @@ export type {
   ExpressionEvaluatorProvider,
   ExpressionValidationResult,
 } from "./expressions";
+export * from "./internal-contracts";
 // layer-factories.ts — Built-in layer factories
 export { Layers, replaceOnly } from "./layer-factories";
 // layers.ts — Layer abstraction interfaces
@@ -80,6 +88,36 @@ export type {
   ObjectConfigurationPropertySchema,
   WeaverPropertyExtensions,
 } from "./property-schema";
+export {
+  authoritySequenceSchema,
+  type FileAuthorityOptions,
+  fileAuthorityOptionsSchema,
+  type LayerCommitRequest,
+  type LayerCommitResult,
+  type LayerEnvelope,
+  layerCommitReceiptSchema,
+  layerCommitRequestSchema,
+  layerCommitResultSchema,
+  layerEnvelopeSchema,
+  type MongoLayerEnvelope,
+  mongoLayerEnvelopeSchema,
+  type ProviderAuthority,
+  type ProviderCapabilities,
+  type ProviderInventory,
+  type ProviderMutation,
+  type ProviderOwnership,
+  type ProviderPreflight,
+  type ProviderRevision,
+  type ProviderWriterHandle,
+  providerCapabilitiesSchema,
+  providerInventorySchema,
+  providerMutationSchema,
+  providerOwnershipSchema,
+  providerPreflightSchema,
+  providerRevisionSchema,
+  type StorageAuthorityOptions,
+  storageAuthorityOptionsSchema,
+} from "./provider-authority";
 // providers.ts — Storage provider interfaces
 export type {
   ConfigSyncAckRequest,
@@ -110,6 +148,7 @@ export type {
   WriteError,
   WriteResult,
 } from "./providers";
+export { isSafePattern } from "./regex-safety";
 export type {
   RegisteredEffectiveValidationRequest,
   RegisteredEffectiveValidationResponse,
@@ -120,9 +159,11 @@ export type {
   RegisteredSchemasResponse,
   RegisteredWriteOptions,
 } from "./registered-operations";
+export { containsRegistrationDefaultMarker } from "./registration-default-markers";
 // result.ts — Discriminated Result<T,E> union for fallible operations
 export type { Result } from "./result";
 export { err, isErr, isOk, ok } from "./result";
+export { type RollbackRequest, rollbackRequestSchema } from "./rollback";
 // schema-registration.ts — Path-first schema registration contracts
 export type {
   FragmentSchemaRegistrationRequest,
@@ -130,7 +171,10 @@ export type {
   FragmentSlotRegistrationMetadata,
   RegistrationOwner,
   SchemaRegistrationAuditMetadata,
+  SchemaRegistrationContext,
   SchemaRegistrationMetadata,
+  SchemaRegistrationOperation,
+  SchemaRegistrationOptions,
   SchemaRegistrationRequest,
   SchemaRegistrationResponse,
   ServiceSchemaRegistrationRequest,
@@ -150,18 +194,6 @@ export {
   serviceAccessPolicySchema,
   serviceConfigurationDeclarationSchema,
 } from "./schemas-access";
-export type {
-  BootstrapConfig,
-  BootstrapLayer,
-  LayerProvider,
-} from "./schemas-bootstrap";
-// schemas-bootstrap.ts — Zod schemas for bootstrap configuration
-export {
-  bootstrapConfigSchema,
-  bootstrapLayerSchema,
-  builtinProviders,
-  layerProviderSchema,
-} from "./schemas-bootstrap";
 // schemas-expression.ts — Zod schemas for expression validation types
 export { expressionValidationResultSchema } from "./schemas-expression";
 // schemas-layers.ts — Zod schemas for layer and context types
@@ -235,6 +267,11 @@ export {
   registeredPathPatchResponseSchema,
   registeredSchemasResponseSchema,
 } from "./schemas-registered-operations";
+// schemas-schema-registration.ts — Zod schemas for path-first schema registration contracts
+export {
+  registeredConfigurationSchemaSchema,
+  visitConfigurationSchemas,
+} from "./schemas-registration-grammar";
 export {
   providerIdPattern,
   providerIdSchema,
@@ -243,14 +280,16 @@ export {
   serviceIdSchema,
   slotPathSchema,
 } from "./schemas-registration-paths";
-// schemas-schema-registration.ts — Zod schemas for path-first schema registration contracts
 export {
   fragmentSchemaRegistrationRequestSchema,
   fragmentSlotDeclarationSchema,
   fragmentSlotRegistrationMetadataSchema,
   registrationOwnerSchema,
   schemaRegistrationAuditMetadataSchema,
+  schemaRegistrationContextSchema,
   schemaRegistrationMetadataSchema,
+  schemaRegistrationOperationSchema,
+  schemaRegistrationOptionsSchema,
   schemaRegistrationResponseSchema,
   serviceSchemaRegistrationRequestSchema,
 } from "./schemas-schema-registration";
@@ -276,6 +315,20 @@ export {
   configDeltaSchema,
   configSnapshotSchema,
 } from "./schemas-transport";
+export {
+  type AuthorityVector,
+  authorityVectorSchema,
+  type ScopeInventory,
+  type ServiceAuthoritySnapshot,
+  scopeInventorySchema,
+  serviceAuthoritySnapshotSchema,
+} from "./scope-inventory";
+export {
+  type ScopeLifecycleRequest,
+  type ScopeLifecycleResult,
+  scopeLifecycleRequestSchema,
+  scopeLifecycleResultSchema,
+} from "./scope-lifecycle";
 // service.ts — Service interfaces
 export type {
   ConfigurationInspection,

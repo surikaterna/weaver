@@ -10,7 +10,7 @@ import type {
   SchemaRegistrationResult,
   SchemaRegistry,
 } from "../core/schema-registry";
-import { parseScopeQuery } from "../core/scope-utils";
+import { assertServiceScope, parseScopeQuery } from "../core/scope-utils";
 import type { WeaverErrorCode } from "../types/index";
 import { createWeaverError, httpStatusForError } from "../types/index";
 import type { AuthGate } from "./auth-gate";
@@ -93,7 +93,7 @@ function extractExpectedRevision(req: RestRequest): string | undefined {
   return ifMatch.replace(/^"|"$/g, "");
 }
 
-const schemaRegistryAdminKey = "_weaver.registry.schemas";
+const schemaRegistryAdminKey = "_weaver.catalog.registrations";
 
 function gateRead(
   req: RestRequest,
@@ -106,7 +106,7 @@ function gateRead(
   return deps.authGate.gateRead(accessCtx, key, req.schemaMap?.get(key));
 }
 
-function gateAdminRead(
+function gateAdmin(
   req: RestRequest,
   deps: SchemaRouteDeps,
 ): RestResponse | null {
@@ -188,7 +188,7 @@ function listSchemasRoute(deps: SchemaRouteDeps): RestRoute {
     method: "GET",
     path: "/v1/admin/schemas",
     async handler(req) {
-      const adminDenied = gateAdminRead(req, deps);
+      const adminDenied = gateAdmin(req, deps);
       if (adminDenied) return adminDenied;
       if (!schemaRegistry) return unavailable(configService);
       const denied = gateRead(req, deps, schemaRegistryAdminKey);
@@ -206,6 +206,8 @@ function registerServiceRoute(deps: SchemaRouteDeps): RestRoute {
     method: "POST",
     path: "/v1/admin/schemas/services",
     async handler(req) {
+      const adminDenied = gateAdmin(req, deps);
+      if (adminDenied) return adminDenied;
       if (!schemaRegistry) return unavailable(configService);
       const denied = gateWrite(req, deps, "admin", schemaRegistryAdminKey);
       if (denied) return denied;
@@ -228,6 +230,8 @@ function registerFragmentRoute(deps: SchemaRouteDeps): RestRoute {
     method: "POST",
     path: "/v1/admin/schemas/fragments",
     async handler(req) {
+      const adminDenied = gateAdmin(req, deps);
+      if (adminDenied) return adminDenied;
       if (!schemaRegistry) return unavailable(configService);
       const denied = gateWrite(req, deps, "admin", schemaRegistryAdminKey);
       if (denied) return denied;
@@ -332,6 +336,7 @@ function validateRegisteredEffectiveRoute(deps: SchemaRouteDeps): RestRoute {
       const denied = gateRead(req, deps, key);
       if (denied) return denied;
       const context = effectiveValidationContext(req, schemaRegistry);
+      await assertServiceScope(configService, context.scopePath);
       const operation = effectiveValidationRouteContext(
         req,
         anchorPath,
@@ -361,7 +366,7 @@ function effectiveValidationContext(
   schemaRegistry: SchemaRegistry,
 ): EffectiveValidationContext {
   const query = registeredEffectiveValidationQuerySchema.parse(req.query);
-  const scopePath = query.scope ? parseScopeQuery(query.scope) : undefined;
+  const scopePath = parseScopeQuery(query.scope);
   return {
     schemaRegistry,
     ...(query.environment ? { environment: query.environment } : {}),
@@ -375,7 +380,7 @@ function registrationFailure(
 ): RestResponse {
   return v1Error(
     configService,
-    "VALIDATION_ERROR",
+    result.error?.code ?? "VALIDATION_ERROR",
     result.error?.message ?? "Schema registration failed",
     result.error?.details,
   );

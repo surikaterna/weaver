@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { environmentNameSchema } from "./environment";
 import { weaverErrorSchema } from "./errors";
-import { objectConfigurationPropertySchemaSchema } from "./schemas-property";
+import { registeredConfigurationSchemaSchema } from "./schemas-registration-grammar";
 import {
   providerIdSchema,
   serviceIdSchema,
@@ -22,12 +22,18 @@ export const schemaRegistrationAuditMetadataSchema = z.object({
   actor: z.string().min(1).optional(),
 });
 
+export const schemaRegistrationContextSchema = z.strictObject({
+  expectedRevision: z.string().min(1).optional(),
+  subject: z.string().min(1).optional(),
+  actor: z.string().min(1).optional(),
+});
+
 export const serviceSchemaRegistrationRequestSchema = z
   .strictObject({
     serviceId: serviceIdSchema,
     environment: environmentNameSchema,
     owner: registrationOwnerSchema,
-    schema: objectConfigurationPropertySchemaSchema,
+    schema: registeredConfigurationSchemaSchema,
     schemaVersion: z.string().min(1).optional(),
     fragmentSlots: z.array(fragmentSlotDeclarationSchema).readonly(),
   })
@@ -50,7 +56,7 @@ export const fragmentSchemaRegistrationRequestSchema = z
     slotPath: slotPathSchema,
     environment: environmentNameSchema,
     owner: registrationOwnerSchema,
-    schema: objectConfigurationPropertySchemaSchema,
+    schema: registeredConfigurationSchemaSchema,
     schemaVersion: z.string().min(1).optional(),
   })
   .refine(
@@ -84,6 +90,8 @@ export const schemaRegistrationMetadataSchema = z.strictObject({
 });
 
 export const schemaRegistrationResponseSchema = z.strictObject({
+  revision: z.string().optional(),
+  compatibility: z.enum(["compatible", "breaking", "unknown"]).optional(),
   success: z.boolean(),
   isNewSchema: z.boolean(),
   hasBreakingChanges: z.boolean(),
@@ -91,3 +99,15 @@ export const schemaRegistrationResponseSchema = z.strictObject({
   breakingChanges: z.array(z.string()).readonly().optional(),
   error: weaverErrorSchema.optional(),
 });
+
+export const schemaRegistrationOptionsSchema = z.strictObject({
+  ifRevision: z.string().min(1).optional(),
+});
+export const schemaRegistrationOperationSchema = z.union([
+  serviceSchemaRegistrationRequestSchema.safeExtend(
+    schemaRegistrationOptionsSchema.shape,
+  ),
+  fragmentSchemaRegistrationRequestSchema.safeExtend(
+    schemaRegistrationOptionsSchema.shape,
+  ),
+]);

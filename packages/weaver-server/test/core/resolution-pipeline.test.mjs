@@ -1,5 +1,18 @@
-import { createWeaverConfigService } from "../../src/core/config-service.ts";
+import { createTestService } from "../setup-service.ts";
+import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import { deepSet, deepRemove } from "@weaver-conf/config-engine";
+import { hostForControl } from "../../src/core/config-service-internal.ts";
+
+const schemas = {
+  app: { type: "object", additionalProperties: true, description: "private" },
+  shared: { type: "object", additionalProperties: true },
+  myservice: { type: "object", additionalProperties: true },
+  database: { type: "object", additionalProperties: true },
+  db: { type: "object", additionalProperties: true },
+  a: { type: "object", additionalProperties: true },
+  b: { type: "object", additionalProperties: true },
+};
+const createWeaverConfigService = (options, paths = []) => createTestService(options, schemas, paths);
 
 function createTestProvider(id, layer, entries, writable = true) {
   let data = JSON.parse(JSON.stringify(entries));
@@ -101,7 +114,7 @@ describe("Resolution pipeline", () => {
 
   test("resolveAll() returns clean entries (no markers)", async () => {
     const entries = {
-      key: { _weaver: "secret-ref", provider: "vault", uri: "x" },
+      app: { key: { _weaver: "secret-ref", provider: "vault", uri: "x" } },
     };
     const mockBackend = {
       resolve: async () => "resolved",
@@ -114,20 +127,21 @@ describe("Resolution pipeline", () => {
     });
 
     const snapshot = await svc.resolveAll();
-    expect(snapshot.entries.key).toBe("resolved");
+    expect(snapshot.entries.app.key).toBe("resolved");
   });
 
   test("without secretBackend, SecretReference markers stay private", async () => {
     const entries = {
-      key: { _weaver: "secret-ref", provider: "vault", uri: "x" },
+      app: { key: { _weaver: "secret-ref", provider: "vault", uri: "x" } },
     };
-    const provider = createTestProvider("p1", "platform", entries);
+    const provider = createTestProvider("p1", "platform", {});
     const svc = await createWeaverConfigService({
       providers: [provider],
       environment: "dev",
     });
 
-    const value = await svc.get("key");
+    hostForControl(svc).layerData.set("p1", entries);
+    const value = await svc.get("app.key");
     expect(value).toBe(undefined);
   });
 
@@ -136,12 +150,13 @@ describe("Resolution pipeline", () => {
       a: { _weaver: "mount", source: "b" },
       b: { _weaver: "mount", source: "a" },
     };
-    const provider = createTestProvider("p1", "platform", entries);
+    const provider = createTestProvider("p1", "platform", {});
     const svc = await createWeaverConfigService({
       providers: [provider],
       environment: "dev",
     });
 
+    hostForControl(svc).layerData.set("p1", entries);
     const value = await svc.get("a");
     expect(value).toBe(undefined);
   });
@@ -206,23 +221,22 @@ describe("Resolution pipeline", () => {
         empty: { _weaver: "mount", source: "" },
         syntax: { _weaver: "mount", source: "shared[" },
         unsafe: { _weaver: "mount", source: "shared.__proto__" },
-        protected: { _weaver: "mount", source: "_weaver.registry" },
+        protected: { _weaver: "mount", source: "_weaver.catalog.registrations" },
         ordinary: { _weaver: "metadata", value: "base-kept" },
         valid: { _weaver: "mount", source: "shared.value" },
       },
-      _weaver: { registry: "private" },
     });
-    const scoped = createTestProvider("scope", "tenant:acme", {
+    const scoped = createInMemoryStorageProvider({ id: "scope", layer: "tenant:acme", initialEntries: {
       app: {
         scopedMissing: { _weaver: "mount" },
         scopedMalformed: { _weaver: "mount", source: ".bad" },
         ordinary: { _weaver: "metadata", value: "scope-kept" },
       },
-    });
+    } });
     const service = await createWeaverConfigService({
       providers: [base, scoped],
       environment: "dev",
-    });
+    }, [[{ scopeId: "tenant", value: "acme" }]]);
     const scopePath = [{ scopeId: "tenant", value: "acme" }];
     const malformedKeys = [
       "missing",

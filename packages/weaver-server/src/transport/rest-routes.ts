@@ -1,23 +1,24 @@
-// REST route definitions for config and scope endpoints
-
 import { buildPath } from "@weaver-conf/config-engine";
 import type { WriteResult } from "@weaver-conf/config-types";
 import type { AuditService } from "../audit/audit-service";
 import type { WeaverConfigService, WriteContext } from "../core/config-service";
 import type { SchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
-import { parseScopeQuery } from "../core/scope-utils";
-import type { WeaverErrorCode } from "../types/index";
-import { createWeaverError, httpStatusForError } from "../types/index";
+import { assertServiceScope, parseScopeQuery } from "../core/scope-utils";
+import type { WeaverRuntime } from "../server-runtime";
 import type { AuthGate } from "./auth-gate";
 import type { RestRequest, RestResponse, RestRoute } from "./rest-adapter";
-import { envelope, errorEnvelope, v1Headers } from "./rest-helpers";
-import { buildSchemaRoutes } from "./rest-schema-routes";
 import {
-  configBatchBodySchema,
-  configWriteBodySchema,
-  scopeProvisionBodySchema,
-} from "./rest-schemas";
+  extractExpectedRevision,
+  param,
+  queryOpt,
+  v1Error,
+  v1Response,
+} from "./rest-helpers";
+import { buildSchemaRoutes } from "./rest-schema-routes";
+import { configBatchBodySchema, configWriteBodySchema } from "./rest-schemas";
+import { buildScopeRoutes } from "./rest-scope-routes";
+import { buildUpgradeRoutes } from "./rest-upgrade-routes";
 
 export interface RouteFactoryDeps {
   configService: WeaverConfigService;
@@ -25,342 +26,190 @@ export interface RouteFactoryDeps {
   scopeManager?: ScopeManager | undefined;
   authGate?: AuthGate | undefined;
   auditService?: AuditService | undefined;
-}
-
-function param(params: Record<string, string>, name: string): string {
-  const value = params[name];
-  if (!value) {
-    throw createWeaverError(
-      "VALIDATION_ERROR",
-      `Missing required route parameter: ${name}`,
-    );
-  }
-  return value;
-}
-
-function queryOpt(
-  query: Record<string, string>,
-  name: string,
-): string | undefined {
-  const v = query[name];
-  return v === undefined ? undefined : v;
-}
-
-function v1Response<T>(
-  configService: WeaverConfigService,
-  status: number,
-  data: T,
-): RestResponse {
-  const rev = configService.revision;
-  return { status, body: envelope(data, rev), headers: v1Headers(rev) };
-}
-
-function v1Error(
-  configService: WeaverConfigService,
-  code: WeaverErrorCode,
-  message: string,
-): RestResponse {
-  const rev = configService.revision;
-  const err = createWeaverError(code, message);
-  return {
-    status: httpStatusForError(code),
-    body: errorEnvelope(err, rev),
-    headers: v1Headers(rev),
-  };
-}
-
-function extractExpectedRevision(req: RestRequest): string | undefined {
-  const ifMatch = req.headers["if-match"];
-  if (ifMatch === undefined) return undefined;
-  return ifMatch.replace(/^"|"$/g, "");
-}
-
-function writeErrorResponse(
-  configService: WeaverConfigService,
-  result: WriteResult,
-  fallback: string,
-): RestResponse {
-  const errorObj = result.error;
-  const msg = errorObj?.message ?? fallback;
-  const code: WeaverErrorCode =
-    errorObj?.code === "REVISION_CONFLICT"
-      ? "REVISION_CONFLICT"
-      : "VALIDATION_ERROR";
-  const status = code === "REVISION_CONFLICT" ? 409 : httpStatusForError(code);
-  const rev = configService.revision;
-  return {
-    status,
-    body: errorEnvelope(createWeaverError(code, msg), rev),
-    headers: v1Headers(rev),
-  };
+  runtime?: WeaverRuntime | undefined;
 }
 
 export function buildRoutes(deps: RouteFactoryDeps): RestRoute[] {
-  const {
-    configService,
-    schemaRegistry,
-    scopeManager,
-    authGate,
-    auditService,
-  } = deps;
-
   return [
-    ...buildSchemaRoutes({
-      configService,
-      schemaRegistry,
-      authGate,
-      auditService,
-    }),
-    {
-      method: "GET",
-      path: "/v1/config",
-      async handler(req) {
-        const scopePath = parseScopeQuery(queryOpt(req.query, "scope"));
-        const opts = scopePath ? { scopePath } : {};
-        const snapshot = await configService.resolveAll(opts);
-        if (authGate && req.authContext) {
-          const accessCtx = authGate.toAccessContext(req.authContext);
-          const filtered = authGate.filterVisible(
-            accessCtx,
-            snapshot.entries,
-            req.schemaMap ?? new Map(),
-          );
-          return v1Response(configService, 200, {
-            ...snapshot,
-            entries: filtered,
-          });
-        }
-        return v1Response(configService, 200, snapshot);
-      },
-    },
-    {
-      method: "GET",
-      path: "/v1/config/*keyPath",
-      async handler(req) {
-        const keyPath = param(req.params, "keyPath");
-        const segments = keyPath.split("/");
-        const key = buildPath(segments);
-        const scopePath = parseScopeQuery(queryOpt(req.query, "scope"));
-        const opts = scopePath ? { scopePath } : {};
-        if (authGate && req.authContext) {
-          const accessCtx = authGate.toAccessContext(req.authContext);
-          const denied = authGate.gateRead(
-            accessCtx,
-            key,
-            req.schemaMap?.get(key),
-          );
-          if (denied) return denied;
-        }
-        if ("inspect" in req.query) {
-          const inspection = await configService.inspect(key);
-          return v1Response(configService, 200, inspection);
-        }
-        const value = await configService.get(key, opts);
-        return v1Response(configService, 200, { key, value });
-      },
-    },
-    {
-      method: "PUT",
-      path: "/v1/config/*keyPath",
-      async handler(req) {
-        const keyPath = param(req.params, "keyPath");
-        const segments = keyPath.split("/");
-        const key = buildPath(segments);
-        const layer = queryOpt(req.query, "layer") ?? "platform";
-        const environment = queryOpt(req.query, "env");
-        if (authGate && req.authContext) {
-          const accessCtx = authGate.toAccessContext(req.authContext);
-          const denied = authGate.gateWrite(
-            accessCtx,
-            layer,
-            key,
-            req.schemaMap?.get(key),
-          );
-          if (denied) return denied;
-        }
-        const body = configWriteBodySchema.parse(req.body);
-        const expectedRevision = extractExpectedRevision(req);
-        const writeCtx: WriteContext = {};
-        if (expectedRevision) writeCtx.expectedRevision = expectedRevision;
-        if (environment) writeCtx.environment = environment;
-        const result = await configService.set(
-          layer,
-          key,
-          body.value,
-          writeCtx,
-        );
-        if (!result.success)
-          return writeErrorResponse(configService, result, "Write failed");
-        return v1Response(configService, 200, result);
-      },
-    },
-    {
-      method: "DELETE",
-      path: "/v1/config/*keyPath",
-      async handler(req) {
-        const keyPath = param(req.params, "keyPath");
-        const segments = keyPath.split("/");
-        const key = buildPath(segments);
-        const layer = queryOpt(req.query, "layer") ?? "platform";
-        const environment = queryOpt(req.query, "env");
-        if (authGate && req.authContext) {
-          const accessCtx = authGate.toAccessContext(req.authContext);
-          const denied = authGate.gateWrite(
-            accessCtx,
-            layer,
-            key,
-            req.schemaMap?.get(key),
-          );
-          if (denied) return denied;
-        }
-        const expectedRevision = extractExpectedRevision(req);
-        const writeCtx: WriteContext = {};
-        if (expectedRevision) writeCtx.expectedRevision = expectedRevision;
-        if (environment) writeCtx.environment = environment;
-        const result = await configService.remove(layer, key, writeCtx);
-        if (!result.success)
-          return writeErrorResponse(configService, result, "Remove failed");
-        return v1Response(configService, 200, result);
-      },
-    },
-    {
-      method: "PATCH",
-      path: "/v1/config",
-      async handler(req) {
-        const layer = queryOpt(req.query, "layer") ?? "platform";
-        const environment = queryOpt(req.query, "env");
-        const body = configBatchBodySchema.parse(req.body);
-        const entries = body.entries;
-        if (authGate && req.authContext) {
-          const accessCtx = authGate.toAccessContext(req.authContext);
-          for (const key of Object.keys(entries)) {
-            const denied = authGate.gateWrite(
-              accessCtx,
-              layer,
-              key,
-              req.schemaMap?.get(key),
-            );
-            if (denied) return denied;
-          }
-        }
-        const expectedRevision = extractExpectedRevision(req);
-        const writeCtx: WriteContext = {};
-        if (expectedRevision) writeCtx.expectedRevision = expectedRevision;
-        if (environment) writeCtx.environment = environment;
-        const result = await configService.setMany(layer, entries, writeCtx);
-        if (!result.success)
-          return writeErrorResponse(
-            configService,
-            result,
-            "Batch write failed",
-          );
-        return v1Response(configService, 200, {
-          ...result,
-          written: Object.keys(entries).length,
-        });
-      },
-    },
-    {
-      method: "GET",
-      path: "/v1/scopes",
-      async handler() {
-        if (!scopeManager) {
-          return v1Response(configService, 200, { definitions: [] });
-        }
-        const definitions = scopeManager.listScopes();
-        return v1Response(configService, 200, { definitions });
-      },
-    },
-    {
-      method: "GET",
-      path: "/v1/scopes/:scopeId",
-      async handler(req) {
-        if (!scopeManager) {
-          return v1Response(configService, 200, { values: [] });
-        }
-        const scopeId = param(req.params, "scopeId");
-        const values = scopeManager.listScopeValues(scopeId);
-        return v1Response(configService, 200, { values });
-      },
-    },
-    {
-      method: "POST",
-      path: "/v1/admin/scopes/:scopeId",
-      async handler(req) {
-        if (!scopeManager) {
-          return v1Error(
-            configService,
-            "VALIDATION_ERROR",
-            "Scope manager not configured",
-          );
-        }
-        if (authGate && req.authContext) {
-          const accessCtx = authGate.toAccessContext(req.authContext);
-          const denied = authGate.gateWrite(
-            accessCtx,
-            "admin",
-            `scopes.${param(req.params, "scopeId")}`,
-            undefined,
-          );
-          if (denied) return denied;
-        }
-        const scopeId = param(req.params, "scopeId");
-        const body = scopeProvisionBodySchema.parse(req.body);
-        const value = body.value;
-        const displayName = body.displayName;
-        const result = await scopeManager.provision({
-          scopeId,
-          value,
-          ...(displayName !== undefined ? { displayName } : {}),
-          actor: "api",
-        });
-        if (!result.success) {
-          return v1Error(
-            configService,
-            "VALIDATION_ERROR",
-            result.error?.message ?? "Provision failed",
-          );
-        }
-        return v1Response(configService, 201, result);
-      },
-    },
-    {
-      method: "DELETE",
-      path: "/v1/admin/scopes/:scopeId/:value",
-      async handler(req) {
-        if (!scopeManager) {
-          return v1Error(
-            configService,
-            "VALIDATION_ERROR",
-            "Scope manager not configured",
-          );
-        }
-        if (authGate && req.authContext) {
-          const accessCtx = authGate.toAccessContext(req.authContext);
-          const denied = authGate.gateWrite(
-            accessCtx,
-            "admin",
-            `scopes.${param(req.params, "scopeId")}`,
-            undefined,
-          );
-          if (denied) return denied;
-        }
-        const scopeId = param(req.params, "scopeId");
-        const value = param(req.params, "value");
-        const result = await scopeManager.deprovision({
-          scopeId,
-          value,
-          actor: "api",
-        });
-        if (!result.success) {
-          return v1Error(
-            configService,
-            "SCOPE_NOT_FOUND",
-            result.error?.message ?? "Scope not found",
-          );
-        }
-        return v1Response(configService, 200, result);
-      },
-    },
+    ...buildUpgradeRoutes(deps.runtime),
+    ...buildSchemaRoutes(deps),
+    readAllRoute(deps),
+    readKeyRoute(deps),
+    setRoute(deps),
+    removeRoute(deps),
+    batchRoute(deps),
+    ...buildScopeRoutes(deps),
   ];
+}
+
+function readAllRoute({
+  configService,
+  authGate,
+}: RouteFactoryDeps): RestRoute {
+  return {
+    method: "GET",
+    path: "/v1/config",
+    async handler(req) {
+      const scopePath = parseScopeQuery(queryOpt(req.query, "scope"));
+      await assertServiceScope(configService, scopePath);
+      const snapshot = await configService.resolveAll(
+        scopePath ? { scopePath } : {},
+      );
+      if (authGate && req.authContext) {
+        const context = authGate.toAccessContext(req.authContext);
+        const filter = (entries: Record<string, unknown>) =>
+          authGate.filterVisible(context, entries, req.schemaMap ?? new Map());
+        return v1Response(configService, 200, {
+          ...snapshot,
+          entries: filter(snapshot.entries),
+          scopes: Object.fromEntries(
+            Object.entries(snapshot.scopes).map(([scope, entries]) => [
+              scope,
+              filter(entries),
+            ]),
+          ),
+        });
+      }
+      return v1Response(configService, 200, snapshot);
+    },
+  };
+}
+
+function readKeyRoute({
+  configService,
+  authGate,
+}: RouteFactoryDeps): RestRoute {
+  return {
+    method: "GET",
+    path: "/v1/config/*keyPath",
+    async handler(req) {
+      const key = buildPath(param(req.params, "keyPath").split("/"));
+      const scopePath = parseScopeQuery(queryOpt(req.query, "scope"));
+      if (authGate && req.authContext) {
+        const denied = authGate.gateRead(
+          authGate.toAccessContext(req.authContext),
+          key,
+          req.schemaMap?.get(key),
+        );
+        if (denied) return denied;
+      }
+      await assertServiceScope(configService, scopePath);
+      if ("inspect" in req.query)
+        return v1Response(configService, 200, await configService.inspect(key));
+      const value = await configService.get(
+        key,
+        scopePath ? { scopePath } : {},
+      );
+      return v1Response(configService, 200, { key, value });
+    },
+  };
+}
+
+function writeContext(req: RestRequest): WriteContext {
+  const expectedRevision = extractExpectedRevision(req);
+  const environment = queryOpt(req.query, "env");
+  return {
+    ...(expectedRevision ? { expectedRevision } : {}),
+    ...(environment ? { environment } : {}),
+  };
+}
+
+function gateWrite(
+  req: RestRequest,
+  deps: RouteFactoryDeps,
+  layer: string,
+  key: string,
+): RestResponse | null {
+  const gate = deps.authGate;
+  return gate && req.authContext
+    ? gate.gateWrite(
+        gate.toAccessContext(req.authContext),
+        layer,
+        key,
+        req.schemaMap?.get(key),
+      )
+    : null;
+}
+
+function writeResponse(
+  service: WeaverConfigService,
+  result: WriteResult,
+  fallback: string,
+): RestResponse {
+  if (result.success) return v1Response(service, 200, result);
+  return v1Error(
+    service,
+    result.error?.code === "REVISION_CONFLICT" ||
+      result.error?.code === "MAINTENANCE" ||
+      result.error?.code === "CONFIG_NOT_READY"
+      ? result.error.code
+      : "VALIDATION_ERROR",
+    result.error?.message ?? fallback,
+  );
+}
+
+function setRoute(deps: RouteFactoryDeps): RestRoute {
+  return {
+    method: "PUT",
+    path: "/v1/config/*keyPath",
+    async handler(req) {
+      const key = buildPath(param(req.params, "keyPath").split("/"));
+      const layer = queryOpt(req.query, "layer") ?? "platform";
+      const denied = gateWrite(req, deps, layer, key);
+      if (denied) return denied;
+      const body = configWriteBodySchema.parse(req.body);
+      const result = await deps.configService.set(
+        layer,
+        key,
+        body.value,
+        writeContext(req),
+      );
+      return writeResponse(deps.configService, result, "Write failed");
+    },
+  };
+}
+
+function removeRoute(deps: RouteFactoryDeps): RestRoute {
+  return {
+    method: "DELETE",
+    path: "/v1/config/*keyPath",
+    async handler(req) {
+      const key = buildPath(param(req.params, "keyPath").split("/"));
+      const layer = queryOpt(req.query, "layer") ?? "platform";
+      const denied = gateWrite(req, deps, layer, key);
+      if (denied) return denied;
+      const result = await deps.configService.remove(
+        layer,
+        key,
+        writeContext(req),
+      );
+      return writeResponse(deps.configService, result, "Remove failed");
+    },
+  };
+}
+
+function batchRoute(deps: RouteFactoryDeps): RestRoute {
+  return {
+    method: "PATCH",
+    path: "/v1/config",
+    async handler(req) {
+      const layer = queryOpt(req.query, "layer") ?? "platform";
+      const { entries } = configBatchBodySchema.parse(req.body);
+      for (const key of Object.keys(entries)) {
+        const denied = gateWrite(req, deps, layer, key);
+        if (denied) return denied;
+      }
+      const result = await deps.configService.setMany(
+        layer,
+        entries,
+        writeContext(req),
+      );
+      if (!result.success)
+        return writeResponse(deps.configService, result, "Batch write failed");
+      return v1Response(deps.configService, 200, {
+        ...result,
+        written: Object.keys(entries).length,
+      });
+    },
+  };
 }

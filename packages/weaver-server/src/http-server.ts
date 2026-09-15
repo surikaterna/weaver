@@ -1,9 +1,11 @@
 import type { AddressInfo, Socket } from "node:net";
+import { WeaverErrorInstance } from "@weaver-conf/config-types";
 import express, {
   type NextFunction,
   type Request,
   type Response,
 } from "express";
+import { httpStatusForError } from "./types/errors";
 
 type RequestHandler = (request: Request, response: Response) => Promise<void>;
 
@@ -21,6 +23,16 @@ function isJsonParseError(error: unknown): boolean {
     return false;
   }
   return error.status === 400 && error.type === "entity.parse.failed";
+}
+
+function sendClientError(error: unknown, res: Response): boolean {
+  if (!(error instanceof WeaverErrorInstance)) return false;
+  const status = httpStatusForError(error.code);
+  if (status < 400 || status >= 500) return false;
+  res.status(status).json({
+    error: { code: error.code, message: error.message },
+  });
+  return true;
 }
 
 export async function startHttpServer(options: {
@@ -51,6 +63,7 @@ export async function startHttpServer(options: {
         res.status(400).json({ error: "invalid request body" });
         return;
       }
+      if (sendClientError(error, res)) return;
 
       res.status(500).json({ error: "internal server error" });
     },

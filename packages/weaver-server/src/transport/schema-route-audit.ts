@@ -51,6 +51,9 @@ export function schemaRegistrationRequestContext(
   const subject = subjectFromRequest(req);
   return {
     ...(subject ? { subject, actor: subject } : {}),
+    ...(req.headers["if-match"] !== undefined
+      ? { expectedRevision: req.headers["if-match"].replace(/^"|"$/g, "") }
+      : {}),
   };
 }
 

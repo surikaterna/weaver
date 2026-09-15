@@ -26,6 +26,8 @@ export {
   registeredPathPatchRequestSchema,
   registeredPathPatchResponseSchema,
   registeredSchemasResponseSchema,
+  schemaRegistrationOperationSchema,
+  schemaRegistrationOptionsSchema,
   schemaRegistrationResponseSchema,
   serviceSchemaRegistrationRequestSchema,
   WeaverConfig,

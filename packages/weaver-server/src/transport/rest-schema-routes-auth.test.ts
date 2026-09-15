@@ -233,9 +233,7 @@ describe("REST schema routes authGate denial", () => {
 
     expect(res.status).toBe(403);
     expect(registryCalls.registrations).toBe(0);
-    expect(authGate.writeRequests).toEqual([
-      { layer: "admin", key: "_weaver.registry.schemas" },
-    ]);
+    expect(authGate.writeRequests).toEqual([]);
   });
 
   it("denies fragment schema registration before registering schema", async () => {
@@ -262,9 +260,7 @@ describe("REST schema routes authGate denial", () => {
 
     expect(res.status).toBe(403);
     expect(registryCalls.registrations).toBe(0);
-    expect(authGate.writeRequests).toEqual([
-      { layer: "admin", key: "_weaver.registry.schemas" },
-    ]);
+    expect(authGate.writeRequests).toEqual([]);
   });
 
   it("denies registered object writes before write side effects", async () => {

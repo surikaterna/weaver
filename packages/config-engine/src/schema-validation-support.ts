@@ -34,7 +34,7 @@ export interface SchemaValidationOptions {
   path?: string | readonly SchemaValidationPathSegment[] | undefined;
 }
 
-export type ValidationMode = "partial" | "effective";
+export type ValidationMode = "partial" | "raw-partial" | "effective";
 
 export interface ValidationContext {
   mode: ValidationMode;
@@ -145,18 +145,6 @@ export function compileSchemaPattern(
     });
     return undefined;
   }
-}
-
-export function getEffectiveValue(
-  schema: ConfigurationPropertySchema,
-  value: unknown,
-  mode: ValidationMode,
-): unknown {
-  return mode === "effective" &&
-    value === undefined &&
-    schema.default !== undefined
-    ? schema.default
-    : value;
 }
 
 export function matchesAnyType(

@@ -1,5 +1,13 @@
-import { createWeaverConfigService } from "../../src/core/config-service.ts";
+import { createTestService } from "../setup-service.ts";
+import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import { deepSet, deepRemove } from "@weaver-conf/config-engine";
+
+const schemas = {
+  app: { type: "object", properties: { name: { type: "string" }, theme: { type: "string" }, key: { type: "string" } }, additionalProperties: false },
+  db: { type: "object", properties: { host: { type: "string" }, port: { type: "number" } }, additionalProperties: false },
+  cache: { type: "object", properties: { ttl: { type: "number" } }, additionalProperties: false },
+};
+const createWeaverConfigService = (options, paths = []) => createTestService(options, schemas, paths);
 
 function createTestProvider(id, layer, entries, writable = true) {
   let data = JSON.parse(JSON.stringify(entries));
@@ -82,57 +90,57 @@ describe("WeaverConfigService read path", () => {
 
   test("multi-scope: platform + scoped providers grouped correctly", async () => {
     const platform = createTestProvider("p1", "platform", { app: { name: "test" } });
-    const acme = createTestProvider("t1", "tenant:acme", { theme: "dark" });
-    const globex = createTestProvider("t2", "tenant:globex", { theme: "light" });
+    const acme = createInMemoryStorageProvider({ id: "t1", layer: "tenant:acme", initialEntries: { app: { theme: "dark" } } });
+    const globex = createInMemoryStorageProvider({ id: "t2", layer: "tenant:globex", initialEntries: { app: { theme: "light" } } });
 
     const svc = await createWeaverConfigService({
       providers: [platform, acme, globex],
       environment: "dev",
-    });
+    }, [[{ scopeId: "tenant", value: "acme" }], [{ scopeId: "tenant", value: "globex" }]]);
 
     const snapshot = await svc.resolveAll();
     expect(snapshot.entries.app.name).toBe("test");
-    expect(snapshot.scopes["tenant:acme"]["theme"]).toBe("dark");
-    expect(snapshot.scopes["tenant:globex"]["theme"]).toBe("light");
+    expect(snapshot.scopes["tenant:acme"].app.theme).toBe("dark");
+    expect(snapshot.scopes["tenant:globex"].app.theme).toBe("light");
   });
 
   test("get with scopePath merges scope over platform", async () => {
-    const platform = createTestProvider("p1", "platform", { theme: "default" });
-    const acme = createTestProvider("t1", "tenant:acme", { theme: "dark" });
+    const platform = createTestProvider("p1", "platform", { app: { theme: "default" } });
+    const acme = createInMemoryStorageProvider({ id: "t1", layer: "tenant:acme", initialEntries: { app: { theme: "dark" } } });
 
     const svc = await createWeaverConfigService({
       providers: [platform, acme],
       environment: "dev",
-    });
+    }, [[{ scopeId: "tenant", value: "acme" }]]);
 
-    const val = await svc.get("theme", { scopePath: [{ scopeId: "tenant", value: "acme" }] });
+    const val = await svc.get("app.theme", { scopePath: [{ scopeId: "tenant", value: "acme" }] });
     expect(val).toBe("dark");
   });
 
   test("reloadProvider picks up changes", async () => {
-    const provider = createTestProvider("p1", "platform", { key: "old" });
+    const provider = createTestProvider("p1", "platform", { app: { key: "old" } });
     const svc = await createWeaverConfigService({
       providers: [provider],
       environment: "dev",
     });
 
-    expect(await svc.get("key")).toBe("old");
+    expect(await svc.get("app.key")).toBe("old");
 
-    provider._setData({ key: "new" });
+    provider._setData({ app: { key: "new" } });
     await svc.reloadProvider("p1");
 
-    expect(await svc.get("key")).toBe("new");
+    expect(await svc.get("app.key")).toBe("new");
   });
 
   test("revision changes after reload", async () => {
-    const provider = createTestProvider("p1", "platform", { key: "v1" });
+    const provider = createTestProvider("p1", "platform", { app: { key: "v1" } });
     const svc = await createWeaverConfigService({
       providers: [provider],
       environment: "dev",
     });
 
     const rev1 = svc.revision;
-    provider._setData({ key: "v2" });
+    provider._setData({ app: { key: "v2" } });
     await svc.reloadProvider("p1");
     const rev2 = svc.revision;
 

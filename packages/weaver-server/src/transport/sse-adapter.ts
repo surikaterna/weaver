@@ -1,8 +1,8 @@
 // SSE transport adapter — three-event model (snapshot/change/checkpoint)
 import { formatScopePath } from "@weaver-conf/config-types";
 import type { WeaverConfigService } from "../core/config-service";
-import { parseScopeQuery } from "../core/scope-utils";
-import type { ConfigDelta } from "../types/index";
+import { assertServiceScope, parseScopeQuery } from "../core/scope-utils";
+import { type ConfigDelta, createWeaverError } from "../types/index";
 import { formatSSEMessage, type SSEMessage } from "./sse-events";
 
 /** Default max messages retained per client to prevent unbounded memory growth */
@@ -29,7 +29,11 @@ export interface SSEClient {
 }
 
 export interface SSEAdapter {
-  createClient(options?: SSEClientOptions): Promise<SSEClient>;
+  /** The signal controls connection lifetime; it is not a serialized option. */
+  createClient(
+    options?: SSEClientOptions,
+    signal?: AbortSignal,
+  ): Promise<SSEClient>;
   removeClient(client: SSEClient): void;
   readonly clientCount: number;
   closeAll(): void;
@@ -61,30 +65,76 @@ function matchesScopeFilter(
   scope: string | undefined,
 ): boolean {
   if (!scope) return true;
-  // scope filter format: "scopeId:value" — match against delta.layer
-  return delta.layer === scope || delta.layer.startsWith(`${scope}/`);
+  // Each scoped delta describes one full effective context, not its descendants.
+  return delta.layer === scope;
+}
+
+async function whileActive<T>(
+  operation: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  let onAbort = () => {};
+  const canceled = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  try {
+    const result = await Promise.race([operation, canceled]);
+    signal.throwIfAborted();
+    return result;
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 }
 
 export function createSSEAdapter(options: SSEAdapterOptions): SSEAdapter {
   const { configService, maxBufferSize = DEFAULT_MAX_BUFFER_SIZE } = options;
   const clients = new Set<SSEClient & { unsubscribe: () => void }>();
+  const pendingCreations = new Set<AbortController>();
   let clientIdCounter = 0;
   let checkpointTimer: ReturnType<typeof setInterval> | null = null;
 
   async function createClient(
     clientOptions?: SSEClientOptions,
+    signal?: AbortSignal,
   ): Promise<SSEClient> {
+    const cancellation = new AbortController();
+    pendingCreations.add(cancellation);
+    const lifetime = signal
+      ? AbortSignal.any([signal, cancellation.signal])
+      : cancellation.signal;
+    try {
+      const client = await createActiveClient(clientOptions, lifetime);
+      lifetime.throwIfAborted();
+      return client;
+    } finally {
+      pendingCreations.delete(cancellation);
+    }
+  }
+
+  async function createActiveClient(
+    clientOptions: SSEClientOptions | undefined,
+    signal: AbortSignal,
+  ): Promise<SSEClient> {
+    signal.throwIfAborted();
     const opts: SSEClientOptions = clientOptions ?? {};
     const messages: string[] = [];
     let closed = false;
     const id = `sse-${++clientIdCounter}`;
 
     const scopePath = parseScopeQuery(opts.scope);
+    const scope = scopePath ? formatScopePath(scopePath) : undefined;
+    await whileActive(
+      assertServiceScope(configService, scopePath, signal),
+      signal,
+    );
+    signal.throwIfAborted();
 
     const unsubscribe = configService.onDelta((delta) => {
       if (closed) return;
       if (!matchesPrefix(delta.key, opts.prefix)) return;
-      if (!matchesScopeFilter(delta, opts.scope)) return;
+      if (!matchesScopeFilter(delta, scope)) return;
 
       client.send({
         event: "change",
@@ -115,23 +165,30 @@ export function createSSEAdapter(options: SSEAdapterOptions): SSEAdapter {
       close(): void {
         if (closed) return;
         closed = true;
+        signal.removeEventListener("abort", client.close);
         unsubscribe();
         clients.delete(client);
       },
     };
 
+    signal.addEventListener("abort", client.close, { once: true });
+    if (signal.aborted) client.close();
+    signal.throwIfAborted();
     clients.add(client);
 
     // v1: always send snapshot (delta history not tracked, so `since` is ignored)
-    const snapshot = await configService
-      .resolveAll(scopePath ? { scopePath } : undefined)
-      .catch((error: unknown) => {
-        client.close();
-        throw error;
-      });
-    const effectiveEntries = scopePath
-      ? (snapshot.scopes[formatScopePath(scopePath)] ?? snapshot.entries)
-      : snapshot.entries;
+    const snapshot = await whileActive(
+      configService.resolveAll(scopePath ? { scopePath } : undefined),
+      signal,
+    ).catch((error: unknown) => {
+      client.close();
+      throw error;
+    });
+    const effectiveEntries = scope ? snapshot.scopes[scope] : snapshot.entries;
+    if (!effectiveEntries) {
+      client.close();
+      throw createWeaverError("SCOPE_NOT_FOUND", "Scoped snapshot is missing");
+    }
     const filteredEntries = filterEntriesByPrefix(
       effectiveEntries,
       opts.prefix,
@@ -152,6 +209,7 @@ export function createSSEAdapter(options: SSEAdapterOptions): SSEAdapter {
   }
 
   function closeAll(): void {
+    for (const pending of pendingCreations) pending.abort();
     for (const client of [...clients]) {
       client.close();
     }

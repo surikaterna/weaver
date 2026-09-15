@@ -35,6 +35,7 @@ export function setupDeltaSubscription(deps: SubscriptionDeps): Unsubscribe {
 
   return transport.subscribe((delta: ConfigDelta) => {
     const scopePath = scopePathFromLayer(delta.layer);
+    if (scopePath === null) return;
     if (scopePath) {
       applyScopedDelta(delta, scopePath);
     } else {
@@ -71,12 +72,12 @@ export function setupDeltaSubscription(deps: SubscriptionDeps): Unsubscribe {
   });
 }
 
-function scopePathFromLayer(layer: string): ScopeInstance[] | undefined {
-  if (!layer.includes(":")) return undefined;
+function scopePathFromLayer(layer: string): ScopeInstance[] | undefined | null {
+  if (/^[^:/,\s]+$/.test(layer)) return undefined;
   const scopePath: ScopeInstance[] = [];
   for (const part of layer.split("/")) {
+    if (!/^[^:/,\s]+:[^:/,\s]+$/.test(part)) return null;
     const separator = part.indexOf(":");
-    if (separator <= 0 || separator === part.length - 1) return undefined;
     scopePath.push({
       scopeId: part.slice(0, separator),
       value: part.slice(separator + 1),

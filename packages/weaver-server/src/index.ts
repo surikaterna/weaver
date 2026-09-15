@@ -3,6 +3,12 @@
 export type { WeaverLogger } from "@weaver-conf/config-engine";
 export { consoleLogger } from "@weaver-conf/config-engine";
 export type {
+  MaintenanceStatus,
+  UpgradeApplyRequest,
+  UpgradeExecutionResult,
+  UpgradeRecoveryRequest,
+} from "@weaver-conf/config-types";
+export type {
   AuditService,
   AuditServiceOptions,
 } from "./audit/audit-service";
@@ -36,18 +42,26 @@ export {
   createJwtValidator,
 } from "./auth/index";
 export type {
-  BootstrapOptions,
-  BootstrapResult,
-  LayerFactoryDeps,
-  ProviderFactory,
+  BootstrapAdministrator,
+  BootstrapCredentials,
+  BootstrapRuntimeOptions,
+  InstalledProviderFactory,
+  ProviderBuildContext,
+  ProviderFactories,
+  ProviderResource,
 } from "./bootstrap/index";
-// bootstrap
 export {
-  bootstrap,
-  createProviders,
-  registerProviderFactory,
-  resolveEnvVars,
+  authenticateBootstrapAdministrator,
+  createBuiltinProviderFactories,
+  initializeWeaver,
+  inspectWeaver,
+  readBootstrapSeed,
 } from "./bootstrap/index";
+export {
+  builtinCatalogReference,
+  prepareBuiltinCatalog,
+  readBuiltinRecoveryEnvelope,
+} from "./core/builtin-catalog";
 export type {
   ChangeDetector,
   ChangeDetectorOptions,
@@ -55,7 +69,6 @@ export type {
   EffectiveValidationContext,
   OverrideSessionInfo,
   OverrideSessionRequest,
-  PersistentSchemaRegistryOptions,
   PromotionEngine,
   PromotionEngineOptions,
   PromotionRequest,
@@ -86,7 +99,7 @@ export type {
 export {
   buildScopePathString,
   createChangeDetector,
-  createPersistentSchemaRegistry,
+  createControlService,
   createPromotionEngine,
   createRollbackService,
   createSchemaRegistry,
@@ -104,7 +117,6 @@ export type { HealthEndpoints, HealthStatus } from "./health";
 export { createHealthEndpoints } from "./health";
 // providers
 export type {
-  EnvironmentOverlayOptions,
   FileSystemProviderOptions,
   FileSystemStorageProvider,
   GitManager,
@@ -119,14 +131,12 @@ export {
   createGitStorageProvider,
   createInMemoryStorageProvider,
   createMongoDBStorageProvider,
-  mergeWithEnvironment,
-  withEnvironmentOverlay,
 } from "./providers/index";
 export type { WeaverServer, WeaverServerOptions } from "./server";
 // server
 export { startWeaverServer } from "./server";
-export type { ServerEnv } from "./server-env";
-export { parseServerEnv, serverEnvSchema } from "./server-env";
+export { bootstrapCredentialsFromEnvironment } from "./server-env";
+export { openWeaverRuntime, WeaverRuntime } from "./server-runtime";
 export type { ShutdownManager, ShutdownManagerOptions } from "./shutdown";
 export { createShutdownManager } from "./shutdown";
 export type {
@@ -165,24 +175,18 @@ export {
   WEAVER_CONFIG_V1,
 } from "./transport/index";
 export type {
-  BootstrapConfig,
-  BootstrapLayer,
   ConfigDelta,
   ConfigSnapshot,
-  LayerProvider,
   WeaverError,
   WeaverErrorCode,
 } from "./types/index";
 // types
 export {
-  bootstrapConfigSchema,
-  bootstrapLayerSchema,
   configDeltaSchema,
   configSnapshotSchema,
   createWeaverError,
   HTTP_STATUS_MAP,
   httpStatusForError,
-  layerProviderSchema,
   weaverErrorCodeSchema,
   weaverErrorCodes,
   weaverErrorSchema,

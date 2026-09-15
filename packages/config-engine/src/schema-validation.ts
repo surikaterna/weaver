@@ -1,4 +1,5 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
+import { isConfigMount, isSecretReference } from "@weaver-conf/config-types";
 
 import { deepEqual } from "./deep-equal";
 import {
@@ -18,7 +19,6 @@ import {
   compileSchemaPattern,
   describeTypes,
   describeValue,
-  getEffectiveValue,
   hasOwn,
   isRecord,
   isSchemaArray,
@@ -56,10 +56,38 @@ export function validateEffectiveConfiguration(
   return validateSchema(schema, value, "effective", options);
 }
 
+/** Sparse raw layers may contain references; resolved values still require full validation. */
+export function validateLayerConfiguration(
+  schema: ConfigurationPropertySchema,
+  value: unknown,
+  options?: SchemaValidationOptions,
+): SchemaValidationResult {
+  return validateSchema(schema, value, "raw-partial", options);
+}
+
 export function validateConfigurationPatch(
   schema: ConfigurationPropertySchema,
   path: string | readonly SchemaValidationPathSegment[],
   value: unknown,
+  options?: SchemaValidationOptions,
+): SchemaValidationResult {
+  return validatePatch(schema, path, value, "partial", options);
+}
+
+export function validateLayerPatch(
+  schema: ConfigurationPropertySchema,
+  path: string | readonly SchemaValidationPathSegment[],
+  value: unknown,
+  options?: SchemaValidationOptions,
+): SchemaValidationResult {
+  return validatePatch(schema, path, value, "raw-partial", options);
+}
+
+function validatePatch(
+  schema: ConfigurationPropertySchema,
+  path: string | readonly SchemaValidationPathSegment[],
+  value: unknown,
+  mode: ValidationMode,
   options?: SchemaValidationOptions,
 ): SchemaValidationResult {
   const basePath = toPathSegmentsResult(options?.path);
@@ -78,7 +106,7 @@ export function validateConfigurationPatch(
     return { valid: target.errors.length === 0, errors: target.errors };
   }
 
-  const context: ValidationContext = { mode: "partial", errors: [] };
+  const context: ValidationContext = { mode, errors: [] };
   const targetPath = [...basePath.segments, ...patchPath.segments];
   for (const targetSchema of target.schemas) {
     validateValue({ schema: targetSchema, value, path: targetPath, context });
@@ -110,11 +138,12 @@ function validateValue(state: ValidationState): void {
     return;
   }
 
-  const value = getEffectiveValue(
-    state.schema,
-    state.value,
-    state.context.mode,
-  );
+  const value = state.value;
+  if (
+    state.context.mode === "raw-partial" &&
+    (isConfigMount(value) || isSecretReference(value))
+  )
+    return;
 
   if (value === undefined) {
     addError(state, "invalid-type", "Value must be defined", {
@@ -191,17 +220,6 @@ function validateRequiredProperties(
 ): void {
   for (const key of schema.required ?? []) {
     if (hasOwn(value, key)) {
-      continue;
-    }
-
-    const propertySchema = schema.properties?.[key];
-    if (propertySchema?.default !== undefined) {
-      validateValue({
-        schema: propertySchema,
-        value: undefined,
-        path: [...path, key],
-        context,
-      });
       continue;
     }
 

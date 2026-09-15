@@ -1,6 +1,6 @@
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
+import { createTestService } from "../../test/setup-service";
 import type { WeaverConfigService } from "../core/config-service";
-import { createWeaverConfigService } from "../core/config-service";
 import { createSchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
 import { createRestAdapter } from "./rest-adapter";
@@ -57,18 +57,24 @@ describe("REST body validation", () => {
     });
     const write = vi.spyOn(provider, "write");
     const remove = vi.spyOn(provider, "remove");
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "default",
-    });
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "default",
+      },
+      { checkout: settingsSchema },
+    );
     const schemaRegistry = createSchemaRegistry({ configService });
-    await schemaRegistry.register({
-      serviceId: "checkout",
-      environment: "default",
-      owner: { name: "Checkout", contact: "checkout@example.com" },
-      schema: settingsSchema,
-      fragmentSlots: [],
-    });
+    await schemaRegistry.register(
+      {
+        serviceId: "checkout",
+        environment: "default",
+        owner: { name: "Checkout", contact: "checkout@example.com" },
+        schema: settingsSchema,
+        fragmentSlots: [],
+      },
+      { expectedRevision: configService.revision },
+    );
     const adapter = createRestAdapter({ configService, schemaRegistry });
 
     const response = await adapter.handleRequest(
@@ -121,28 +127,45 @@ describe("REST body validation", () => {
     expect(await configService.get("checkout.db.port")).toBe(5432);
   });
 
-  it("maps invalid effective runtime reads to 422 without registry metadata", async () => {
+  it("keeps invalid reloads nonready without exposing registry metadata", async () => {
     const provider = createInMemoryStorageProvider({
       id: "platform",
       layer: "platform",
       initialEntries: {
-        checkout: { db: { host: "db" } },
+        checkout: { db: { host: "db", port: 5432 } },
         public: { ready: true },
       },
     });
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "default",
-    });
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "default",
+      },
+      {
+        checkout: settingsSchema,
+        public: { type: "object", additionalProperties: true },
+      },
+    );
     const schemaRegistry = createSchemaRegistry({ configService });
-    await schemaRegistry.register({
-      serviceId: "checkout",
-      environment: "default",
-      owner: { name: "Private Owner", contact: "private@example.com" },
-      schema: settingsSchema,
-      fragmentSlots: [],
-    });
+    await schemaRegistry.register(
+      {
+        serviceId: "checkout",
+        environment: "default",
+        owner: { name: "Private Owner", contact: "private@example.com" },
+        schema: settingsSchema,
+        fragmentSlots: [],
+      },
+      { expectedRevision: configService.revision },
+    );
     const adapter = createRestAdapter({ configService, schemaRegistry });
+    if (!provider.authority) throw new Error("Expected authority");
+    const corrupted = await provider.authority.readLayer("platform");
+    corrupted.entries.checkout = { db: { host: "db" } };
+    const fault = vi
+      .spyOn(provider.authority, "readLayer")
+      .mockResolvedValue(corrupted);
+    await expect(configService.reloadProvider("platform")).rejects.toThrow();
+    fault.mockRestore();
 
     const snapshot = await adapter.handleRequest("GET", "/v1/config", {
       params: {},
@@ -160,12 +183,9 @@ describe("REST body validation", () => {
       { params: {}, query: {}, headers: {} },
     );
 
-    expect(snapshot.status).toBe(422);
-    expect(registered.status).toBe(422);
-    expect(unrelated.status).toBe(200);
-    expect(JSON.stringify({ snapshot, registered })).toContain(
-      "effective-configuration-invalid",
-    );
+    expect(snapshot.status).toBe(503);
+    expect(registered.status).toBe(503);
+    expect(unrelated.status).toBe(503);
     expect(JSON.stringify({ snapshot, registered })).not.toContain(
       "private@example.com",
     );
@@ -187,19 +207,28 @@ describe("REST body validation", () => {
         },
       },
     });
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "default",
-      secretBackend: { resolve: async () => "db.internal" },
-    });
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "default",
+        secretBackend: { resolve: async () => "db.internal" },
+      },
+      {
+        checkout: settingsSchema,
+        shared: { type: "object", additionalProperties: true },
+      },
+    );
     const schemaRegistry = createSchemaRegistry({ configService });
-    await schemaRegistry.register({
-      serviceId: "checkout",
-      environment: "default",
-      owner: { name: "Checkout", contact: "checkout@example.com" },
-      schema: settingsSchema,
-      fragmentSlots: [],
-    });
+    await schemaRegistry.register(
+      {
+        serviceId: "checkout",
+        environment: "default",
+        owner: { name: "Checkout", contact: "checkout@example.com" },
+        schema: settingsSchema,
+        fragmentSlots: [],
+      },
+      { expectedRevision: configService.revision },
+    );
     const adapter = createRestAdapter({ configService, schemaRegistry });
 
     const exact = await adapter.handleRequest("GET", "/v1/config/checkout", {
@@ -233,10 +262,14 @@ describe("REST body validation", () => {
       layer: "tenant:acme",
       initialEntries: { app: { limit: 2 } },
     });
-    const configService = await createWeaverConfigService({
-      providers: [base, tenant],
-      environment: "default",
-    });
+    const configService = await createTestService(
+      {
+        providers: [base, tenant],
+        environment: "default",
+      },
+      { app: { type: "object", additionalProperties: true } },
+      [[{ scopeId: "tenant", value: "acme" }]],
+    );
     const adapter = createRestAdapter({ configService });
 
     const response = await adapter.handleRequest("GET", "/v1/config", {
@@ -260,17 +293,25 @@ describe("REST body validation", () => {
       initialEntries: {
         app: {
           name: "public",
-          direct: { _weaver: "mount", source: "_weaver.registry.schemas" },
-          bridge: { _weaver: "mount", source: "_weaver.registry.schemas" },
+          direct: { _weaver: "mount", source: "_weaver.catalog.registrations" },
+          bridge: { _weaver: "mount", source: "_weaver.catalog.registrations" },
           chained: { _weaver: "mount", source: "app.bridge" },
         },
-        _weaver: { registry: { schemas: "LEAK" } },
       },
     });
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "default",
-    });
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "default",
+      },
+      {
+        app: {
+          type: "object",
+          additionalProperties: true,
+          description: "LEAK",
+        },
+      },
+    );
     const adapter = createRestAdapter({ configService });
 
     const snapshot = await adapter.handleRequest("GET", "/v1/config", {
@@ -295,7 +336,7 @@ describe("REST body validation", () => {
     );
     const inspection = await adapter.handleRequest(
       "GET",
-      "/v1/config/_weaver?inspect",
+      "/v1/config/_weaver",
       { params: {}, query: { inspect: "" }, headers: {} },
     );
 
@@ -417,7 +458,10 @@ describe("REST body validation", () => {
   });
 
   it("rejects legacy schema registration fields", async () => {
-    const configService = mockConfigService();
+    const configService = await createTestService(
+      { providers: [], environment: "default" },
+      {},
+    );
     const adapter = createRestAdapter({
       configService,
       schemaRegistry: createSchemaRegistry({ configService }),
@@ -445,7 +489,10 @@ describe("REST body validation", () => {
   });
 
   it("rejects unsafe schema environments without registry side effects", async () => {
-    const configService = mockConfigService();
+    const configService = await createTestService(
+      { providers: [], environment: "default" },
+      {},
+    );
     const schemaRegistry = createSchemaRegistry({ configService });
     const adapter = createRestAdapter({ configService, schemaRegistry });
     const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
@@ -492,7 +539,10 @@ describe("REST body validation", () => {
   });
 
   it("returns canonical registration metadata", async () => {
-    const configService = mockConfigService();
+    const configService = await createTestService(
+      { providers: [], environment: "default" },
+      {},
+    );
     const adapter = createRestAdapter({
       configService,
       schemaRegistry: createSchemaRegistry({ configService }),
@@ -527,10 +577,13 @@ describe("REST body validation", () => {
       layer: "platform",
       initialEntries: {},
     });
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "default",
-    });
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "default",
+      },
+      {},
+    );
     const schemaRegistry = createSchemaRegistry({ configService });
     const adapter = createRestAdapter({ configService, schemaRegistry });
     await schemaRegistry.register({
@@ -575,10 +628,13 @@ describe("REST body validation", () => {
       layer: "platform",
       initialEntries: {},
     });
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "default",
-    });
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "default",
+      },
+      {},
+    );
     const adapter = createRestAdapter({
       configService,
       schemaRegistry: createSchemaRegistry({ configService }),
@@ -604,10 +660,13 @@ describe("REST body validation", () => {
       layer: "platform",
       initialEntries: {},
     });
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "default",
-    });
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "default",
+      },
+      {},
+    );
     const schemaRegistry = createSchemaRegistry({ configService });
     const adapter = createRestAdapter({ configService, schemaRegistry });
     await schemaRegistry.register({
@@ -638,7 +697,7 @@ describe("REST body validation", () => {
 
     const effective = await adapter.handleRequest(
       "GET",
-      "/v1/registered/effective/checkout",
+      "/v1/registered/effective/missing",
       { params: {}, query: {}, headers: {} },
     );
     expect(effective.status).toBe(422);
@@ -646,7 +705,7 @@ describe("REST body validation", () => {
       data: { errors: Array<{ code: string }> };
     };
     expect(
-      body.data.errors.some((error) => error.code === "missing-required"),
+      body.data.errors.some((error) => error.code === "invalid-path"),
     ).toBe(true);
   });
 });

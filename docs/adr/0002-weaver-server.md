@@ -1,5 +1,7 @@
 # ADR-0002: weaver-server — Central Configuration Server
 
+> **Historical design record:** repository bootstrap/server.json, hardcoded ranks, environment bootstrap options and aggregate registry examples below are retired, not current supported interfaces. Preserve the architectural rationale; use the [current seed/bootstrap contract](../guides/bootstrap-config-repo.md) and [removal inventory](../bootstrap-removal-inventory.md) for executable behavior.
+
 > **Status**: Accepted. Note: packages `config-providers` and `config-server` referenced in this ADR were consolidated into `weaver-server` in Phase 1 (May 2026).
 
 - **Status**: Proposed

@@ -11,7 +11,9 @@ import {
 } from "@weaver-conf/config-types";
 import { createWeaverError } from "../types/errors";
 import type { ConfigDelta } from "../types/index";
+import { assertCoverage } from "./config-coverage";
 import type { WeaverConfigService } from "./config-service-types";
+import { evaluateEffectiveCandidate } from "./schema-effective-candidate";
 import type { RegisteredSchemaAnchor } from "./schema-registry";
 import { parseScopeQuery } from "./scope-utils";
 
@@ -59,8 +61,12 @@ export function bindSchemaReadRegistry(
   service: WeaverConfigService,
   anchors: AnchorEnumerator,
 ): void {
-  const current = bindings.get(service) ?? [];
-  bindings.set(service, [...current, { anchors }]);
+  if (bindings.has(service))
+    throw createWeaverError(
+      "FORBIDDEN",
+      "Schema reads are bound to the canonical registry",
+    );
+  bindings.set(service, [{ anchors }]);
 }
 
 export function notifySchemaRegistration(
@@ -74,30 +80,73 @@ export function assertValidRuntimeRead(
   service: WeaverConfigService,
   entries: Record<string, unknown>,
   requestedKey?: string,
-): void {
+): Record<string, unknown> {
   const environment = environmentFor(service);
+  if (!bindings.has(service))
+    throw createWeaverError(
+      "SERVER_DEGRADED",
+      "Configuration contracts are not bound",
+    );
   const requestedPath = requestedKey
     ? runtimePathFromStorageKey(requestedKey)
     : undefined;
-  const anchors = runtimeAnchors(service, environment).filter(
-    (anchor) =>
-      requestedPath === undefined || pathsIntersect(anchor.path, requestedPath),
-  );
+  const anchors = runtimeAnchors(service, environment);
+  assertCoverage(entries, runtimeAnchors(service, environment));
+  if (
+    requestedPath &&
+    !anchors.some((anchor) => pathsIntersect(anchor.path, requestedPath))
+  )
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "No registered schema covers this path",
+    );
 
-  for (const anchor of anchors) {
-    const validation = validateAnchor(anchor, entries);
-    if (validation.valid) continue;
+  const candidate = evaluateEffectiveCandidate(anchors, entries);
+  if (!candidate.valid) {
     throw createWeaverError(
       "VALIDATION_ERROR",
       "Effective configuration does not match registered schema",
       {
         kind: "effective-configuration-invalid",
-        anchorPath: anchor.path,
+        anchorPath: candidate.anchorPath,
         environment,
-        errors: validation.errors,
+        errors: candidate.errors,
       },
     );
   }
+  return candidate.entries;
+}
+
+export function assertRuntimeReadPath(
+  service: WeaverConfigService,
+  key: string,
+): void {
+  if (!key) return;
+  const path = runtimePathFromStorageKey(key);
+  if (
+    !path ||
+    !runtimeAnchors(service, environmentFor(service)).some((anchor) =>
+      pathsIntersect(anchor.path, path),
+    )
+  )
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "No registered schema covers this path",
+    );
+}
+
+export function validateRuntimeEffective(
+  service: WeaverConfigService,
+  entries: Record<string, unknown>,
+  anchor: RegisteredSchemaAnchor,
+  environment: string,
+) {
+  const governing = runtimeAnchors(service, environment).filter((root) =>
+    pathsIntersect(root.path, anchor.path),
+  );
+  const candidate = evaluateEffectiveCandidate(governing, entries);
+  if (!candidate.valid) return { valid: false, errors: [...candidate.errors] };
+  return validateAnchor(anchor, candidate.entries);
 }
 
 export function assertValidRuntimeScopes(
@@ -168,11 +217,9 @@ function projectGroup(
   trigger: ConfigDelta,
 ): ConfigDelta {
   const key = parseCanonicalConfigPath(group.root.path).storageKey;
-  const valid = group.members.every(
-    (anchor) => validateAnchor(anchor, entries).valid,
-  );
-  const value = deepGet(entries, key);
-  if (!valid || value === undefined) {
+  const candidate = evaluateEffectiveCandidate(group.members, entries);
+  const value = deepGet(candidate.entries, key);
+  if (!candidate.valid || value === undefined) {
     return { ...trigger, action: "remove", key, value: null, layer };
   }
   return { ...trigger, action: "set", key, value, layer };

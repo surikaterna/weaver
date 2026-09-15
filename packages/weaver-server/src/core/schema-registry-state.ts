@@ -17,10 +17,12 @@ import {
   serviceSchemaRegistrationRequestSchema,
 } from "@weaver-conf/config-types";
 import { createWeaverError } from "../types/errors";
+import { assertValidSchemaDefaults } from "./schema-registration-defaults";
 import type {
   SchemaRegistrationContext,
   SchemaRegistrationResult,
 } from "./schema-registry";
+import { composeRegistryEntries } from "./schema-registry-composition";
 
 export interface SchemaEntry {
   readonly kind: "service" | "fragment";
@@ -93,6 +95,23 @@ export function applyEvaluation(
 }
 
 export function evaluateRegistration(
+  state: RegistryState,
+  request: SchemaRegistrationRequest,
+  context?: SchemaRegistrationContext,
+): RegistrationEvaluation {
+  const evaluation = evaluateRegistrationCandidate(state, request, context);
+  if (!evaluation.result.success) return evaluation;
+  try {
+    const candidate = cloneState(state);
+    applyEvaluation(candidate, evaluation);
+    composeRegistryEntries(candidate);
+    return evaluation;
+  } catch (error: unknown) {
+    return validationFailure(errorMessage(error));
+  }
+}
+
+function evaluateRegistrationCandidate(
   state: RegistryState,
   request: SchemaRegistrationRequest,
   _context?: SchemaRegistrationContext,
@@ -186,7 +205,9 @@ function parseRegistrationRequest(
 function parseServiceRegistration(
   request: SchemaRegistrationRequest,
 ): ParsedRegistration {
-  const parsed = serviceSchemaRegistrationRequestSchema.safeParse(request);
+  const parsed = serviceSchemaRegistrationRequestSchema.safeParse(
+    structuredClone(request),
+  );
   if (!parsed.success) return parsedValidationFailure(parsed.error.message);
   const data = parsed.data;
   const service = deriveServicePath(data.serviceId);
@@ -244,9 +265,12 @@ function deriveSlotMetadata(
 function parseFragmentRegistration(
   request: SchemaRegistrationRequest,
 ): ParsedRegistration {
-  const parsed = fragmentSchemaRegistrationRequestSchema.safeParse(request);
+  const parsed = fragmentSchemaRegistrationRequestSchema.safeParse(
+    structuredClone(request),
+  );
   if (!parsed.success) return parsedValidationFailure(parsed.error.message);
   const data = parsed.data;
+  assertValidSchemaDefaults(data.schema);
   const derived = deriveFragmentPath(
     data.serviceId,
     data.slotPath,

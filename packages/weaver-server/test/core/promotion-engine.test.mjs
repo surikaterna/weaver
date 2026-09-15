@@ -1,5 +1,10 @@
 import { createPromotionEngine } from "../../src/core/promotion-engine.ts";
-import { createWeaverConfigService } from "../../src/core/config-service.ts";
+import { createTestService } from "../setup-service.ts";
+const createWeaverConfigService = (options) => createTestService(options, {
+  db: { type: "object", properties: { host: { type: "string" } }, additionalProperties: false },
+  feature: { type: "object", properties: { flag: { type: "boolean" } }, additionalProperties: false },
+  app: { type: "object", properties: { key: { type: "string" } }, additionalProperties: false },
+});
 import { deepSet, deepRemove } from "@weaver-conf/config-engine";
 
 function createTestProvider(id, layer, entries, writable = true) {
@@ -52,7 +57,7 @@ describe("PromotionEngine", () => {
     const engine = createPromotionEngine({ configService });
 
     const result = await engine.promote({
-      key: "nonexistent",
+      key: "db.nonexistent",
       fromEnvironment: "staging",
       toEnvironment: "production",
       layer: "platform",
@@ -64,7 +69,7 @@ describe("PromotionEngine", () => {
   });
 
   test("promote rejects non-promotable layers", async () => {
-    const provider = createTestProvider("p1", "user", { "key": "val" });
+    const provider = createTestProvider("p1", "user", { app: { key: "val" } });
     const configService = await createWeaverConfigService({
       providers: [provider],
       environment: "dev",
@@ -72,7 +77,7 @@ describe("PromotionEngine", () => {
     const engine = createPromotionEngine({ configService });
 
     const result = await engine.promote({
-      key: "key",
+      key: "app.key",
       fromEnvironment: "dev",
       toEnvironment: "prod",
       layer: "user",

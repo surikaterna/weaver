@@ -5,9 +5,11 @@ import {
   registeredObjectWriteResponseSchema,
   registeredPathPatchResponseSchema,
   registeredSchemasResponseSchema,
+  type SchemaRegistrationOptions,
   type SchemaRegistrationRequest,
   type SchemaRegistrationResponse,
   type ScopeInstance,
+  schemaRegistrationOptionsSchema,
   schemaRegistrationResponseSchema,
 } from "@weaver-conf/config-types";
 import type { z } from "zod";
@@ -42,7 +44,9 @@ export async function fetchRegisteredSchemas(
 export async function postSchemaRegistration(
   context: HttpRegisteredContext,
   requestBody: SchemaRegistrationRequest,
+  options?: SchemaRegistrationOptions,
 ): Promise<SchemaRegistrationResponse> {
+  const validated = schemaRegistrationOptionsSchema.parse(options ?? {});
   const path =
     "providerId" in requestBody
       ? "/v1/admin/schemas/fragments"
@@ -52,7 +56,12 @@ export async function postSchemaRegistration(
     path,
     schemaRegistrationResponseSchema,
     requestBody,
-    { mapServerError: failedRegistration },
+    {
+      mapServerError: failedRegistration,
+      ...(validated.ifRevision
+        ? { headers: { "If-Match": `"${validated.ifRevision}"` } }
+        : {}),
+    },
   );
 }
 

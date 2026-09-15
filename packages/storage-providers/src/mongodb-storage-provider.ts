@@ -1,398 +1,113 @@
+import { normalizeStorageWritePath } from "@weaver-conf/config-engine";
 import {
-  buildPath,
-  cloneValue,
-  consoleLogger,
-  deepGet,
-  deepRemove,
-  deepSet,
-  extractErrorMessage,
-  parsePath,
-  type WeaverLogger,
-} from "@weaver-conf/config-engine";
-import type {
-  ConfigurationChange,
-  ConfigurationLayerData,
-  ConfigurationStorageProvider,
-  WriteResult,
+  type ConfigurationLayerData,
+  type ConfigurationStorageProvider,
+  createWeaverError,
+  type WriteResult,
 } from "@weaver-conf/config-types";
-import type { ChangeStream, Collection } from "mongodb";
-import { z } from "zod";
+import type { Collection } from "mongodb";
+import { revisionOf } from "./authority-envelope";
+import { directAuthorityWrite } from "./layer-authority";
 import {
-  canonicalMongoPath,
-  isSameMongoPathOrDescendant,
-  mongoPathCandidatePattern,
-} from "./mongodb-path-identity.js";
-
-const MAX_BACKOFF_MS = 30_000;
-const BASE_BACKOFF_MS = 1_000;
+  createMongoAuthority,
+  type MongoAuthorityOptions,
+} from "./mongodb-authority";
 
 export interface MongoDBStorageProviderOptions {
-  id: string;
-  layer: string;
-  collection: Collection;
-  environment: string;
-  writable?: boolean | undefined;
-  logger?: WeaverLogger;
-  /** Timeout in milliseconds for MongoDB operations. Defaults to 30000 (30s). */
-  timeoutMs?: number | undefined;
+  readonly id: string;
+  readonly layer: string;
+  readonly collection: Collection;
+  readonly environment: string;
+  readonly writable?: boolean;
+  readonly authority: MongoAuthorityOptions;
 }
-
-const configDocumentSchema = z.object({
-  layer: z.string(),
-  environment: z.string(),
-  key: z.string(),
-  value: z.unknown(),
-  updatedAt: z.string(),
-});
-const storedKeyDocumentSchema = z.object({ key: z.string() });
-
-type ConfigDocument = z.infer<typeof configDocumentSchema>;
-
+/** Only the versioned layer envelope has authority. Old root-key documents are refused, not parsed. */
 class MongoDBStorageProvider implements ConfigurationStorageProvider {
   readonly id: string;
   readonly layer: string;
   readonly writable: boolean;
-
-  private readonly collection: Collection;
-  private readonly environment: string;
-  private readonly logger: WeaverLogger;
-  private readonly timeoutMs: number;
-
+  readonly authority;
+  readonly capabilities;
   constructor(options: MongoDBStorageProviderOptions) {
+    if (
+      !options.authority ||
+      Object.keys(options).some(
+        (key) =>
+          ![
+            "id",
+            "layer",
+            "collection",
+            "environment",
+            "writable",
+            "authority",
+          ].includes(key),
+      )
+    )
+      throw createWeaverError(
+        "UNSUPPORTED_AUTHORITY",
+        "Mongo provider requires current envelope authority; root-key storage options are unsupported",
+      );
     this.id = options.id;
     this.layer = options.layer;
     this.writable = options.writable ?? true;
-    this.collection = options.collection;
-    this.environment = options.environment;
-    this.logger = options.logger ?? consoleLogger;
-    this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.authority = createMongoAuthority(
+      options.collection,
+      options.environment,
+      options.layer,
+      options.authority,
+    );
+    this.capabilities = this.authority.capabilities;
   }
-
-  async load(): Promise<ConfigurationLayerData> {
+  load(): Promise<ConfigurationLayerData> {
     return this.loadLayer(this.layer);
   }
-
   async loadLayer(layer: string): Promise<ConfigurationLayerData> {
-    let rawDocs: Awaited<ReturnType<ReturnType<Collection["find"]>["toArray"]>>;
-    try {
-      rawDocs = await this.collection
-        .find({ layer, environment: this.environment })
-        .maxTimeMS(this.timeoutMs)
-        .toArray();
-    } catch (err) {
-      const message = extractErrorMessage(err);
-      this.logger.error(
-        `[weaver] MongoDB load failed for provider "${this.id}": ${message}`,
-      );
-      throw new Error(
-        `MongoDB load failed for provider "${this.id}": ${message}`,
-      );
-    }
-
-    const docs = z.array(configDocumentSchema).parse(rawDocs);
-
-    const entries: Record<string, unknown> = {};
-    for (const doc of selectEffectiveDocuments(docs)) {
-      deepSet(entries, doc.key, cloneValue(doc.value));
-    }
-    return { entries };
+    const snapshot = await this.authority.readLayer(layer);
+    return {
+      entries: snapshot.entries,
+      revision: JSON.stringify(revisionOf(snapshot)),
+    };
   }
-
-  async write(key: string, value: unknown): Promise<WriteResult> {
+  write(key: string, value: unknown): Promise<WriteResult> {
     return this.writeLayer(this.layer, key, value);
   }
-
-  async writeLayer(
-    layer: string,
-    key: string,
-    value: unknown,
-  ): Promise<WriteResult> {
-    if (!this.writable) {
-      return {
-        success: false,
-        error: { code: "READONLY", message: "Provider is read-only" },
-      };
-    }
-
-    try {
-      const { key: rootKey, value: rootValue } = await this.toRootDocument(
-        layer,
-        key,
-        value,
-      );
-
-      await this.upsertRootDocument(layer, rootKey, rootValue);
-      await this.deleteDescendantDocumentsBestEffort(layer, rootKey);
-    } catch (err) {
-      const message = extractErrorMessage(err);
-      return {
-        success: false,
-        error: {
-          code: "WRITE_ERROR",
-          message: `MongoDB write failed for key "${key}": ${message}`,
-        },
-      };
-    }
-    return { success: true };
+  writeLayer(layer: string, key: string, value: unknown): Promise<WriteResult> {
+    return this.mutate(layer, key, value, false);
   }
-
-  async remove(key: string): Promise<WriteResult> {
+  remove(key: string): Promise<WriteResult> {
     return this.removeLayer(this.layer, key);
   }
-
-  async removeLayer(layer: string, key: string): Promise<WriteResult> {
-    if (!this.writable) {
+  removeLayer(layer: string, key: string): Promise<WriteResult> {
+    return this.mutate(layer, key, undefined, true);
+  }
+  private async mutate(
+    layer: string,
+    key: string,
+    value: unknown,
+    remove: boolean,
+  ): Promise<WriteResult> {
+    const path = normalizeStorageWritePath(key);
+    if (!path.ok) return { success: false, error: path.error };
+    if (!this.writable)
       return {
         success: false,
         error: { code: "READONLY", message: "Provider is read-only" },
       };
-    }
-
-    try {
-      await this.removeNestedPath(layer, key);
-    } catch (err) {
-      const message = extractErrorMessage(err);
-      return {
-        success: false,
-        error: {
-          code: "WRITE_ERROR",
-          message: `MongoDB remove failed for key "${key}": ${message}`,
-        },
-      };
-    }
-    return { success: true };
-  }
-
-  onExternalChange(
-    listener: (changes: ConfigurationChange[]) => void,
-  ): () => void {
-    let backoffMs = BASE_BACKOFF_MS;
-    let currentStream: ChangeStream | null = null;
-    let disposed = false;
-    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-
-    const setupChangeStream = (): void => {
-      if (disposed) return;
-
-      const stream = this.collection.watch([
-        { $match: { "fullDocument.layer": this.layer } },
-      ]);
-      currentStream = stream;
-
-      stream.on("change", (change: unknown) => {
-        backoffMs = BASE_BACKOFF_MS;
-        const doc = (change as { fullDocument?: ConfigDocument }).fullDocument; // SAFETY: MongoDB change stream with fullDocument option
-        if (doc) {
-          listener([
-            { key: doc.key, oldValue: undefined, newValue: doc.value },
-          ]);
-        }
-      });
-
-      stream.on("error", (err: unknown) => {
-        const message = extractErrorMessage(err);
-        this.logger.error(
-          `[weaver] MongoDB changeStream error for provider "${this.id}": ${message}`,
-        );
-        void stream.close();
-        if (disposed) return;
-
-        const delay = Math.min(backoffMs, MAX_BACKOFF_MS);
-        backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
-        reconnectTimer = setTimeout(setupChangeStream, delay);
-      });
-    };
-
-    setupChangeStream();
-
-    return () => {
-      disposed = true;
-      clearTimeout(reconnectTimer);
-      if (currentStream) {
-        void currentStream.close();
-      }
-    };
-  }
-
-  private async toRootDocument(
-    layer: string,
-    key: string,
-    value: unknown,
-  ): Promise<{ key: string; value: unknown }> {
-    const segments = parsePath(key);
-    const root = getRootSegment(segments);
-    const rootKey = buildPath([root]);
-    const tail = segments.slice(1);
-
-    if (tail.length === 0) {
-      return { key: rootKey, value };
-    }
-
-    const entries = (await this.loadLayer(layer)).entries;
-    const existingRoot = deepGet(entries, rootKey);
-    const rootValue = isRecord(existingRoot) ? existingRoot : {};
-    deepSet(rootValue, buildPath(tail), value);
-
-    return { key: rootKey, value: rootValue };
-  }
-
-  private async removeNestedPath(layer: string, key: string): Promise<void> {
-    const segments = parsePath(key);
-    const root = getRootSegment(segments);
-    const rootKey = buildPath([root]);
-    const tail = segments.slice(1);
-
-    if (tail.length === 0) {
-      await this.deletePathAndDescendants(layer, rootKey);
-      return;
-    }
-
-    const entries = (await this.loadLayer(layer)).entries;
-    const existingRoot = deepGet(entries, rootKey);
-    if (!isRecord(existingRoot)) {
-      await this.deletePathAndDescendants(layer, buildPath(segments));
-      return;
-    }
-
-    deepRemove(existingRoot, buildPath(tail));
-    await this.upsertRootDocument(layer, rootKey, existingRoot);
-    await this.deleteDescendantDocumentsBestEffort(layer, rootKey);
-  }
-
-  private async upsertRootDocument(
-    layer: string,
-    key: string,
-    value: unknown,
-  ): Promise<void> {
-    await this.collection.updateOne(
-      { layer, environment: this.environment, key },
-      { $set: { value, updatedAt: new Date().toISOString() } },
-      { upsert: true, maxTimeMS: this.timeoutMs },
+    return directAuthorityWrite(
+      this.authority,
+      layer,
+      path.value,
+      value,
+      remove,
     );
   }
-
-  private async deleteDescendantDocumentsBestEffort(
-    layer: string,
-    key: string,
-  ): Promise<void> {
-    try {
-      const storedKeys = await this.findStoredKeys(layer, key, false);
-      await this.deleteStoredKeys(layer, storedKeys);
-    } catch (err) {
-      const message = extractErrorMessage(err);
-      try {
-        this.logger.warn(
-          `[weaver] MongoDB descendant cleanup failed for root "${key}"; the authoritative root document remains valid: ${message}`,
-        );
-      } catch {
-        return;
-      }
-    }
-  }
-
-  private async deletePathAndDescendants(
-    layer: string,
-    key: string,
-  ): Promise<void> {
-    const storedKeys = await this.findStoredKeys(layer, key, true);
-    await this.deleteStoredKeys(layer, storedKeys);
-  }
-
-  private async findStoredKeys(
-    layer: string,
-    key: string,
-    includeCanonicalPath: boolean,
-  ): Promise<string[]> {
-    const rawDocs = await this.collection
-      .find(
-        {
-          layer,
-          environment: this.environment,
-          key: { $regex: mongoPathCandidatePattern(key) },
-        },
-        { projection: { _id: 0, key: 1 } },
-      )
-      .maxTimeMS(this.timeoutMs)
-      .toArray();
-    const targetSegments = parsePath(key);
-    const docs = z.array(storedKeyDocumentSchema).parse(rawDocs);
-    return docs
-      .filter((doc) => {
-        if (!isSameMongoPathOrDescendant(parsePath(doc.key), targetSegments)) {
-          return false;
-        }
-        return includeCanonicalPath || doc.key !== key;
-      })
-      .map((doc) => doc.key);
-  }
-
-  private async deleteStoredKeys(
-    layer: string,
-    storedKeys: readonly string[],
-  ): Promise<void> {
-    if (storedKeys.length === 0) return;
-    await this.collection.deleteMany(
-      {
-        layer,
-        environment: this.environment,
-        $or: storedKeys.map((storedKey) => ({ key: storedKey })),
-      },
-      { maxTimeMS: this.timeoutMs },
+  onExternalChange(): () => void {
+    throw createWeaverError(
+      "UNSUPPORTED_AUTHORITY",
+      "Current Mongo authority requires explicit validated reloads, not unfenced change streams",
     );
   }
 }
-
-function getRootSegment(segments: readonly string[]): string {
-  const root = segments[0];
-  if (root === undefined) {
-    throw new Error("Path must not be empty");
-  }
-  return root;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function sortConfigDocuments(
-  docs: readonly ConfigDocument[],
-): ConfigDocument[] {
-  return [...docs].sort((left, right) => {
-    const dateOrder = left.updatedAt.localeCompare(right.updatedAt);
-    if (dateOrder !== 0) return dateOrder;
-    return parsePath(left.key).length - parsePath(right.key).length;
-  });
-}
-
-function selectEffectiveDocuments(
-  docs: readonly ConfigDocument[],
-): ConfigDocument[] {
-  const rootIdentities = new Set(
-    docs
-      .filter((doc) => parsePath(doc.key).length === 1)
-      .map((doc) => canonicalMongoPath(doc.key)),
-  );
-  const canonicalRootIdentities = new Set(
-    docs
-      .filter(
-        (doc) =>
-          parsePath(doc.key).length === 1 &&
-          doc.key === canonicalMongoPath(doc.key),
-      )
-      .map((doc) => doc.key),
-  );
-  const effectiveDocs = docs.filter((doc) => {
-    const segments = parsePath(doc.key);
-    if (segments.length === 1) {
-      const identity = canonicalMongoPath(doc.key);
-      return !canonicalRootIdentities.has(identity) || doc.key === identity;
-    }
-    const rootKey = buildPath([getRootSegment(segments)]);
-    return !rootIdentities.has(rootKey);
-  });
-  return sortConfigDocuments(effectiveDocs);
-}
-
 export function createMongoDBStorageProvider(
   options: MongoDBStorageProviderOptions,
 ): ConfigurationStorageProvider {

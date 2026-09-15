@@ -1,706 +1,244 @@
-import {
-  createPersistentSchemaRegistry,
-  createSchemaRegistry,
-} from "../../src/core/schema-registry.ts";
-import {
-  parsePersistedRegistry,
-  serializeRegistry,
-} from "../../src/core/schema-registry-persistence.ts";
-import { createWeaverConfigService } from "../../src/core/config-service.ts";
+import { vi } from "vitest";
 import { ZodError } from "zod";
+import { internalRegistrationId, internalRegistrationRecordSchema, internalCatalogSchema } from "@weaver-conf/config-types";
+import { createSchemaRegistry } from "../../src/core/schema-registry.ts";
+import { createWeaverConfigService } from "../../src/core/config-service.ts";
+import { record } from "../validated-fixtures.mjs";
+import { registryFixture } from "./registry-fixture.mjs";
 
-function deepSet(target, path, value) {
-  const parts = path.split(".");
-  let current = target;
-  for (let index = 0; index < parts.length - 1; index++) {
-    const part = parts[index];
-    current[part] = current[part] ?? {};
-    current = current[part];
-  }
-  current[parts[parts.length - 1]] = value;
+const owner = { name: "svc", contact: "svc@example.com" };
+const request = (schema = { type: "object" }, serviceId = "svc") => ({ serviceId, environment: "dev", owner, schema, fragmentSlots: [] });
+const unsafeEnvironments = ["__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod"];
+
+async function fixture(profile = "memory") {
+  const f = await registryFixture(profile);
+  const registry = createSchemaRegistry({ configService: f.service });
+  return { ...f, registry };
 }
 
-function createTestProvider(id, layer, entries) {
-  let data = { ...entries };
-  const writes = [];
-  return {
-    id,
-    layer,
-    writable: true,
-    async load() { return { entries: { ...data } }; },
-    writes,
-    async write(key, value) { writes.push({ key, value }); deepSet(data, key, value); return { success: true }; },
-    async remove(key) { delete data[key]; return { success: true }; },
-  };
+async function corruptionRejected(f, change) {
+  await f.service.close();
+  const state = structuredClone((await f.platform.load()).entries._weaver);
+  change(state);
+  expect((await f.platform.write("_weaver", state)).success).toBe(true);
+  const before = (await f.platform.load()).entries;
+  await expect(createWeaverConfigService({ providers: f.providers, environment: "dev" })).rejects.toThrow();
+  expect((await f.platform.load()).entries).toEqual(before);
 }
 
-function createFailingProvider(id, layer) {
-  return {
-    id,
-    layer,
-    writable: true,
-    async load() { return { entries: {} }; },
-    async write() {
-      return { success: false, error: { code: "INTERNAL_ERROR", message: "nope" } };
-    },
-    async remove() { return { success: true }; },
-  };
-}
-
-function makeOptions() {
-  const provider = createTestProvider("p1", "platform", {});
-  return createWeaverConfigService({
-    providers: [provider],
-    environment: "dev",
-  }).then((configService) => ({
-    configService,
-  }));
-}
-
-function serviceRegistration(serviceId, environment, schema) {
-  return {
-    serviceId,
-    environment,
-    owner: { name: serviceId, contact: `${serviceId}@example.com` },
-    schema,
-    fragmentSlots: [],
-  };
-}
-
-function persistedRegistryEntries(environmentRegistry) {
-  return {
-    _weaver: {
-      registry: {
-        schemas: { environments: { dev: environmentRegistry } },
-      },
-    },
-  };
-}
-
-describe("SchemaRegistry", () => {
+describe("Canonical SchemaRegistry", () => {
   test("register new schema succeeds with isNewSchema true", async () => {
-    const opts = await makeOptions();
-    const registry = createSchemaRegistry(opts);
-
-    const result = await registry.register({
-      ...serviceRegistration("my-service", "dev", {
-        type: "object",
-        properties: { port: { type: "number", default: 3000 } },
-      }),
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.isNewSchema).toBe(true);
-    expect(result.hasBreakingChanges).toBe(false);
+    const f = await fixture();
+    try {
+      const result = await f.registry.register(request({ type: "object", properties: { port: { type: "number", default: 3000 } } }));
+      expect(result).toMatchObject({ success: true, isNewSchema: true, hasBreakingChanges: false });
+    } finally { await f.service.close(); }
   });
 
-  test("transient registry rejects unsafe environments without state side effects", async () => {
-    const opts = await makeOptions();
-    const registry = createSchemaRegistry(opts);
-    const invalidEnvironments = [
-      "__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod", 42,
-    ];
-    const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
+  for (const profile of ["memory", "fs"]) test(`registry rejects unsafe environments without effects (${profile})`, async () => {
+    const f = await fixture(profile);
+    try {
+      const before = (await f.platform.load()).entries;
+      for (const environment of [...unsafeEnvironments, 42]) {
+        expect(await f.registry.register({ ...request(), environment })).toMatchObject({ success: false, error: { code: "VALIDATION_ERROR" } });
+      }
+      expect((await f.platform.load()).entries).toEqual(before);
+      expect(f.registry.listAll()).toEqual({});
+    } finally { await f.service.close(); }
+  });
 
-    for (const environment of invalidEnvironments) {
-      const result = await registry.register(
-        serviceRegistration("svc", environment, { type: "object" }),
-      );
-      expect(result).toMatchObject({
-        success: false,
-        error: { code: "VALIDATION_ERROR" },
-      });
+  test("canonical records reject unsafe environment keys without prototype effects", () => {
+    const before = Object.getOwnPropertyDescriptors(Object.prototype);
+    for (const environment of unsafeEnvironments) {
+      expect(() => internalRegistrationRecordSchema.parse({ version: 1, kind: "service", request: { ...request(), environment }, audit: { actor: "test" } })).toThrow(ZodError);
     }
-
-    expect(registry.listAll()).toEqual({});
-    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(prototypeBefore);
+    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(before);
   });
 
-  test("persistent registry rejects unsafe environments before persistence", async () => {
-    const provider = createTestProvider("p1", "platform", {});
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "dev",
+  test.each(unsafeEnvironments)("canonical hydration rejects unsafe request environment %j without mutation", async (environment) => {
+    const before = Object.getOwnPropertyDescriptors(Object.prototype);
+    const f = await fixture("fs");
+    await corruptionRejected(f, (state) => {
+      const item = record("svc", { type: "object" });
+      const id = internalRegistrationId(item);
+      item.request.environment = environment;
+      state.catalog.registrations[id] = item;
     });
-    const registry = await createPersistentSchemaRegistry({ configService });
-    const invalidEnvironments = [
-      "__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod", 42,
-    ];
-    const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
-
-    for (const environment of invalidEnvironments) {
-      const result = await registry.register(
-        serviceRegistration("svc", environment, { type: "object" }),
-      );
-      expect(result).toMatchObject({
-        success: false,
-        error: { code: "VALIDATION_ERROR" },
-      });
-    }
-
-    expect(provider.writes).toEqual([]);
-    expect(registry.listAll()).toEqual({});
-    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(prototypeBefore);
+    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(before);
   });
 
-  test("serialization and hydration reject unsafe environment keys without raw throws", () => {
-    const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
-    for (const environment of [
-      "__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod",
-    ]) {
-      const entry = {
-        kind: "service",
-        path: "/svc",
-        environment,
-        schema: { type: "object" },
-        metadata: {
-          serviceId: "svc",
-          servicePath: "/svc",
-          environment,
-          providerId: "svc",
-          owner: { name: "svc", contact: "svc@example.com" },
-        },
-      };
-      const state = { schemas: new Map([[`/svc:${environment}`, entry]]), slots: new Map() };
-      expect(() => serializeRegistry(state)).toThrow(ZodError);
-
-      const raw = {
-        environments: Object.fromEntries([[environment, {
-          schemas: { "/svc": { kind: "service", schema: entry.schema, metadata: entry.metadata } },
-          slots: {},
-        }]]),
-      };
-      expect(() => parsePersistedRegistry(raw)).toThrow(ZodError);
-    }
-    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(prototypeBefore);
+  test("canonical registry refuses alternate environment/storage options", async () => {
+    const f = await fixture();
+    try {
+      for (const environment of ["__proto__", "other"]) expect(() => createSchemaRegistry({ configService: f.service, environment })).toThrow();
+    } finally { await f.service.close(); }
   });
 
-  test("persistent hydration rejects every unsafe environment key", async () => {
-    const prototypeBefore = Object.getOwnPropertyDescriptors(Object.prototype);
-    for (const environment of [
-      "__proto__", "constructor", "prototype", "", " dev", "dev/prod", "dev:prod",
-    ]) {
-      const metadata = {
-        serviceId: "svc",
-        servicePath: "/svc",
-        environment,
-        providerId: "svc",
-        owner: { name: "svc", contact: "svc@example.com" },
-      };
-      const environments = Object.fromEntries([[environment, {
-        schemas: { "/svc": { kind: "service", schema: { type: "object" }, metadata } },
-        slots: {},
-      }]]);
-      const entries = { _weaver: { registry: { schemas: { environments } } } };
-      const provider = createTestProvider("p1", "platform", entries);
-      const configService = await createWeaverConfigService({
-        providers: [provider],
-        environment: "dev",
-      });
-
-      await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(ZodError);
-      expect(provider.writes).toEqual([]);
-    }
-    expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(prototypeBefore);
+  test("canonical hydration refuses obsolete aggregate shape", () => {
+    expect(() => internalCatalogSchema.parse({ environments: {} })).toThrow();
   });
 
-  test("persistent registry rejects an invalid default environment before hydration", async () => {
-    const provider = createTestProvider("p1", "platform", {});
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "dev",
-    });
-    await expect(
-      createPersistentSchemaRegistry({ configService, environment: "__proto__" }),
-    ).rejects.toThrow(ZodError);
-    expect(provider.writes).toEqual([]);
+  test("unchanged service registration is idempotent", async () => {
+    const f = await fixture();
+    try {
+      await f.registry.register(request());
+      const revision = f.service.revision;
+      expect(await f.registry.register(request())).toMatchObject({ success: true, isNewSchema: false });
+      expect(f.service.revision).toBe(revision);
+    } finally { await f.service.close(); }
   });
 
-  test("hydration requires own registry aggregation properties", () => {
-    const inherited = Object.create({ environments: {} });
-    expect(() => parsePersistedRegistry(inherited)).toThrow(
-      "Persisted schema registry must include own environments object",
-    );
+  test("non-object and ambiguous service roots are rejected", async () => {
+    const f = await fixture();
+    try {
+      for (const schema of [{ type: "string" }, { type: "array" }, {}, { type: ["object", "null"] }]) expect((await f.registry.register(request(schema))).success).toBe(false);
+      expect(f.registry.listAll()).toEqual({});
+    } finally { await f.service.close(); }
   });
 
-  test("register unchanged schema is idempotent", async () => {
-    const opts = await makeOptions();
-    const registry = createSchemaRegistry(opts);
-    const schema = { type: "object", properties: { port: { type: "number" } } };
-
-    await registry.register(serviceRegistration("svc", "dev", schema));
-    const result = await registry.register(serviceRegistration("svc", "dev", schema));
-
-    expect(result.success).toBe(true);
-    expect(result.isNewSchema).toBe(false);
-    expect(result.hasBreakingChanges).toBe(false);
+  test("non-object and ambiguous fragment roots are rejected", async () => {
+    const f = await fixture();
+    try {
+      await f.registry.register({ ...request(), fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }] });
+      for (const schema of [{ type: "string" }, { type: "array" }, {}, { type: ["object", "null"] }]) {
+        expect((await f.registry.register({ serviceId: "svc", environment: "dev", owner, providerId: "plugin", slotPath: "/plugins", schema })).success).toBe(false);
+      }
+    } finally { await f.service.close(); }
   });
 
-  test("register rejects non-object and ambiguous service schema roots", async () => {
-    const opts = await makeOptions();
-    const registry = createSchemaRegistry(opts);
-    const invalidSchemas = [
-      { type: "string" },
-      { type: "array", items: { type: "string" } },
-      { properties: { enabled: { type: "boolean" } } },
-      { oneOf: [{ type: "object" }, { type: "string" }] },
-      { type: ["object", "null"] },
-    ];
-
-    for (const schema of invalidSchemas) {
-      const result = await registry.register(serviceRegistration("svc", "dev", schema));
-      expect(result.success).toBe(false);
-      expect(result.error?.message).toContain('type exactly "object"');
-    }
-    expect(registry.listAll()).toEqual({});
+  test("conditional removal reports breaking compatibility conservatively", async () => {
+    const f = await fixture();
+    try {
+      await f.registry.register(request({ type: "object", properties: { port: { type: "number" } } }));
+      expect(await f.registry.register(request(), { expectedRevision: f.service.revision })).toMatchObject({ success: true, hasBreakingChanges: true, compatibility: "breaking" });
+    } finally { await f.service.close(); }
   });
 
-  test("register rejects non-object and ambiguous fragment schema roots", async () => {
-    const opts = await makeOptions();
-    const registry = createSchemaRegistry(opts);
-    await registry.register({
-      ...serviceRegistration("svc", "dev", { type: "object" }),
-      fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }],
-    });
-
-    for (const schema of [{ type: "string" }, { type: ["object", "null"] }]) {
-      const result = await registry.register({
-        serviceId: "svc",
-        providerId: "plugin",
-        slotPath: "/plugins",
-        environment: "dev",
-        owner: { name: "plugin", contact: "plugin@example.com" },
-        schema,
-      });
-      expect(result.success).toBe(false);
-      expect(result.error?.message).toContain('type exactly "object"');
-    }
-    expect(Object.keys(registry.listAll())).toEqual(["/svc:dev"]);
-  });
-
-  test("register with removed property detects breaking change", async () => {
-    const opts = await makeOptions();
-    const registry = createSchemaRegistry(opts);
-
-    await registry.register({
-      ...serviceRegistration("svc", "dev", {
-        type: "object",
-        properties: { port: { type: "number" }, host: { type: "string" } },
-      }),
-    });
-
-    const result = await registry.register({
-      ...serviceRegistration("svc", "dev", {
-        type: "object",
-        properties: { port: { type: "number" } },
-      }),
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.hasBreakingChanges).toBe(true);
-    expect(result.breakingChanges?.some((c) => c.includes("host"))).toBeTruthy();
-  });
-
-  test("getSchema returns registered schema", async () => {
-    const opts = await makeOptions();
-    const registry = createSchemaRegistry(opts);
-    const schema = { type: "object", properties: { key: { type: "string" } } };
-
-    await registry.register(serviceRegistration("svc", "dev", schema));
-    const registeredSchema = await registry.getSchema("svc", "dev");
-
-    expect(registeredSchema).toEqual(schema);
+  test("getSchema returns a detached registered schema", async () => {
+    const f = await fixture();
+    try {
+      await f.registry.register(request());
+      const schema = await f.registry.getSchema("svc", "dev");
+      schema.type = "string";
+      expect((await f.registry.getSchema("svc", "dev")).type).toBe("object");
+    } finally { await f.service.close(); }
   });
 
   test("getSchema returns null for unknown service", async () => {
-    const opts = await makeOptions();
-    const registry = createSchemaRegistry(opts);
-
-    const schema = await registry.getSchema("unknown", "dev");
-    expect(schema).toBe(null);
+    const f = await fixture();
+    try { expect(await f.registry.getSchema("missing", "dev")).toBeNull(); }
+    finally { await f.service.close(); }
   });
 
-  test("persistent registry writes schemas into the protected internal registry root", async () => {
-    const provider = createTestProvider("p1", "custom", {});
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "dev",
-    });
-    const registry = await createPersistentSchemaRegistry({
-      configService,
-      layer: "custom",
-    });
-
-    const result = await registry.register({
-      ...serviceRegistration("billing", "dev", {
-        type: "object",
-        properties: { enabled: { type: "boolean" } },
-      }),
-    });
-
-    expect(result.success).toBe(true);
-    expect(await configService.get("_weaver.registry.schemas")).toBe(undefined);
-
-    const restartedService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "dev",
-    });
-    const restartedRegistry = await createPersistentSchemaRegistry({
-      configService: restartedService,
-      layer: "custom",
-    });
-    expect(await restartedRegistry.getSchema("billing", "dev")).toEqual({
-      type: "object",
-      properties: { enabled: { type: "boolean" } },
-    });
-    await expect(restartedService.get("billing")).rejects.toMatchObject({
-      code: "VALIDATION_ERROR",
-      details: { anchorPath: "/billing" },
-    });
-    const completed = await restartedService.set("custom", "billing.enabled", true);
-    expect(completed.success).toBe(true);
-    expect(await restartedService.get("billing")).toEqual({ enabled: true });
-  });
-
-  test("registry persistence emits only the effective root projection", async () => {
-    const opts = await makeOptions();
-    const deltas = [];
-    opts.configService.onDelta((delta) => deltas.push(delta));
-    const registry = await createPersistentSchemaRegistry(opts);
-
-    await registry.register(
-      serviceRegistration("billing", "dev", { type: "object" }),
-    );
-
-    expect(deltas).toHaveLength(1);
-    expect(deltas[0]).toMatchObject({
-      action: "remove",
-      key: "billing",
-      value: null,
-      layer: "weaver-effective",
-    });
-    expect(JSON.stringify(deltas)).not.toContain("_weaver");
-  });
-
-  test("throwing listeners cannot fail committed transient or persistent registration", async () => {
-    for (const persistent of [false, true]) {
-      const errors = [];
-      const configService = await createWeaverConfigService({
-        providers: [createTestProvider("p1", "platform", {})],
-        environment: "dev",
-        logger: { debug() {}, info() {}, warn() {}, error(...args) { errors.push(args); } },
-      });
-      configService.onDelta(() => { throw new Error("subscriber boom"); });
-      const delivered = [];
-      configService.onDelta((delta) => delivered.push(delta));
-      const registry = persistent
-        ? await createPersistentSchemaRegistry({ configService })
-        : createSchemaRegistry({ configService });
-
-      const result = await registry.register(
-        serviceRegistration("billing", "dev", { type: "object" }),
-      );
-
-      expect(result.success).toBe(true);
-      expect(await registry.getSchema("billing", "dev")).toEqual({ type: "object" });
-      expect(delivered).toHaveLength(1);
-      expect(errors).toHaveLength(1);
-    }
-  });
-
-  test("concurrent registration and mutation publish in commit order", async () => {
-    const configService = await createWeaverConfigService({
-      providers: [createTestProvider("p1", "platform", { billing: {} })],
-      environment: "dev",
-    });
-    const registry = createSchemaRegistry({ configService });
-    const delivered = [];
-    configService.onDelta((delta) => delivered.push([delta.action, delta.key]));
-
-    const registration = registry.register(serviceRegistration("billing", "dev", {
-      type: "object",
-      required: ["mode"],
-      properties: { mode: { type: "string" } },
-      additionalProperties: false,
-    }));
-    const mutation = configService.set("platform", "public.ready", true);
-    const [registered, written] = await Promise.all([registration, mutation]);
-
-    expect(registered.success).toBe(true);
-    expect(written.success).toBe(true);
-    expect(delivered).toEqual([
-      ["remove", "billing"],
-      ["remove", "billing"],
-      ["set", "public.ready"],
-    ]);
-  });
-
-  test("persistent registry hydrates schemas after restart", async () => {
-    const entries = {
-      _weaver: {
-        registry: {
-          schemas: {
-            environments: {
-              dev: {
-                schemas: {
-                  "/billing": {
-                    kind: "service",
-                    schema: {
-                      type: "object",
-                      properties: { limit: { type: "number" } },
-                    },
-                    metadata: {
-                      serviceId: "billing",
-                      servicePath: "/billing",
-                      environment: "dev",
-                      providerId: "billing",
-                      owner: { name: "billing", contact: "billing@example.com" },
-                    },
-                  },
-                },
-                slots: {},
-              },
-            },
-          },
-        },
-      },
-    };
-    const configService = await createWeaverConfigService({
-      providers: [createTestProvider("p1", "platform", entries)],
-      environment: "dev",
-    });
-
-    const registry = await createPersistentSchemaRegistry({ configService });
-
-    expect(await registry.getSchema("billing", "dev")).toEqual({
-      type: "object",
-      properties: { limit: { type: "number" } },
-    });
-  });
-
-  test("persistent registry rejects non-object service schema roots", async () => {
-    const configService = await createWeaverConfigService({
-      providers: [
-        createTestProvider("p1", "platform", {
-          _weaver: {
-            registry: {
-              schemas: {
-                environments: {
-                  prod: {
-                    schemas: {
-                      "/svc": {
-                        kind: "service",
-                        schema: { type: "string" },
-                        metadata: {
-                          serviceId: "svc",
-                          servicePath: "/svc",
-                          environment: "prod",
-                          providerId: "svc",
-                          owner: { name: "svc", contact: "svc@example.com" },
-                        },
-                      },
-                    },
-                    slots: {},
-                  },
-                },
-              },
-            },
-          },
-        }),
-      ],
-      environment: "prod",
-    });
-
-    await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow();
-  });
-
-  test("persistent registry rejects non-object fragment schema roots", async () => {
-    const path = "/billing/extensions/payments";
-    const environmentRegistry = fragmentMetadataCase(path, "schemaVersion", "1.0.0");
-    environmentRegistry.schemas[path].schema = { type: ["object", "null"] };
-    const configService = await createWeaverConfigService({
-      providers: [createTestProvider("p1", "platform", persistedRegistryEntries(environmentRegistry))],
-      environment: "dev",
-    });
-
-    await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow();
-  });
-
-  test("persistent registry throws for invalid persisted root", async () => {
-    const configService = await createWeaverConfigService({
-      providers: [
-        createTestProvider("p1", "platform", {
-          _weaver: { registry: { schemas: [] } },
-        }),
-      ],
-      environment: "dev",
-    });
-
-    await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(/Persisted schema registry must be an object/);
-  });
-
-  test("persistent registry rejects dangerous schema and slot paths without changing prototypes", async () => {
-    Reflect.deleteProperty(Object.prototype, "polluted");
+  test("persistent registry writes only canonical registration records", async () => {
+    const f = await fixture("fs");
     try {
-      for (const segment of ["__proto__", "constructor", "prototype"]) {
-        const path = `/billing/${segment}`;
-        const schemaEntry = {
-          kind: "service",
-          schema: { type: "object" },
-          metadata: {
-            serviceId: "billing",
-            servicePath: path,
-            environment: "dev",
-            providerId: "billing",
-            owner: { name: "billing", contact: "billing@example.com" },
-          },
-        };
-        const slot = {
-          serviceId: "billing",
-          servicePath: "/billing",
-          slotPath: `/${segment}`,
-          canonicalSlotPath: path,
-          environment: "dev",
-          providerId: "billing",
-          owner: { name: "billing", contact: "billing@example.com" },
-          accepts: "object",
-        };
-
-        for (const environmentRegistry of [
-          { schemas: { [path]: schemaEntry }, slots: {} },
-          { schemas: {}, slots: { [path]: slot } },
-        ]) {
-          const configService = await createWeaverConfigService({
-            providers: [createTestProvider("p1", "platform", persistedRegistryEntries(environmentRegistry))],
-            environment: "dev",
-          });
-          await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(
-            `Path segment "${segment}" is not allowed`,
-          );
-        }
-      }
-      expect(Reflect.get(Object.prototype, "polluted")).toBe(undefined);
-    } finally {
-      Reflect.deleteProperty(Object.prototype, "polluted");
-    }
+      await f.registry.register(request(), { actor: "operator" });
+      const raw = (await f.platform.load()).entries._weaver;
+      expect(raw.registry).toBeUndefined();
+      expect(Object.values(raw.catalog.registrations)).toEqual([{ version: 1, kind: "service", request: request(), audit: { actor: "operator" } }]);
+    } finally { await f.service.close(); }
   });
 
-  test("persistent registry rejects dangerous path metadata behind safe keys", async () => {
-    Reflect.deleteProperty(Object.prototype, "polluted");
-    const servicePath = "/billing";
-    const slotPath = "/extensions";
-    const canonicalSlotPath = `${servicePath}${slotPath}`;
-    const fragmentPath = `${canonicalSlotPath}/payments`;
+  test("registry persistence publishes only the effective service root", async () => {
+    const f = await fixture("fs");
+    const events = [];
+    f.service.onDelta((event) => events.push(event));
     try {
-      for (const segment of ["__proto__", "constructor", "prototype"]) {
-        const dangerousPath = `/billing/${segment}`;
-        const cases = [
-          schemaMetadataCase(servicePath, "servicePath", dangerousPath),
-          schemaMetadataCase(servicePath, "canonicalSlotPath", dangerousPath),
-          schemaMetadataCase(servicePath, "fragmentPath", dangerousPath),
-          fragmentMetadataCase(fragmentPath, "servicePath", dangerousPath),
-          fragmentMetadataCase(fragmentPath, "canonicalSlotPath", dangerousPath),
-          fragmentMetadataCase(fragmentPath, "fragmentPath", dangerousPath),
-          slotMetadataCase(canonicalSlotPath, "servicePath", dangerousPath),
-          slotMetadataCase(canonicalSlotPath, "slotPath", `/${segment}`),
-          slotMetadataCase(canonicalSlotPath, "canonicalSlotPath", dangerousPath),
-        ];
-
-        for (const environmentRegistry of cases) {
-          await expectPersistedRegistryRejection(environmentRegistry, segment);
-        }
-      }
-      expect(Reflect.get(Object.prototype, "polluted")).toBe(undefined);
-    } finally {
-      Reflect.deleteProperty(Object.prototype, "polluted");
-    }
+      await f.registry.register(request());
+      expect(events).toHaveLength(1);
+      expect(events[0].key).toBe("svc");
+      expect(JSON.stringify(events)).not.toContain("_weaver");
+    } finally { await f.service.close(); }
   });
 
-  test("register rejects legacy target fields", async () => {
-    const opts = await makeOptions();
-    const registry = createSchemaRegistry(opts);
-
-    const result = await registry.register({
-      ...serviceRegistration("svc", "dev", { type: "object" }),
-      path: "/svc",
-      namespace: "legacy",
-      ownerId: "team-a",
-    });
-
-    expect(result.success).toBe(false);
-    expect(result.error?.code).toBe("VALIDATION_ERROR");
+  test("throwing listeners do not reverse committed registrations", async () => {
+    const f = await fixture("fs");
+    f.service.onDelta(() => { throw new Error("listener"); });
+    try {
+      expect((await f.registry.register(request())).success).toBe(true);
+      expect(await f.registry.getSchema("svc", "dev")).toEqual({ type: "object" });
+    } finally { await f.service.close(); }
   });
 
-  test("write failure returns failed result without updating memory", async () => {
-    const configService = await createWeaverConfigService({
-      providers: [createFailingProvider("p1", "platform")],
-      environment: "dev",
-    });
-    const registry = await createPersistentSchemaRegistry({ configService });
-    const deltas = [];
-    configService.onDelta((delta) => deltas.push(delta));
+  test("registration and mutation publish in coordinator commit order", async () => {
+    const f = await fixture();
+    const events = [];
+    f.service.onDelta((event) => events.push(event));
+    try {
+      const results = await Promise.all([f.registry.register(request({ type: "object", properties: { ready: { type: "boolean" } }, additionalProperties: false })), f.service.set("platform", "svc", { ready: true })]);
+      expect(results.every((result) => result.success)).toBe(true);
+      expect(events.map((event) => event.action)).toEqual(["remove", "set"]);
+      expect(events[1].value).toEqual({ ready: true });
+    } finally { await f.service.close(); }
+  });
 
-    const result = await registry.register({
-      ...serviceRegistration("svc", "dev", {
-        type: "object",
-        properties: { host: { type: "string" } },
-      }),
-    });
+  test("canonical registrations reconstruct after ownership transfer/restart", async () => {
+    const f = await fixture("fs");
+    await f.registry.register(request());
+    await f.service.close();
+    const service = await createWeaverConfigService({ providers: f.providers, environment: "dev" });
+    try { expect(createSchemaRegistry({ configService: service }).listAll()).toHaveProperty("/svc:dev"); }
+    finally { await service.close(); }
+  });
 
-    expect(result.success).toBe(false);
-    expect(await registry.getSchema("svc", "dev")).toBe(null);
-    expect(registry.listAll()).toEqual({});
-    expect(deltas).toEqual([]);
+  test("hydration refuses an invalid canonical service root", async () => {
+    const f = await fixture("fs");
+    await corruptionRejected(f, (state) => {
+      const item = record("svc", { type: "object" });
+      const id = internalRegistrationId(item);
+      item.request.schema = { type: "number" };
+      state.catalog.registrations[id] = item;
+    });
+  });
+
+  test("hydration refuses an invalid canonical fragment root", async () => {
+    const f = await fixture("fs");
+    await corruptionRejected(f, (state) => {
+      const item = { version: 1, kind: "fragment", request: { serviceId: "svc", environment: "dev", owner, providerId: "plugin", slotPath: "/plugins", schema: { type: "string" } }, audit: { actor: "operator" } };
+      state.catalog.registrations[internalRegistrationId(item)] = item;
+    });
+  });
+
+  test("invalid control roots cannot initialize a registry", async () => {
+    const f = await fixture();
+    await corruptionRejected(f, (state) => { state.catalog = "invalid"; });
+  });
+
+  test("dangerous service and slot identities cannot mutate prototypes", async () => {
+    const f = await fixture();
+    const before = Object.getOwnPropertyDescriptors(Object.prototype);
+    try {
+      for (const serviceId of ["__proto__", "constructor", "prototype", "/_weaver"]) expect((await f.registry.register(request({ type: "object" }, serviceId))).success).toBe(false);
+      for (const slotPath of ["/__proto__", "/constructor", "/prototype"]) expect((await f.registry.register({ ...request(), fragmentSlots: [{ slotPath, accepts: "object" }] })).success).toBe(false);
+      expect(Object.getOwnPropertyDescriptors(Object.prototype)).toEqual(before);
+    } finally { await f.service.close(); }
+  });
+
+  test("safe record IDs cannot hide contradictory or dangerous request metadata", async () => {
+    const f = await fixture();
+    await corruptionRejected(f, (state) => {
+      const item = record("svc", { type: "object" });
+      const id = internalRegistrationId(item);
+      item.request.serviceId = "constructor";
+      state.catalog.registrations[id] = item;
+    });
+  });
+
+  test("legacy target fields are rejected, not used as independent path authority", async () => {
+    const f = await fixture();
+    try { expect((await f.registry.register({ ...request(), path: "/other", namespace: "other" })).success).toBe(false); }
+    finally { await f.service.close(); }
+  });
+
+  test("failed persistence leaves durable and projected records unchanged", async () => {
+    const f = await fixture("fs");
+    const before = (await f.platform.load()).entries;
+    const fault = vi.spyOn(f.platform.authority, "commitLayer").mockResolvedValue({ success: false, error: { code: "INTERNAL_ERROR", message: "injected" } });
+    try {
+      expect((await f.registry.register(request())).success).toBe(false);
+      expect(f.registry.listAll()).toEqual({});
+      expect((await f.platform.load()).entries).toEqual(before);
+    } finally { fault.mockRestore(); await f.service.close(); }
   });
 });
-
-function schemaMetadataCase(path, field, value) {
-  const metadata = {
-    serviceId: "billing",
-    servicePath: path,
-    environment: "dev",
-    providerId: "billing",
-    owner: { name: "billing", contact: "billing@example.com" },
-    [field]: value,
-  };
-  return { schemas: { [path]: { kind: "service", schema: { type: "object" }, metadata } }, slots: {} };
-}
-
-function fragmentMetadataCase(path, field, value) {
-  const metadata = {
-    serviceId: "billing",
-    servicePath: "/billing",
-    canonicalSlotPath: "/billing/extensions",
-    fragmentPath: path,
-    environment: "dev",
-    providerId: "payments",
-    owner: { name: "payments", contact: "payments@example.com" },
-    [field]: value,
-  };
-  return { schemas: { [path]: { kind: "fragment", schema: { type: "object" }, metadata } }, slots: {} };
-}
-
-function slotMetadataCase(path, field, value) {
-  const slot = {
-    serviceId: "billing",
-    servicePath: "/billing",
-    slotPath: "/extensions",
-    canonicalSlotPath: path,
-    environment: "dev",
-    providerId: "billing",
-    owner: { name: "billing", contact: "billing@example.com" },
-    accepts: "object",
-    [field]: value,
-  };
-  return { schemas: {}, slots: { [path]: slot } };
-}
-
-async function expectPersistedRegistryRejection(environmentRegistry, segment) {
-  const configService = await createWeaverConfigService({
-    providers: [createTestProvider("p1", "platform", persistedRegistryEntries(environmentRegistry))],
-    environment: "dev",
-  });
-  await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(
-    `Path segment "${segment}" is not allowed`,
-  );
-}

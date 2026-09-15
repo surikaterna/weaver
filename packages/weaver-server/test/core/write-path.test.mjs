@@ -1,4 +1,9 @@
-import { createWeaverConfigService } from "../../src/core/config-service.ts";
+import { createTestService } from "../setup-service.ts";
+import { deepSet, deepRemove } from "@weaver-conf/config-engine";
+
+const createWeaverConfigService = (options) => createTestService(options, {
+  app: { type: "object", properties: { key: { type: "string" }, foo: { type: "string" }, x: { type: "number" }, big: { type: "string" } }, additionalProperties: false },
+});
 
 function createTestProvider(id, layer, entries, writable = true) {
   let data = { ...entries };
@@ -9,12 +14,12 @@ function createTestProvider(id, layer, entries, writable = true) {
     async load() { return { entries: { ...data } }; },
     async write(key, value) {
       if (!writable) return { success: false, error: { code: "READONLY", message: "read-only" } };
-      data[key] = value;
+      deepSet(data, key, value);
       return { success: true };
     },
     async remove(key) {
       if (!writable) return { success: false, error: { code: "READONLY", message: "read-only" } };
-      delete data[key];
+      deepRemove(data, key);
       return { success: true };
     },
   };
@@ -22,27 +27,27 @@ function createTestProvider(id, layer, entries, writable = true) {
 
 describe("WeaverConfigService write path", () => {
   test("set writes value and updates merged state", async () => {
-    const provider = createTestProvider("p1", "platform", { "key": "old" });
+    const provider = createTestProvider("p1", "platform", { app: { key: "old" } });
     const svc = await createWeaverConfigService({
       providers: [provider],
       environment: "dev",
     });
 
-    const result = await svc.set("platform", "key", "new");
+    const result = await svc.set("platform", "app.key", "new");
     expect(result.success).toBe(true);
-    expect(await svc.get("key")).toBe("new");
+    expect(await svc.get("app.key")).toBe("new");
   });
 
   test("remove removes key and updates merged state", async () => {
-    const provider = createTestProvider("p1", "platform", { "key": "val" });
+    const provider = createTestProvider("p1", "platform", { app: { key: "val" } });
     const svc = await createWeaverConfigService({
       providers: [provider],
       environment: "dev",
     });
 
-    const result = await svc.remove("platform", "key");
+    const result = await svc.remove("platform", "app.key");
     expect(result.success).toBe(true);
-    expect(await svc.get("key")).toBe(undefined);
+    expect(await svc.get("app.key")).toBe(undefined);
   });
 
   test("set on read-only provider returns error", async () => {
@@ -52,7 +57,7 @@ describe("WeaverConfigService write path", () => {
       environment: "dev",
     });
 
-    const result = await svc.set("platform", "key", "val");
+    const result = await svc.set("platform", "app.key", "val");
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe("READONLY");
     expect(result.error?.message.includes("read-only")).toBeTruthy();
@@ -68,16 +73,16 @@ describe("WeaverConfigService write path", () => {
     const deltas = [];
     svc.onDelta((d) => deltas.push(d));
 
-    await svc.set("platform", "foo", "bar");
+    await svc.set("platform", "app.foo", "bar");
     expect(deltas.length).toBe(1);
     expect(deltas[0].action).toBe("set");
-    expect(deltas[0].key).toBe("foo");
-    expect(deltas[0].value).toBe("bar");
+    expect(deltas[0].key).toBe("app");
+    expect(deltas[0].value).toEqual({ foo: "bar" });
     expect(deltas[0].layer).toBe("weaver-effective");
   });
 
   test("delta has correct action for remove", async () => {
-    const provider = createTestProvider("p1", "platform", { "x": 1 });
+    const provider = createTestProvider("p1", "platform", { app: { x: 1 } });
     const svc = await createWeaverConfigService({
       providers: [provider],
       environment: "dev",
@@ -86,10 +91,10 @@ describe("WeaverConfigService write path", () => {
     const deltas = [];
     svc.onDelta((d) => deltas.push(d));
 
-    await svc.remove("platform", "x");
-    expect(deltas[0].action).toBe("remove");
-    expect(deltas[0].key).toBe("x");
-    expect(deltas[0].value).toBe(null);
+    await svc.remove("platform", "app.x");
+    expect(deltas[0].action).toBe("set");
+    expect(deltas[0].key).toBe("app");
+    expect(deltas[0].value).toEqual({});
   });
 
   test("size warning for large values", async () => {
@@ -104,7 +109,7 @@ describe("WeaverConfigService write path", () => {
     console.warn = (msg) => warnings.push(msg);
 
     const bigValue = "x".repeat(1_048_577);
-    await svc.set("platform", "big", bigValue);
+    await svc.set("platform", "app.big", bigValue);
 
     console.warn = origWarn;
     expect(warnings.some((w) => w.includes("exceeds 1MB"))).toBeTruthy();

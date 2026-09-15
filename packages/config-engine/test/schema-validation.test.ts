@@ -180,12 +180,13 @@ describe("schema validation", () => {
     });
   });
 
-  it("allows schema defaults and effective context to satisfy required fields", () => {
+  it("does not validate hypothetical defaults absent from the delivered value", () => {
     const result = validateEffectiveConfiguration(settingsSchema, {
       endpoint: "https://api.example.test",
     });
 
-    expect(result).toEqual({ valid: true, errors: [] });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]?.code).toBe("missing-required");
   });
 
   it("validates property patch paths and nested patch values", () => {

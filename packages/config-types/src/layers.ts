@@ -26,7 +26,7 @@ export interface LayerData {
 
 /** Runtime resolver created by a LayerType */
 export interface LayerResolver {
-  resolve(context: ResolutionContext): LayerData[];
+  resolve(context: ResolutionContext): Promise<LayerData[]>;
   onChange?(cb: (changes: ConfigurationChange[]) => void): () => void;
   dispose?(): void;
 }

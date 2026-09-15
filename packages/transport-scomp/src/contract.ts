@@ -9,6 +9,8 @@ export {
   registeredPathPatchRequestSchema,
   registeredPathPatchResponseSchema,
   registeredSchemasResponseSchema,
+  schemaRegistrationOperationSchema,
+  schemaRegistrationOptionsSchema,
   schemaRegistrationResponseSchema,
   serviceSchemaRegistrationRequestSchema,
 } from "@weaver-conf/config-types";
@@ -24,7 +26,7 @@ import type {
   RegisteredObjectWriteResponse,
   RegisteredPathPatchRequest,
   RegisteredPathPatchResponse,
-  SchemaRegistrationRequest,
+  SchemaRegistrationOperation,
   SchemaRegistrationResponse,
   ScopeDefinition,
   WriteResult,
@@ -87,7 +89,7 @@ export type EmptyInput = Record<PropertyKey, never>;
 
 export type FetchSchemasInput = EmptyInput;
 
-export type RegisterSchemaInput = SchemaRegistrationRequest;
+export type RegisterSchemaInput = SchemaRegistrationOperation;
 
 export type SetRegisteredObjectInput = RegisteredObjectWriteRequest;
 

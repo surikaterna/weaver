@@ -11,6 +11,7 @@ export type {
   WriteContext,
 } from "./config-service";
 export { createWeaverConfigService } from "./config-service";
+export { createControlService } from "./control-service";
 export type {
   PromotionEngine,
   PromotionEngineOptions,
@@ -26,7 +27,6 @@ export type {
 } from "./rollback-service";
 export { createRollbackService } from "./rollback-service";
 export type {
-  PersistentSchemaRegistryOptions,
   RegisteredSchemaAnchor,
   SchemaRegistrationRequest,
   SchemaRegistrationResult,
@@ -34,7 +34,6 @@ export type {
   SchemaRegistryOptions,
 } from "./schema-registry";
 export {
-  createPersistentSchemaRegistry,
   createSchemaRegistry,
   registeredSchemaAnchorSchema,
 } from "./schema-registry";

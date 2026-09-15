@@ -4,16 +4,15 @@ import {
   deepRemove,
   deepSet,
   parseCanonicalConfigPath,
-  validateEffectiveConfiguration,
-  validatePartialConfiguration,
+  validateLayerConfiguration as validatePartialConfiguration,
 } from "@weaver-conf/config-engine";
-import type { WriteResult } from "@weaver-conf/config-types";
+import { createWeaverError, type WriteResult } from "@weaver-conf/config-types";
 import type { WeaverConfigService } from "./config-service-types";
 import { protectedConfigMutationError } from "./protected-config-paths";
-import type { RegisteredSchemaAnchor, SchemaRegistry } from "./schema-registry";
+import { evaluateRawEffectiveCandidate } from "./schema-effective-candidate";
+import type { RegisteredSchemaAnchor } from "./schema-registry";
 
 interface SchemaBoundaryBinding {
-  readonly registry: SchemaRegistry;
   readonly affectedAnchors: (
     path: string,
     environment: string,
@@ -57,18 +56,15 @@ const defaultEnvironments = new WeakMap<WeaverConfigService, string>();
 export function registerSchemaBoundaryHost(
   service: WeaverConfigService,
   defaultEnvironment: string,
+  affectedAnchors?: SchemaBoundaryBinding["affectedAnchors"],
 ): void {
+  if (bindings.has(service))
+    throw createWeaverError(
+      "FORBIDDEN",
+      "Schema writes are bound to the canonical registry",
+    );
   defaultEnvironments.set(service, defaultEnvironment);
-}
-
-export function bindSchemaRegistry(
-  service: WeaverConfigService,
-  registry: SchemaRegistry,
-  affectedAnchors: SchemaBoundaryBinding["affectedAnchors"],
-): void {
-  const current = bindings.get(service) ?? [];
-  if (current.some((binding) => binding.registry === registry)) return;
-  bindings.set(service, [...current, { registry, affectedAnchors }]);
+  if (affectedAnchors) bindings.set(service, [{ affectedAnchors }]);
 }
 
 export function validatePublicWrite(key: string): WriteResult | null {
@@ -151,7 +147,8 @@ function validateAffected(
   effective: boolean,
 ): WriteResult | null {
   const serviceBindings = bindings.get(service);
-  if (!serviceBindings) return null;
+  if (!serviceBindings)
+    return validationFailure("Configuration contracts are not bound", { key });
   const environment = defaultEnvironments.get(service) ?? "";
   const path = storagePath(key);
   if (path === null)
@@ -160,17 +157,35 @@ function validateAffected(
   const anchors = serviceBindings.flatMap((binding) =>
     binding.affectedAnchors(path, environment),
   );
+  if (!anchors.length)
+    return validationFailure("No registered schema covers this path", { path });
+  if (effective) {
+    const candidate = evaluateRawEffectiveCandidate(anchors, entries);
+    return candidate.valid
+      ? null
+      : validationFailure("Configuration does not match registered schema", {
+          path,
+          anchorPath: candidate.anchorPath,
+          environment,
+          errors: candidate.errors,
+        });
+  }
+  return validateSparseAnchors(anchors, entries, path, environment);
+}
+
+function validateSparseAnchors(
+  anchors: readonly RegisteredSchemaAnchor[],
+  entries: Record<string, unknown>,
+  path: string,
+  environment: string,
+): WriteResult | null {
   for (const anchor of anchors) {
     const anchorKey = parseCanonicalConfigPath(anchor.path).storageKey;
     const value = deepGet(entries, anchorKey);
-    if (!effective && value === undefined) continue;
-    const validation = effective
-      ? validateEffectiveConfiguration(anchor.schema, value, {
-          path: parseCanonicalConfigPath(anchor.path).segments,
-        })
-      : validatePartialConfiguration(anchor.schema, value, {
-          path: parseCanonicalConfigPath(anchor.path).segments,
-        });
+    if (value === undefined) continue;
+    const validation = validatePartialConfiguration(anchor.schema, value, {
+      path: parseCanonicalConfigPath(anchor.path).segments,
+    });
     if (!validation.valid) {
       return validationFailure(
         "Configuration does not match registered schema",

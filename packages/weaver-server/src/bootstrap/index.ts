@@ -1,5 +1,15 @@
-export type { BootstrapOptions, BootstrapResult } from "./bootstrap-loader";
-export { bootstrap } from "./bootstrap-loader";
-export { resolveEnvVars } from "./env-resolver";
-export type { LayerFactoryDeps, ProviderFactory } from "./layer-factory";
-export { createProviders, registerProviderFactory } from "./layer-factory";
+export { type BootstrapRuntimeOptions, initializeWeaver } from "./initialize";
+export {
+  createBuiltinProviderFactories,
+  type InstalledProviderFactory,
+  type ProviderBuildContext,
+  type ProviderFactories,
+  type ProviderResource,
+} from "./provider-resources";
+export { inspectWeaver } from "./runtime-open";
+export { readBootstrapSeed } from "./seed-file";
+export {
+  authenticateBootstrapAdministrator,
+  type BootstrapAdministrator,
+  type BootstrapCredentials,
+} from "./seed-trust";

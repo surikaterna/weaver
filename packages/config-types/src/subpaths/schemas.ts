@@ -1,4 +1,10 @@
 // Sub-path barrel: @weaver-conf/config-types/schemas
+
+export {
+  bootstrapSeedSchema,
+  initializeWeaverRequestSchema,
+  weaverRuntimeStatusSchema,
+} from "../bootstrap-seed";
 export { environmentNamePattern, environmentNameSchema } from "../environment";
 export {
   configurationAccessContextSchema,
@@ -8,12 +14,6 @@ export {
   serviceAccessPolicySchema,
   serviceConfigurationDeclarationSchema,
 } from "../schemas-access";
-export {
-  bootstrapConfigSchema,
-  bootstrapLayerSchema,
-  builtinProviders,
-  layerProviderSchema,
-} from "../schemas-bootstrap";
 export { expressionValidationResultSchema } from "../schemas-expression";
 export {
   configurationContextSchema,
@@ -86,7 +86,10 @@ export {
   fragmentSlotRegistrationMetadataSchema,
   registrationOwnerSchema,
   schemaRegistrationAuditMetadataSchema,
+  schemaRegistrationContextSchema,
   schemaRegistrationMetadataSchema,
+  schemaRegistrationOperationSchema,
+  schemaRegistrationOptionsSchema,
   schemaRegistrationResponseSchema,
   serviceSchemaRegistrationRequestSchema,
 } from "../schemas-schema-registration";

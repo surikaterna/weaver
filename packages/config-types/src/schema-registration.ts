@@ -18,6 +18,13 @@ export interface SchemaRegistrationAuditMetadata {
   readonly actor?: string | undefined;
 }
 
+/** Trusted registration provenance and the authoritative activation precondition. */
+export interface SchemaRegistrationContext {
+  readonly expectedRevision?: string | undefined;
+  readonly subject?: string | undefined;
+  readonly actor?: string | undefined;
+}
+
 /** Path-first service schema registration request. */
 export interface ServiceSchemaRegistrationRequest {
   readonly serviceId: string;
@@ -71,6 +78,8 @@ export interface SchemaRegistrationMetadata {
 
 /** Result returned by path-first schema registration endpoints. */
 export interface SchemaRegistrationResponse {
+  readonly revision?: string | undefined;
+  readonly compatibility?: "compatible" | "breaking" | "unknown" | undefined;
   readonly success: boolean;
   readonly isNewSchema: boolean;
   readonly hasBreakingChanges: boolean;
@@ -78,3 +87,9 @@ export interface SchemaRegistrationResponse {
   readonly breakingChanges?: ReadonlyArray<string> | undefined;
   readonly error?: WeaverError | undefined;
 }
+
+export interface SchemaRegistrationOptions {
+  readonly ifRevision?: string | undefined;
+}
+export type SchemaRegistrationOperation = SchemaRegistrationRequest &
+  SchemaRegistrationOptions;

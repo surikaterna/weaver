@@ -38,7 +38,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --import tsx --test --test-concurrency=1 test/*.node.mjs",
     "lint": "biome check ."
   },
   "dependencies": {

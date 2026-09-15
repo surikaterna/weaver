@@ -1,6 +1,6 @@
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
+import { createTestService } from "../../test/setup-service";
 import type { WeaverConfigService } from "../core/config-service";
-import { createWeaverConfigService } from "../core/config-service";
 import { createSchemaRegistry } from "../core/schema-registry";
 import type { ConfigDelta } from "../types/index";
 import type { SSEAdapter } from "./sse-adapter";
@@ -131,17 +131,25 @@ describe("SSEAdapter", () => {
       initialEntries: {
         app: {
           name: "public",
-          direct: { _weaver: "mount", source: "_weaver.registry.schemas" },
-          bridge: { _weaver: "mount", source: "_weaver.registry.schemas" },
+          direct: { _weaver: "mount", source: "_weaver.catalog.registrations" },
+          bridge: { _weaver: "mount", source: "_weaver.catalog.registrations" },
           chained: { _weaver: "mount", source: "app.bridge" },
         },
-        _weaver: { registry: { schemas: "LEAK" } },
       },
     });
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "test",
-    });
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "test",
+      },
+      {
+        app: {
+          type: "object",
+          additionalProperties: true,
+          description: "LEAK",
+        },
+      },
+    );
     const realAdapter = createSSEAdapter({ configService });
 
     const client = await realAdapter.createClient({ prefix: "app" });
@@ -163,10 +171,14 @@ describe("SSEAdapter", () => {
       layer: "tenant:acme",
       initialEntries: { app: { limit: 2 } },
     });
-    const configService = await createWeaverConfigService({
-      providers: [base, tenant],
-      environment: "test",
-    });
+    const configService = await createTestService(
+      {
+        providers: [base, tenant],
+        environment: "test",
+      },
+      { app: { type: "object", additionalProperties: true } },
+      [[{ scopeId: "tenant", value: "acme" }]],
+    );
     const realAdapter = createSSEAdapter({ configService });
 
     const client = await realAdapter.createClient({ scope: "tenant:acme" });
@@ -213,32 +225,30 @@ describe("SSEAdapter", () => {
     client.close();
   });
 
-  it("rejects invalid snapshots and suppresses invalid subscription deltas", async () => {
+  it("rejects incomplete mutations before invalid snapshots or deltas can exist", async () => {
     const provider = createInMemoryStorageProvider({
       id: "platform",
       layer: "platform",
       initialEntries: { checkout: { mode: "prod" } },
     });
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "test",
-    });
-    const registry = createSchemaRegistry({ configService });
-    await registry.register({
-      serviceId: "checkout",
-      environment: "test",
-      owner: { name: "Checkout", contact: "checkout@example.com" },
-      schema: {
-        type: "object",
-        required: ["mode"],
-        properties: {
-          mode: { type: "string", enum: ["prod", "test"] },
-          limit: { type: "number" },
-        },
-        additionalProperties: false,
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "test",
       },
-      fragmentSlots: [],
-    });
+      {
+        checkout: {
+          type: "object",
+          required: ["mode"],
+          properties: {
+            mode: { type: "string", enum: ["prod", "test"] },
+            limit: { type: "number" },
+          },
+          additionalProperties: false,
+        },
+      },
+    );
+    const registry = createSchemaRegistry({ configService });
     const realAdapter = createSSEAdapter({ configService });
     const client = await realAdapter.createClient();
 
@@ -248,18 +258,15 @@ describe("SSEAdapter", () => {
       { limit: 10 },
       { schemaRegistry: registry },
     );
-    expect(partial.success).toBe(true);
+    expect(partial.success).toBe(false);
     await Promise.resolve();
     await Promise.resolve();
-    expect(parseMessages(client)).toHaveLength(2);
-    expect(parseMessages(client)[1]?.data).toMatchObject({
-      key: "checkout",
-      action: "remove",
-      value: null,
+    expect(parseMessages(client)).toHaveLength(1);
+    const another = await realAdapter.createClient();
+    expect(parseMessages(another)[0]?.data.entries).toEqual({
+      checkout: { mode: "prod" },
     });
-    await expect(realAdapter.createClient()).rejects.toMatchObject({
-      code: "VALIDATION_ERROR",
-    });
+    another.close();
     expect(realAdapter.clientCount).toBe(1);
 
     const completed = await configService.set(
@@ -269,29 +276,35 @@ describe("SSEAdapter", () => {
     );
     expect(completed.success).toBe(true);
     const messages = parseMessages(client);
-    expect(messages).toHaveLength(3);
-    expect(messages[2]?.data).toMatchObject({
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.data).toMatchObject({
       key: "checkout",
-      value: { limit: 10, mode: "test" },
+      value: { mode: "test" },
     });
     client.close();
   });
 
-  it("invalidates an existing client when registration makes its root invalid", async () => {
+  it("does not activate a registration invalidating an existing client", async () => {
     const provider = createInMemoryStorageProvider({
       id: "platform",
       layer: "platform",
       initialEntries: { checkout: { limit: 10 }, public: { ready: true } },
     });
-    const configService = await createWeaverConfigService({
-      providers: [provider],
-      environment: "test",
-    });
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "test",
+      },
+      {
+        checkout: { type: "object", additionalProperties: true },
+        public: { type: "object", additionalProperties: true },
+      },
+    );
     const realAdapter = createSSEAdapter({ configService });
     const client = await realAdapter.createClient();
     const registry = createSchemaRegistry({ configService });
 
-    await registry.register({
+    const request: Parameters<typeof registry.register>[0] = {
       serviceId: "checkout",
       environment: "test",
       owner: { name: "Checkout", contact: "checkout@example.com" },
@@ -305,9 +318,23 @@ describe("SSEAdapter", () => {
         additionalProperties: false,
       },
       fragmentSlots: [],
-    });
+    };
+    const revision = configService.revision;
+    expect(
+      (await registry.register(request, { expectedRevision: revision }))
+        .success,
+    ).toBe(false);
+    expect(configService.revision).toBe(revision);
+    expect(parseMessages(client)).toHaveLength(1);
     await configService.set("platform", "public.ready", false);
     await configService.set("platform", "checkout.mode", "prod");
+    expect(
+      (
+        await registry.register(request, {
+          expectedRevision: configService.revision,
+        })
+      ).success,
+    ).toBe(true);
 
     const changes = parseMessages(client).filter(
       (message) => message.event === "change",
@@ -315,9 +342,10 @@ describe("SSEAdapter", () => {
     expect(
       changes.map((message) => [message.data.action, message.data.key]),
     ).toEqual([
-      ["remove", "checkout"],
-      ["remove", "checkout"],
-      ["set", "public.ready"],
+      ["set", "checkout"],
+      ["set", "public"],
+      ["set", "checkout"],
+      ["set", "public"],
       ["set", "checkout"],
     ]);
     expect(changes.at(-1)?.data.value).toEqual({ limit: 10, mode: "prod" });

@@ -9,7 +9,10 @@ import type {
   ConfigurationInspection,
   ConfigurationStorageProvider,
   ScopeInstance,
+  ScopeInventory,
+  ServiceAuthoritySnapshot,
   Unsubscribe,
+  WeaverConfig,
   WriteResult,
 } from "@weaver-conf/config-types";
 import type { ConfigDelta, ConfigSnapshot } from "../types/index";
@@ -41,6 +44,17 @@ export interface WeaverConfigServiceOptions {
   flushDebounceMs?: number;
   /** Optional secret backend for resolving SecretReference markers. */
   secretBackend?: SecretBackend;
+  /** Refuse volatile or unsupported adapters for bootstrap/maintenance authority. */
+  requireDurableAuthority?: boolean;
+  scopeInventory?: ScopeInventory;
+  infrastructureId?: string;
+  /** Executable readiness notification; failed candidates never become public fallback. */
+  onReadinessChange?: (ready: boolean) => void;
+  /** Explicit isolated control admission; never enables public application access. */
+  serviceMode?: "application" | "control";
+  controlLayer?: string;
+  /** A standalone seed namespace stores protected infrastructure only. */
+  controlPathsOnly?: boolean;
 }
 
 export interface WeaverConfigService {
@@ -56,6 +70,12 @@ export interface WeaverConfigService {
   readonly providers: ReadonlyArray<ConfigurationStorageProvider>;
   readonly degradedProviders: ReadonlyArray<string>;
   readonly revision: string;
+  readonly layout?: WeaverConfig;
+  /** Executable transport admission; configured full-context inventory takes precedence. */
+  assertScopeMembership?(
+    scopePath?: ScopeInstance[],
+    signal?: AbortSignal,
+  ): Promise<void>;
   reloadProvider(providerId: string): Promise<void>;
   set(
     layer: string,
@@ -97,4 +117,8 @@ export interface WeaverConfigService {
   flush(): Promise<void>;
   /** Refresh all providers from remote sources, then reload state. */
   refreshProviders(): Promise<void>;
+  /** Release lifetime writer capabilities after flushing replication. */
+  close?(): Promise<void>;
+  /** Validated complete inventory plus live authority; refuses unsupported providers. */
+  authoritySnapshot?(): Promise<ServiceAuthoritySnapshot>;
 }

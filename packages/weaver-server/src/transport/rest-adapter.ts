@@ -10,6 +10,7 @@ import type { AuthContext } from "../auth/auth-middleware";
 import type { WeaverConfigService } from "../core/config-service";
 import type { SchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
+import type { WeaverRuntime } from "../server-runtime";
 import { createWeaverError, httpStatusForError } from "../types/index";
 import type { AuthGate } from "./auth-gate";
 import {
@@ -26,6 +27,7 @@ export interface RestRoute {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   handler: (req: RestRequest) => Promise<RestResponse>;
+  maintenance?: boolean;
 }
 
 export interface RestRequest {
@@ -50,6 +52,7 @@ export interface RestAdapterOptions {
   corsOrigins?: string[];
   authGate?: AuthGate;
   auditService?: AuditService;
+  runtime?: WeaverRuntime;
 }
 
 export interface RestAdapter {
@@ -74,6 +77,7 @@ export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
     corsOrigins,
     authGate,
     auditService,
+    runtime,
   } = options;
 
   const routes: RestRoute[] = buildRoutes({
@@ -82,6 +86,7 @@ export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
     scopeManager,
     authGate,
     auditService,
+    runtime,
   });
 
   function findRoute(method: string, path: string): RouteMatch | null {

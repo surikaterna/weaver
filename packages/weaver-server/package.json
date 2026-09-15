@@ -29,7 +29,12 @@
     "build": "tsup",
     "start": "node dist/cli.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=1 --no-file-parallelism",
+    "test:pipeline": "node --import tsx --test test/validated-pipeline.node.mjs",
+    "test:vitest": "vitest run --maxWorkers=1 --no-file-parallelism",
+    "test:schemas": "node --import tsx --test --test-concurrency=1 test/schema-foundations/*.node.mjs",
+    "test:node": "node --import tsx --test --test-concurrency=1 test/*.node.mjs test/schema-foundations/*.node.mjs",
+    "test:bootstrap": "node --import tsx --test --test-concurrency=1 test/bootstrap-*.node.mjs",
     "lint": "biome check ."
   },
   "dependencies": {

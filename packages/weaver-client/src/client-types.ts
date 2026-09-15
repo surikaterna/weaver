@@ -1,5 +1,6 @@
 import type {
   RegisteredEffectiveValidationResponse,
+  SchemaRegistrationOptions,
   SchemaRegistrationRequest,
   SchemaRegistrationResponse,
   ScopeDefinition,
@@ -134,6 +135,7 @@ export interface WeaverClient {
   // ── Registration ──
   registerSchema(
     request: SchemaRegistrationRequest,
+    options?: SchemaRegistrationOptions,
   ): Promise<SchemaRegistrationResponse>;
 
   // ── Instances ──

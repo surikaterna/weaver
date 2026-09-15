@@ -52,6 +52,25 @@ export interface HttpTransportOptions {
 export function createHttpTransport(
   options: HttpTransportOptions,
 ): WeaverTransport & { lastCheckpoint: number } {
+  const context = createHttpContext(options);
+  const registeredContext = {
+    buildScopeQuery,
+    queryString,
+    requestValidated: context.requester.requestValidated,
+  };
+  return {
+    ...readMethods(context),
+    ...namespaceMethods(context),
+    ...writeMethods(context),
+    ...registeredMethods(registeredContext),
+    ...streamMethods(context.sse),
+    get lastCheckpoint() {
+      return context.sse.lastCheckpoint;
+    },
+  };
+}
+
+function createHttpContext(options: HttpTransportOptions) {
   const { baseUrl, token, headers: extraHeaders } = options;
   const fetchFn = options.fetch ?? globalThis.fetch;
   const onError = options.onError;
@@ -71,35 +90,7 @@ export function createHttpTransport(
     onError,
   });
 
-  function buildHeaders(): Record<string, string> {
-    const h: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...extraHeaders,
-    };
-    if (token) {
-      h.Authorization = `Bearer ${token}`;
-    }
-    return h;
-  }
-
-  function buildScopeQuery(scopePath?: ScopeInstance[]): string {
-    if (!scopePath?.length) return "";
-    return formatScopePath(scopePath);
-  }
-
-  function queryString(params: Record<string, string | undefined>): string {
-    const entries = Object.entries(params).filter(
-      (pair): pair is [string, string] => pair[1] !== undefined,
-    );
-    if (entries.length === 0) return "";
-    return (
-      "?" +
-      entries
-        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-        .join("&")
-    );
-  }
-
+  const buildHeaders = () => requestHeaders(token, extraHeaders);
   const requester = createHttpRequester({
     baseUrl,
     buildHeaders,
@@ -108,31 +99,64 @@ export function createHttpTransport(
     retry: retryConfig,
     timeout: requestTimeout,
   });
+  return { sse, requester, fetchFn, baseUrl, buildHeaders };
+}
 
-  async function request<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-  ): Promise<T> {
-    // SAFETY: legacy endpoints do not yet export response schemas.
-    return (await requester.request(method, path, body)) as T;
-  }
+type HttpContext = ReturnType<typeof createHttpContext>;
 
-  const registeredContext = {
-    buildScopeQuery,
-    queryString,
-    requestValidated: requester.requestValidated,
+function requestHeaders(
+  token?: string,
+  extraHeaders?: Record<string, string>,
+): Record<string, string> {
+  const h: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...extraHeaders,
   };
+  if (token) {
+    h.Authorization = `Bearer ${token}`;
+  }
+  return h;
+}
 
+function buildScopeQuery(scopePath?: ScopeInstance[]): string {
+  if (!scopePath?.length) return "";
+  return formatScopePath(scopePath);
+}
+
+function queryString(params: Record<string, string | undefined>): string {
+  const entries = Object.entries(params).filter(
+    (pair): pair is [string, string] => pair[1] !== undefined,
+  );
+  if (entries.length === 0) return "";
+  return (
+    "?" +
+    entries
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join("&")
+  );
+}
+
+async function request<T>(
+  context: HttpContext,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  // SAFETY: legacy endpoints do not yet export response schemas.
+  return (await context.requester.request(method, path, body)) as T;
+}
+
+function readMethods(
+  context: HttpContext,
+): Pick<
+  WeaverTransport,
+  "resolveAll" | "get" | "inspect" | "listScopes" | "listScopeValues"
+> {
   return {
-    get lastCheckpoint() {
-      return sse.lastCheckpoint;
-    },
-
     async resolveAll(opts?: ResolveOptions): Promise<ConfigSnapshot> {
       const scope = buildScopeQuery(opts?.scopePath);
       const qs = queryString({ scope: scope || undefined });
-      return request<ConfigSnapshot>("GET", `/v1/config${qs}`);
+      return request<ConfigSnapshot>(context, "GET", `/v1/config${qs}`);
     },
 
     async get(key: string, opts?: GetOptions): Promise<unknown> {
@@ -140,12 +164,42 @@ export function createHttpTransport(
       const keyPath = key.replace(/\./g, "/");
       const qs = queryString({ scope: scope || undefined });
       const result = await request<{ key: string; value: unknown }>(
+        context,
         "GET",
         `/v1/config/${keyPath}${qs}`,
       );
       return result.value;
     },
 
+    async inspect(key: string): Promise<unknown> {
+      const keyPath = key.replace(/\./g, "/");
+      return request<unknown>(context, "GET", `/v1/config/${keyPath}?inspect`);
+    },
+    async listScopes() {
+      return (
+        await request<{ definitions: ScopeDefinition[] }>(
+          context,
+          "GET",
+          "/v1/scopes",
+        )
+      ).definitions;
+    },
+    async listScopeValues(scopeId: string) {
+      return (
+        await request<{ values: string[] }>(
+          context,
+          "GET",
+          `/v1/scopes/${encodeURIComponent(scopeId)}`,
+        )
+      ).values;
+    },
+  };
+}
+
+function namespaceMethods(
+  context: HttpContext,
+): Pick<WeaverTransport, "getNamespace"> {
+  return {
     async getNamespace(
       prefix: string,
       opts?: GetOptions,
@@ -154,6 +208,7 @@ export function createHttpTransport(
       const keyPath = prefix.replace(/\./g, "/");
       const qs = queryString({ scope: scope || undefined });
       const result = await request<{ key: string; value: unknown }>(
+        context,
         "GET",
         `/v1/config/${keyPath}${qs}`,
       );
@@ -166,12 +221,13 @@ export function createHttpTransport(
       }
       return {};
     },
+  };
+}
 
-    async inspect(key: string): Promise<unknown> {
-      const keyPath = key.replace(/\./g, "/");
-      return request<unknown>("GET", `/v1/config/${keyPath}?inspect`);
-    },
-
+function streamMethods(
+  sse: HttpContext["sse"],
+): Pick<WeaverTransport, "subscribe" | "close"> {
+  return {
     subscribe(handler: (delta: ConfigDelta) => void): Unsubscribe {
       sse.deltaHandlers.add(handler);
       if (sse.deltaHandlers.size === 1) {
@@ -185,6 +241,19 @@ export function createHttpTransport(
       };
     },
 
+    async close(): Promise<void> {
+      sse.disconnect();
+      sse.deltaHandlers.clear();
+    },
+  };
+}
+
+function setMethods({
+  fetchFn,
+  baseUrl,
+  buildHeaders,
+}: HttpContext): Pick<WeaverTransport, "set"> {
+  return {
     async set(
       key: string,
       value: unknown,
@@ -215,7 +284,15 @@ export function createHttpTransport(
       }
       return json.data;
     },
+  };
+}
 
+function batchMethods({
+  fetchFn,
+  baseUrl,
+  buildHeaders,
+}: HttpContext): Pick<WeaverTransport, "setMany"> {
+  return {
     async setMany(
       entries: Record<string, unknown>,
       opts?: WriteOptions,
@@ -244,7 +321,15 @@ export function createHttpTransport(
       }
       return json.data;
     },
+  };
+}
 
+function removeMethods({
+  fetchFn,
+  baseUrl,
+  buildHeaders,
+}: HttpContext): Pick<WeaverTransport, "remove"> {
+  return {
     async remove(key: string, opts?: WriteOptions): Promise<WriteResult> {
       const keyPath = key.replace(/\./g, "/");
       const qs = queryString({ layer: opts?.layer, env: opts?.environment });
@@ -270,29 +355,34 @@ export function createHttpTransport(
       }
       return json.data;
     },
+  };
+}
 
-    async listScopes(): Promise<ScopeDefinition[]> {
-      const result = await request<{ definitions: ScopeDefinition[] }>(
-        "GET",
-        "/v1/scopes",
-      );
-      return result.definitions;
-    },
+function writeMethods(context: HttpContext) {
+  return {
+    ...setMethods(context),
+    ...batchMethods(context),
+    ...removeMethods(context),
+  };
+}
 
-    async listScopeValues(scopeId: string): Promise<string[]> {
-      const result = await request<{ values: string[] }>(
-        "GET",
-        `/v1/scopes/${encodeURIComponent(scopeId)}`,
-      );
-      return result.values;
-    },
-
+function registeredMethods(
+  registeredContext: Parameters<typeof fetchRegisteredSchemas>[0],
+): Pick<
+  WeaverTransport,
+  | "fetchSchemas"
+  | "registerSchema"
+  | "setRegisteredObject"
+  | "patchRegisteredPath"
+  | "validateRegisteredEffective"
+> {
+  return {
     async fetchSchemas() {
       return fetchRegisteredSchemas(registeredContext);
     },
 
-    async registerSchema(requestBody) {
-      return postSchemaRegistration(registeredContext, requestBody);
+    async registerSchema(requestBody, options) {
+      return postSchemaRegistration(registeredContext, requestBody, options);
     },
 
     async setRegisteredObject(anchorPath, value, opts?) {
@@ -305,11 +395,6 @@ export function createHttpTransport(
 
     async validateRegisteredEffective(options) {
       return validateRegisteredEffectiveRequest(registeredContext, options);
-    },
-
-    async close(): Promise<void> {
-      sse.disconnect();
-      sse.deltaHandlers.clear();
     },
   };
 }

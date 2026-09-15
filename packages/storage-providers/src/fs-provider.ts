@@ -1,295 +1,111 @@
-import { type FSWatcher, watch } from "node:fs";
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { normalizeStorageWritePath } from "@weaver-conf/config-engine";
 import {
-  deepEqual,
-  deepMerge,
-  deepRemove,
-  deepSet,
-  isNodeError,
-  safeParseConfigEntries,
-} from "@weaver-conf/config-engine";
-import type {
-  ConfigurationChange,
-  ConfigurationLayer,
-  ConfigurationLayerData,
-  ConfigurationStorageProvider,
-  Result,
-  WriteResult,
+  type ConfigurationLayerData,
+  type ConfigurationStorageProvider,
+  createWeaverError,
+  type FileAuthorityOptions,
+  type WriteResult,
 } from "@weaver-conf/config-types";
-import { err, ok } from "@weaver-conf/config-types";
+import { revisionOf } from "./authority-envelope";
+import { createFileAuthority } from "./fs-authority";
+import { directAuthorityWrite } from "./layer-authority";
 
-/** Options for creating a file-system storage provider. */
 export interface FileSystemProviderOptions {
-  id: string;
-  layer: ConfigurationLayer | string;
-  filePath: string;
-  writable?: boolean | undefined;
-  environmentOverlayPath?: string | undefined;
-  /** Debounce interval in ms for file-system watch events (default: 100). */
-  watchDebounceMs?: number | undefined;
+  readonly id: string;
+  readonly layer: string;
+  readonly filePath: string;
+  readonly writable?: boolean;
+  readonly authority: FileAuthorityOptions;
 }
-
-/**
- * Validates that a key does not escape the root directory via path traversal.
- * Rejects null bytes, control characters, and `..` segments.
- */
-export function validateStorageKey(key: string): void {
-  if ([...key].some((char) => char.charCodeAt(0) <= 0x1f)) {
-    throw new Error("Invalid key: contains control characters");
-  }
-  if (key.includes("..")) {
-    throw new Error(`Path traversal rejected: ${key}`);
-  }
-}
-
-/** @see {@link createFileSystemStorageProvider} — prefer the factory function for consistency */
+/** Current envelope format only. Plain JSON and invisible overlays are never adopted. */
 export class FileSystemStorageProvider implements ConfigurationStorageProvider {
   readonly id: string;
-  readonly layer: ConfigurationLayer | string;
+  readonly layer: string;
   readonly writable: boolean;
-
-  private readonly filePath: string;
-  private readonly envOverlayPath: string | undefined;
-  private readonly watchDebounceMs: number;
-  private fsWatcher: FSWatcher | null = null;
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private snapshot: Record<string, unknown> = {};
-  private changeListener: ((changes: ConfigurationChange[]) => void) | null =
-    null;
-
+  readonly authority;
+  readonly capabilities;
   constructor(options: FileSystemProviderOptions) {
+    if (
+      !options.authority ||
+      Object.keys(options).some(
+        (key) =>
+          !["id", "layer", "filePath", "writable", "authority"].includes(key),
+      )
+    )
+      throw createWeaverError(
+        "UNSUPPORTED_AUTHORITY",
+        "Filesystem provider requires current-format authority options; overlays/plain JSON readers are unsupported",
+      );
     this.id = options.id;
     this.layer = options.layer;
     this.writable = options.writable ?? false;
-    this.filePath = resolve(options.filePath);
-    this.envOverlayPath = options.environmentOverlayPath
-      ? resolve(options.environmentOverlayPath)
-      : undefined;
-    this.watchDebounceMs = options.watchDebounceMs ?? 100;
+    this.authority = createFileAuthority(
+      options.filePath,
+      options.layer,
+      options.authority,
+    );
+    this.capabilities = this.authority.capabilities;
   }
-
-  async load(): Promise<ConfigurationLayerData> {
+  load(): Promise<ConfigurationLayerData> {
     return this.loadLayer(this.layer);
   }
-
   async loadLayer(layer: string): Promise<ConfigurationLayerData> {
-    const path =
-      layer === this.layer
-        ? this.filePath
-        : `${this.filePath}.${encodeURIComponent(layer)}.json`;
-    let entries = await this.readJsonFile(path);
-    const revision = await this.getRevision(path);
-
-    if (this.envOverlayPath) {
-      const overlay = await this.readJsonFile(this.envOverlayPath);
-      entries = deepMerge(entries, overlay);
-    }
-
-    const result: ConfigurationLayerData = { entries };
-    if (revision !== undefined) {
-      result.revision = revision;
-    }
-    return result;
+    const snapshot = await this.authority.readLayer(layer);
+    return {
+      entries: snapshot.entries,
+      revision: JSON.stringify(revisionOf(snapshot)),
+    };
   }
-
-  async write(key: string, value: unknown): Promise<WriteResult> {
+  write(key: string, value: unknown): Promise<WriteResult> {
     return this.writeLayer(this.layer, key, value);
   }
-
-  async writeLayer(
+  writeLayer(layer: string, key: string, value: unknown): Promise<WriteResult> {
+    return this.mutate(layer, key, value, false);
+  }
+  remove(key: string): Promise<WriteResult> {
+    return this.removeLayer(this.layer, key);
+  }
+  removeLayer(layer: string, key: string): Promise<WriteResult> {
+    return this.mutate(layer, key, undefined, true);
+  }
+  private async mutate(
     layer: string,
     key: string,
     value: unknown,
+    remove: boolean,
   ): Promise<WriteResult> {
-    if (!this.writable) {
+    const path = normalizeStorageWritePath(key);
+    if (!path.ok) return { success: false, error: path.error };
+    if ([...path.value].some((character) => character.charCodeAt(0) <= 31))
+      return {
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Control characters are forbidden in storage paths",
+        },
+      };
+    if (!this.writable)
       return {
         success: false,
         error: { code: "READONLY", message: "Provider is read-only" },
       };
-    }
-    validateStorageKey(key);
-
-    const path =
-      layer === this.layer
-        ? this.filePath
-        : `${this.filePath}.${encodeURIComponent(layer)}.json`;
-
-    const entries = await this.readJsonFile(path);
-    deepSet(entries, key, value);
-    await this.atomicWrite(path, entries);
-
-    this.snapshot = JSON.parse(JSON.stringify(entries));
-
-    const revision = await this.getRevision(path);
-    return { success: true, revision };
+    return directAuthorityWrite(
+      this.authority,
+      layer,
+      path.value,
+      value,
+      remove,
+    );
   }
-
-  async remove(key: string): Promise<WriteResult> {
-    return this.removeLayer(this.layer, key);
-  }
-
-  async removeLayer(layer: string, key: string): Promise<WriteResult> {
-    if (!this.writable) {
-      return {
-        success: false,
-        error: { code: "READONLY", message: "Provider is read-only" },
-      };
-    }
-    validateStorageKey(key);
-
-    const path =
-      layer === this.layer
-        ? this.filePath
-        : `${this.filePath}.${encodeURIComponent(layer)}.json`;
-
-    const entries = await this.readJsonFile(path);
-    deepRemove(entries, key);
-    await this.atomicWrite(path, entries);
-
-    this.snapshot = JSON.parse(JSON.stringify(entries));
-
-    const revision = await this.getRevision(path);
-    return { success: true, revision };
-  }
-
-  onExternalChange(
-    listener: (changes: ConfigurationChange[]) => void,
-  ): () => void {
-    this.stopWatching();
-    this.changeListener = listener;
-
-    void this.readJsonFile(this.filePath).then((entries) => {
-      if (!this.changeListener) return;
-      this.snapshot = entries;
-      this.startWatching();
-    });
-
-    return () => this.stopWatching();
-  }
-
-  dispose(): void {
-    this.stopWatching();
-  }
-
-  private startWatching(): void {
-    const dir = dirname(this.filePath);
-    const filename = this.filePath.slice(dir.length + 1);
-
-    this.fsWatcher = watch(dir, (_eventType, changedFile) => {
-      if (changedFile !== filename) return;
-      this.scheduleCheck();
-    });
-  }
-
-  private stopWatching(): void {
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = null;
-    }
-    if (this.fsWatcher) {
-      this.fsWatcher.close();
-      this.fsWatcher = null;
-    }
-    this.changeListener = null;
-  }
-
-  private scheduleCheck(): void {
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-    }
-    this.debounceTimer = setTimeout(() => {
-      this.debounceTimer = null;
-      void this.checkForChanges();
-    }, this.watchDebounceMs);
-    this.debounceTimer.unref();
-  }
-
-  private async checkForChanges(): Promise<void> {
-    if (!this.changeListener) return;
-
-    const current = await this.readJsonFile(this.filePath);
-    const changes = diffEntries(this.snapshot, current);
-
-    if (changes.length > 0) {
-      this.snapshot = current;
-      this.changeListener(changes);
-    }
-  }
-
-  private async readJsonFile(path: string): Promise<Record<string, unknown>> {
-    const result = await this.readJsonFileResult(path);
-    if (!result.ok) {
-      // Preserve legacy behavior: log and return empty for parse errors
-      console.warn(result.error.message);
-      return {};
-    }
-    return result.value;
-  }
-
-  private async readJsonFileResult(
-    path: string,
-  ): Promise<Result<Record<string, unknown>, Error>> {
-    try {
-      const content = await readFile(path, "utf-8");
-      return ok(safeParseConfigEntries(JSON.parse(content)));
-    } catch (e: unknown) {
-      if (e instanceof SyntaxError) {
-        return err(new Error(`Invalid JSON in config file: ${path}`));
-      }
-      if (isNodeError(e) && e.code === "ENOENT") {
-        return ok({});
-      }
-      return err(e instanceof Error ? e : new Error(String(e)));
-    }
-  }
-
-  private async getRevision(path: string): Promise<string | undefined> {
-    try {
-      const stats = await stat(path);
-      return stats.mtime.toISOString();
-    } catch {
-      return undefined;
-    }
-  }
-
-  private async atomicWrite(
-    path: string,
-    data: Record<string, unknown>,
-  ): Promise<void> {
-    const dir = dirname(path);
-    await mkdir(dir, { recursive: true });
-    const tmpPath = `${path}.tmp`;
-    await writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
-    await rename(tmpPath, path);
+  onExternalChange(): () => void {
+    throw createWeaverError(
+      "UNSUPPORTED_AUTHORITY",
+      "Exclusive authority does not accept external writers/watchers",
+    );
   }
 }
-
-/** Creates a file-system-backed storage provider instance. */
 export function createFileSystemStorageProvider(
   options: FileSystemProviderOptions,
 ): FileSystemStorageProvider {
   return new FileSystemStorageProvider(options);
-}
-
-/** Shallow diff of top-level keys between two entry maps. */
-function diffEntries(
-  oldEntries: Record<string, unknown>,
-  newEntries: Record<string, unknown>,
-): ConfigurationChange[] {
-  const changes: ConfigurationChange[] = [];
-  const allKeys = new Set([
-    ...Object.keys(oldEntries),
-    ...Object.keys(newEntries),
-  ]);
-
-  for (const key of allKeys) {
-    const oldVal = oldEntries[key];
-    const newVal = newEntries[key];
-    if (!deepEqual(oldVal, newVal)) {
-      changes.push({ key, oldValue: oldVal, newValue: newVal });
-    }
-  }
-
-  return changes;
 }
