@@ -26,6 +26,7 @@ import {
   activateControlApplication,
   controlProjection,
   controlTransaction,
+  hostForControl,
 } from "./config-service-internal";
 import type {
   WeaverConfigService,
@@ -36,7 +37,7 @@ import {
   prepareJournalReplacement,
 } from "./control-journal-lineage";
 import {
-  createSchemaRegistry,
+  registerControlSchema,
   type SchemaRegistrationContext,
 } from "./schema-registry";
 
@@ -67,7 +68,7 @@ function controlService(service: WeaverConfigService) {
   return Object.freeze({
     owner,
     get revision() {
-      return service.revision;
+      return hostForControl(service).authority.revision();
     },
     binding: Object.freeze({ ...controlProjection(service).binding }),
     configuration: service,
@@ -76,11 +77,7 @@ function controlService(service: WeaverConfigService) {
     registerSchema: (
       request: SchemaRegistrationRequest,
       context?: SchemaRegistrationContext,
-    ) =>
-      createSchemaRegistry({ configService: service }).register(
-        request,
-        context,
-      ),
+    ) => registerControlSchema(service, request, context),
     application: () => activateControlApplication(service),
     close: async () => {
       await service.close?.();
@@ -92,7 +89,7 @@ function bootstrapView(service: WeaverConfigService) {
   return {
     initialize: (
       configuration: InternalConfiguration,
-      expectedRevision = service.revision,
+      expectedRevision = hostForControl(service).authority.revision(),
     ) =>
       controlResult(() =>
         controlTransaction(service, "bootstrap", ({ write }) =>
@@ -172,7 +169,7 @@ function inventoryInitialization(service: WeaverConfigService) {
       controlResult(() =>
         controlTransaction(service, "scope", async ({ write }) => {
           const state = controlProjection(service).prepared().configuration;
-          if (expectedRevision !== service.revision)
+          if (expectedRevision !== hostForControl(service).authority.revision())
             throw createWeaverError(
               "REVISION_CONFLICT",
               "Inventory initialization precondition changed",
@@ -181,7 +178,10 @@ function inventoryInitialization(service: WeaverConfigService) {
             state.format.initialization !== "initialized" &&
             deepEqual(state.scopeInventory, inventory)
           )
-            return { success: true, revision: service.revision };
+            return {
+              success: true,
+              revision: hostForControl(service).authority.revision(),
+            };
           if (
             state.format.initialization === "initialized" ||
             Object.keys(state.scopeInventory.contexts).length ||
@@ -325,7 +325,11 @@ function maintenanceView(service: WeaverConfigService, owner: string) {
           "WRITER_CONFLICT",
           "Journal lifecycle updates require the maintenance executor",
         );
-      if (previous) return { success: true, revision: service.revision };
+      if (previous)
+        return {
+          success: true,
+          revision: hostForControl(service).authority.revision(),
+        };
       const prepared = await prepareInitialJournal(service, journal);
       return controlTransaction(service, "maintenance", ({ write }) =>
         write(`_weaver.upgrades.journal.${journal.runId}`, prepared, {

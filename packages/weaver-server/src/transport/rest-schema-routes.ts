@@ -1,11 +1,11 @@
 import { parseCanonicalConfigPath } from "@weaver-conf/config-engine";
-import type { WriteResult } from "@weaver-conf/config-types";
 import type { AuditService } from "../audit/audit-service";
 import type {
   EffectiveValidationContext,
   WeaverConfigService,
   WriteContext,
 } from "../core/config-service";
+import { configServiceTransportRevision } from "../core/config-service-lifecycle";
 import type {
   SchemaRegistrationResult,
   SchemaRegistry,
@@ -16,6 +16,10 @@ import { createWeaverError, httpStatusForError } from "../types/index";
 import type { AuthGate } from "./auth-gate";
 import type { RestRequest, RestResponse, RestRoute } from "./rest-adapter";
 import { envelope, errorEnvelope, v1Headers } from "./rest-helpers";
+import {
+  schemaRegistrationFailureResponse,
+  schemaWriteFailureResponse,
+} from "./rest-schema-responses";
 import {
   fragmentSchemaRegistrationBodySchema,
   registeredEffectiveValidationQuerySchema,
@@ -46,7 +50,7 @@ function v1Response<T>(
   status: number,
   data: T,
 ): RestResponse {
-  const rev = configService.revision;
+  const rev = configServiceTransportRevision(configService);
   return { status, body: envelope(data, rev), headers: v1Headers(rev) };
 }
 
@@ -56,7 +60,7 @@ function v1Error(
   message: string,
   details?: Record<string, unknown>,
 ): RestResponse {
-  const rev = configService.revision;
+  const rev = configServiceTransportRevision(configService);
   const err = createWeaverError(code, message, details);
   return {
     status: httpStatusForError(code),
@@ -145,29 +149,6 @@ function writeContext(req: RestRequest): WriteContext {
   return {
     ...(expectedRevision ? { expectedRevision } : {}),
     ...(environment ? { environment } : {}),
-  };
-}
-
-function writeFailureResponse(
-  configService: WeaverConfigService,
-  fallback: string,
-  result: WriteResult,
-): RestResponse {
-  const error = result.error;
-  const code: WeaverErrorCode =
-    error?.code === "REVISION_CONFLICT"
-      ? "REVISION_CONFLICT"
-      : "VALIDATION_ERROR";
-  const status = code === "REVISION_CONFLICT" ? 409 : httpStatusForError(code);
-  const rev = configService.revision;
-  const details = isRecord(error?.details) ? error.details : undefined;
-  return {
-    status,
-    body: errorEnvelope(
-      createWeaverError(code, error?.message ?? fallback, details),
-      rev,
-    ),
-    headers: v1Headers(rev),
   };
 }
 
@@ -275,7 +256,7 @@ function setRegisteredObjectRoute(deps: SchemaRouteDeps): RestRoute {
         "Registered object write failed",
       );
       if (!result.success) {
-        return writeFailureResponse(
+        return schemaWriteFailureResponse(
           configService,
           "Registered object write failed",
           result,
@@ -313,7 +294,7 @@ function patchRegisteredPathRoute(deps: SchemaRouteDeps): RestRoute {
         "Registered path patch failed",
       );
       if (!result.success) {
-        return writeFailureResponse(
+        return schemaWriteFailureResponse(
           configService,
           "Registered path patch failed",
           result,
@@ -378,14 +359,5 @@ function registrationFailure(
   configService: WeaverConfigService,
   result: SchemaRegistrationResult,
 ): RestResponse {
-  return v1Error(
-    configService,
-    result.error?.code ?? "VALIDATION_ERROR",
-    result.error?.message ?? "Schema registration failed",
-    result.error?.details,
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return schemaRegistrationFailureResponse(configService, result);
 }

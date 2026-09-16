@@ -17,6 +17,7 @@ import {
 } from "./activation-recovery";
 import {
   controlProjection,
+  hostForControl,
   runMaintenanceOperation,
 } from "./config-service-internal";
 import type { createControlService } from "./control-service";
@@ -130,10 +131,13 @@ function controlBinding(
 ) {
   const state = controlProjection(runtime.configService).prepared()
     .configuration;
-  const provider = runtime.configService.providers.find((item) =>
-    plan.source.providerRevisions
-      .find((source) => source.providerId === item.id)
-      ?.revisions.some((revision) => revision.storeId === state.format.storeId),
+  const provider = hostForControl(runtime.configService).providers.find(
+    (item) =>
+      plan.source.providerRevisions
+        .find((source) => source.providerId === item.id)
+        ?.revisions.some(
+          (revision) => revision.storeId === state.format.storeId,
+        ),
   );
   const source = plan.source.providerRevisions.find(
     (item) => item.providerId === provider?.id,

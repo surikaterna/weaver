@@ -4,7 +4,8 @@ import { consumePinnedRecoveryContext } from "../bootstrap/pinned-recovery-open"
 import { ConfigAuthority } from "./config-authority";
 import { ConfigServiceController } from "./config-service-controller";
 import { createConfigServiceFacade } from "./config-service-facade";
-import { bindControlHost } from "./config-service-internal";
+import { bindControlHost } from "./config-service-host";
+import { bindConfigServiceLifecycle } from "./config-service-lifecycle";
 import type {
   WeaverConfigService,
   WeaverConfigServiceOptions,
@@ -116,6 +117,9 @@ function bindService(
   service: WeaverConfigService,
 ): void {
   bindControlHost(service, host);
+  bindConfigServiceLifecycle(service, host.coordinator, () =>
+    host.authority.revision(),
+  );
   bindUpgradePlanningHost(service, host);
   registerSchemaBoundaryHost(
     service,

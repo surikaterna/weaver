@@ -44,11 +44,8 @@ export async function startWeaverServer(
       );
     sse = createSSEAdapter({ configService: runtime.configService });
     if (runtime.state === "ready") sse.startCheckpointTimer();
-    const activeSse = sse;
     runtime.onMaintenance(() => {
       health.setReady(false);
-      activeSse.stopCheckpointTimer();
-      activeSse.closeAll();
     });
     http = await startHttpServer({
       port: runtime.settings.port,

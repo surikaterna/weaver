@@ -30,6 +30,7 @@ import {
   assertBootstrapAdministrator,
   type BootstrapAdministrator,
 } from "./bootstrap/seed-trust";
+import { waitForMaintenanceFence } from "./core/application-maintenance-barrier";
 import {
   controlProjection,
   hostForControl,
@@ -125,7 +126,7 @@ export class WeaverRuntime {
     return weaverRuntimeStatusSchema.parse({
       state: this.state,
       environment: this.#opened.seed.environment,
-      revision: this.configService.revision,
+      revision: hostForControl(this.configService).authority.revision(),
       ...(this.#phase !== "closed"
         ? {
             activeGeneration: controlProjection(this.configService).prepared()
@@ -246,9 +247,11 @@ export class WeaverRuntime {
       assertBootstrapAdministrator(this.#opened.seed, administrator);
     if (this.#phase === "closed")
       throw createWeaverError("CONFIG_NOT_READY", "Runtime is closed");
-    await suspendControlApplication(this.configService);
     this.#phase = "maintenance";
-    this.notifyMaintenance();
+    const drain = suspendControlApplication(this.configService, () =>
+      this.notifyMaintenance(),
+    );
+    await waitForMaintenanceFence(drain);
   }
   requireRestart(): void {
     this.#phase = "restart_required";
@@ -318,7 +321,11 @@ export class WeaverRuntime {
   close(): Promise<void> {
     if (this.#closePromise) return this.#closePromise;
     this.#phase = "closed";
-    this.notifyMaintenance();
+    try {
+      this.notifyMaintenance();
+    } catch {
+      /* Close remains fail-closed when lifecycle notification fails. */
+    }
     this.#closePromise = runIndependentCleanup([
       {
         name: "control/application owners",
@@ -332,13 +339,19 @@ export class WeaverRuntime {
     return this.#closePromise;
   }
   private notifyMaintenance(): void {
+    let failed = false;
     for (const listener of this.#maintenanceListeners) {
       try {
         listener();
       } catch {
-        /* Delivery cannot undo admission closure. */
+        failed = true;
       }
     }
+    if (failed)
+      throw createWeaverError(
+        "MAINTENANCE",
+        "Maintenance lifecycle notification failed",
+      );
   }
 }
 export async function openWeaverRuntime(

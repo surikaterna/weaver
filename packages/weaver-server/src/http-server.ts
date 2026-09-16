@@ -28,7 +28,7 @@ function isJsonParseError(error: unknown): boolean {
 function sendClientError(error: unknown, res: Response): boolean {
   if (!(error instanceof WeaverErrorInstance)) return false;
   const status = httpStatusForError(error.code);
-  if (status < 400 || status >= 500) return false;
+  if (status < 400) return false;
   res.status(status).json({
     error: { code: error.code, message: error.message },
   });

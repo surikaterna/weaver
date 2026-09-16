@@ -5,8 +5,10 @@ import { canonicalInternalJson, internalRegistrationId } from "@weaver-conf/conf
 import { initializeWeaver } from "../src/bootstrap/initialize.ts";
 import { initialRegistrationRecord } from "../src/bootstrap/initial-registrations.ts";
 import { openWeaverRuntime } from "../src/server-runtime.ts";
+import { startWeaverServer } from "../src/server.ts";
 import { createServerRest } from "../src/server-transport.ts";
 import { createStandaloneFixture } from "./standalone-fixture.ts";
+import { rawRuntimeProviders } from "./upgrade-test-providers.mjs";
 
 const sourceSchema = {
   type: "object",
@@ -38,7 +40,7 @@ test("maintenance apply persists intents, data receipts, activation and reopens 
     assert.equal(JSON.stringify(outcome).includes("finalContexts"), false);
     assert.equal(runtime.state, "ready");
     assert.deepEqual(await runtime.configService.get("svc"), { keep: true, added: "planned", port: 41 });
-    const control = runtime.configService.providers.find((item) => item.id === "control");
+    const control = rawRuntimeProviders(runtime).find((item) => item.id === "control");
     const envelope = await control.authority.readLayer(control.layer);
     const journal = Object.values(envelope.entries._weaver.upgrades.journal)[0];
     assert.equal(journal.activation.finalContexts.contexts.length, 1);
@@ -47,6 +49,34 @@ test("maintenance apply persists intents, data receipts, activation and reopens 
     assert.equal(serialized.includes('"added":"planned"'), false);
   } finally {
     await runtime?.close();
+    await fixture.dispose();
+  }
+});
+
+test("successful terminal admission reopens the existing server SSE adapter", { timeout: 30_000 }, async () => {
+  const fixture = await createStandaloneFixture({ schemas: { svc: sourceSchema } });
+  let server;
+  try {
+    await initializeWeaver(fixture.seed, fixture.request, fixture.administrator, { credentials: fixture.credentials });
+    server = await startWeaverServer({ seed: fixture.seed, credentials: fixture.credentials });
+    assert.equal((await server.runtime.configService.set("platform", "svc.keep", true)).success, true);
+    const endpoint = `http://127.0.0.1:${server.port}/v1/events`;
+    const original = await fetch(endpoint, { signal: AbortSignal.timeout(5000) });
+    assert.equal(original.status, 200);
+    const originalReader = original.body.getReader();
+    assert.equal((await originalReader.read()).done, false);
+    const request = planRequest(server.runtime, fixture.request);
+    const outcome = await server.runtime.applyUpgrade({ version: 1, request });
+    assert.equal(outcome.status, "completed");
+    assert.equal(server.runtime.state, "ready");
+    assert.equal((await originalReader.read()).done, true);
+    const resumed = await fetch(endpoint, { signal: AbortSignal.timeout(5000) });
+    assert.equal(resumed.status, 200);
+    const resumedReader = resumed.body.getReader();
+    assert.equal((await resumedReader.read()).done, false);
+    await resumedReader.cancel();
+  } finally {
+    await server?.close();
     await fixture.dispose();
   }
 });
@@ -97,8 +127,8 @@ test("data-committed recovery remains closed without ephemeral final context evi
     await initializeWeaver(fixture.seed, fixture.request, fixture.administrator, { credentials: fixture.credentials });
     runtime = await openWeaverRuntime(fixture.seed, { credentials: fixture.credentials });
     assert.equal((await runtime.configService.set("platform", "svc.keep", true)).success, true);
-    const provider = runtime.configService.providers.find((item) => item.id === "platform");
-    const control = runtime.configService.providers.find((item) => item.id === "control");
+    const provider = rawRuntimeProviders(runtime).find((item) => item.id === "platform");
+    const control = rawRuntimeProviders(runtime).find((item) => item.id === "control");
     const original = control.authority.commitLayer.bind(control.authority);
     let completions = 0;
     mock.method(control.authority, "commitLayer", async (request, handle) => {
@@ -132,8 +162,8 @@ test("unrecorded schema-valid final revision blocks before activation", async ()
     await initializeWeaver(fixture.seed, fixture.request, fixture.administrator, { credentials: fixture.credentials });
     runtime = await openWeaverRuntime(fixture.seed, { credentials: fixture.credentials });
     assert.equal((await runtime.configService.set("platform", "svc.keep", true)).success, true);
-    const data = runtime.configService.providers.find((item) => item.id === "platform");
-    const control = runtime.configService.providers.find((item) => item.id === "control");
+    const data = rawRuntimeProviders(runtime).find((item) => item.id === "platform");
+    const control = rawRuntimeProviders(runtime).find((item) => item.id === "control");
     const original = control.authority.commitLayer.bind(control.authority);
     let injected = false;
     let activations = 0;
@@ -164,7 +194,7 @@ test("unrecorded control self-write blocks before activation", async () => {
     await initializeWeaver(fixture.seed, fixture.request, fixture.administrator, { credentials: fixture.credentials });
     runtime = await openWeaverRuntime(fixture.seed, { credentials: fixture.credentials });
     assert.equal((await runtime.configService.set("platform", "svc.keep", true)).success, true);
-    const control = runtime.configService.providers.find((item) => item.id === "control");
+    const control = rawRuntimeProviders(runtime).find((item) => item.id === "control");
     const original = control.authority.commitLayer.bind(control.authority);
     const originalInventory = control.authority.inventory.bind(control.authority);
     const originalRead = control.authority.readLayer.bind(control.authority);
@@ -223,7 +253,7 @@ test("explicit compensation restores a completed reversible step", async () => {
     await initializeWeaver(fixture.seed, fixture.request, fixture.administrator, { credentials: fixture.credentials });
     runtime = await openWeaverRuntime(fixture.seed, { credentials: fixture.credentials });
     assert.equal((await runtime.configService.set("platform", "svc.keep", true)).success, true);
-    const control = runtime.configService.providers.find((item) => item.id === "control");
+    const control = rawRuntimeProviders(runtime).find((item) => item.id === "control");
     const original = control.authority.commitLayer.bind(control.authority);
     mock.method(control.authority, "commitLayer", async (request, handle) => {
       if (request.mutation.action === "set" && request.mutation.key === "_weaver" && request.mutation.value?.catalog?.registrations) {
@@ -235,7 +265,7 @@ test("explicit compensation restores a completed reversible step", async () => {
     const runId = runtime.maintenanceStatus().activeRun.runId;
     const outcome = await runtime.recoverUpgrade({ version: 1, runId, action: "compensate", priorOwnerStopped: { observedAt: new Date().toISOString(), evidence: "same process operator action" } });
     assert.equal(outcome.status, "compensated");
-    const platform = runtime.configService.providers.find((item) => item.id === "platform");
+    const platform = rawRuntimeProviders(runtime).find((item) => item.id === "platform");
     assert.deepEqual((await platform.authority.readLayer("platform")).entries.svc, { keep: true });
   } finally {
     mock.restoreAll();

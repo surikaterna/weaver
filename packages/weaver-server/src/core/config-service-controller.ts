@@ -10,10 +10,12 @@ import {
   type ScopeInventory,
 } from "@weaver-conf/config-types";
 import type { ConfigDelta } from "../types/index";
+import { createApplicationMaintenanceBarrier } from "./application-maintenance-barrier";
 import type { ConfigAuthority } from "./config-authority";
-import { createConfigMutationCoordinator } from "./config-mutation-coordinator";
+import { ConfigBatchContext } from "./config-batch-context";
 import { ConfigPipeline, type ValidatedCandidate } from "./config-pipeline";
-import { providerFlushSteps } from "./config-service-disposal";
+import { bindProviderSource, providerSource } from "./config-provider-source";
+import { serviceCloseSteps } from "./config-service-disposal";
 import { ConfigServiceMutations } from "./config-service-mutations";
 import type {
   WeaverConfigService,
@@ -36,9 +38,9 @@ import {
   parseScopeLayer,
 } from "./scope-utils";
 import { initializeAuthorityInventory } from "./service-authority-snapshot";
-/** Owns live installation and provider IO; facade reads and mutations share its coordinator. */
 export class ConfigServiceController {
-  readonly coordinator = createConfigMutationCoordinator();
+  readonly coordinator = createApplicationMaintenanceBarrier();
+  readonly batchContext = new ConfigBatchContext();
   readonly readiness;
   readonly layerData = new Map<string, Record<string, unknown>>();
   readonly dynamicScopeEntries = new Map<string, Record<string, unknown>>();
@@ -52,15 +54,16 @@ export class ConfigServiceController {
   private closing: Promise<void> | undefined;
   readonly maintenance = new MaintenanceController(this);
   private admitted = false;
-  private denial: "CONFIG_NOT_READY" | "MAINTENANCE" = "CONFIG_NOT_READY";
+  applicationError: "CONFIG_NOT_READY" | "MAINTENANCE" = "CONFIG_NOT_READY";
   private committedValidation: ValidatedCandidate | undefined;
 
   constructor(
     readonly options: WeaverConfigServiceOptions,
-    readonly providers: readonly ConfigurationStorageProvider[],
+    providers: readonly ConfigurationStorageProvider[],
     readonly authority: ConfigAuthority,
     _inventory?: ScopeInventory,
   ) {
+    bindProviderSource(this, providers, this.coordinator.assertOperationLease);
     this.pipeline = new ConfigPipeline(this);
     this.logger = options.logger ?? consoleLogger;
     this.readiness = createProviderReadiness(options.onReadinessChange);
@@ -79,6 +82,9 @@ export class ConfigServiceController {
       logger: this.logger,
     });
     this.mutations = new ConfigServiceMutations(this.mutationHost());
+  }
+  get providers(): readonly ConfigurationStorageProvider[] {
+    return providerSource(this);
   }
   private mutationHost() {
     return {
@@ -138,20 +144,20 @@ export class ConfigServiceController {
   get applicationActive(): boolean {
     return this.admitted;
   }
-  get applicationError() {
-    return this.denial;
-  }
   get isClosed(): boolean {
     return this.closed;
   }
   suspendApplication(): void {
     this.admitted = false;
-    this.denial = "MAINTENANCE";
+    this.applicationError = "MAINTENANCE";
   }
   openApplication(): void {
     this.assertReady(true);
     this.pipeline.assertInitialized();
+    if (this.coordinator.state() === "active")
+      this.coordinator.reopenApplicationAdmission();
     this.admitted = true;
+    this.runtime.openPublication();
   }
   installUpgradeSnapshot(
     snapshot: ValidatedFinalContexts,
@@ -305,9 +311,14 @@ export class ConfigServiceController {
   async reload(
     selected: readonly ConfigurationStorageProvider[],
     refresh: boolean,
+    internal = false,
   ): Promise<void> {
     this.assertOpen();
-    if (this.options.serviceMode !== "control" && !this.applicationActive)
+    if (
+      !internal &&
+      this.options.serviceMode !== "control" &&
+      !this.applicationActive
+    )
       throw createWeaverError("MAINTENANCE", "Application reload is suspended");
     this.readiness.assertRecoverable();
     const staged = new Map<string, Record<string, unknown>>();
@@ -368,9 +379,6 @@ export class ConfigServiceController {
   private autoFlush(): void {
     this.maintenance.scheduleFlush();
   }
-  async batch<T>(fn: () => Promise<T>): Promise<T> {
-    return this.maintenance.batch(fn);
-  }
   async flush(): Promise<void> {
     await this.maintenance.flush();
   }
@@ -381,14 +389,10 @@ export class ConfigServiceController {
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.closed = true;
+    this.coordinator.sealApplicationAdmission();
     this.readiness.invalidate("service-lifecycle", "Service is closing");
-    this.closing = this.coordinator.run(() =>
-      runIndependentCleanup([
-        ...this.maintenance.stopSteps(),
-        ...providerFlushSteps(this.providers),
-        { name: "provider owners", run: () => this.authority.close() },
-        { name: "runtime", run: () => this.runtime.dispose() },
-      ]),
+    this.closing = this.coordinator.runControl(() =>
+      runIndependentCleanup(serviceCloseSteps(this)),
     );
     return this.closing;
   }

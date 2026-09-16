@@ -15,6 +15,8 @@ import {
 import { openWeaverRuntime } from "../src/server-runtime.ts";
 import { createStandaloneFixture } from "./standalone-fixture.ts";
 
+const rawProviders = (runtime) => hostForControl(runtime.configService).providers;
+
 const sourceSchema = {
   type: "object",
   properties: { keep: { type: "boolean" } },
@@ -221,7 +223,7 @@ test("compensated recovery with mismatched source data stays nonready", async (t
       planRequest(runtime, initialization),
     );
     assert.ok(terminalJournal(runtime, runId).control);
-    const platform = runtime.configService.providers.find(
+    const platform = rawProviders(runtime).find(
       (provider) => provider.id === "platform",
     );
     const read = platform.authority.readLayer.bind(platform.authority);
@@ -514,7 +516,7 @@ test("completed recovery rejects divergent application context authority", async
       request: planRequest(runtime, initialization),
     });
     await runtime.enterMaintenance();
-    const platform = runtime.configService.providers.find(
+    const platform = rawProviders(runtime).find(
       (provider) => provider.id === "platform",
     );
     const read = platform.authority.readLayer.bind(platform.authority);
@@ -708,11 +710,11 @@ function observeTerminalRetries(t, runtime, existing) {
 
 function observeTerminalEffects(t, runtime, existing) {
   const observation = existing ?? observeEvents(runtime);
-  const commits = runtime.configService.providers.map((provider) =>
+  const commits = rawProviders(runtime).map((provider) =>
     t.mock.method(provider.authority, "commitLayer"),
   );
   const configSubscriptions = t.mock.method(runtime.configService, "onDelta");
-  const providerSubscriptions = runtime.configService.providers.flatMap(
+  const providerSubscriptions = rawProviders(runtime).flatMap(
     (provider) =>
       provider.onExternalChange
         ? [t.mock.method(provider, "onExternalChange")]
@@ -721,7 +723,7 @@ function observeTerminalEffects(t, runtime, existing) {
   return {
     snapshot() {
       return {
-        revision: runtime.configService.revision,
+        revision: hostForControl(runtime.configService).authority.revision(),
         events: observation.events.length,
         commits: commits.map((commit) => commit.mock.callCount()),
         configSubscriptions: configSubscriptions.mock.callCount(),
@@ -781,7 +783,7 @@ function terminalJournal(runtime, runId) {
 }
 
 function controlProvider(runtime) {
-  const provider = runtime.configService.providers.find(
+  const provider = rawProviders(runtime).find(
     (candidate) => candidate.id === "control",
   );
   assert.ok(provider?.authority);
@@ -823,7 +825,7 @@ async function recoverThreeTimes(runtime, runId) {
 }
 
 async function compensateAfterActivationFailure(t, runtime, request) {
-  const control = runtime.configService.providers.find(
+  const control = rawProviders(runtime).find(
     (provider) => provider.id === "control",
   );
   const commit = control.authority.commitLayer.bind(control.authority);

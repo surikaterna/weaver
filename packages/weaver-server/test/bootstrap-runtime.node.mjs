@@ -93,9 +93,11 @@ test("qkmd declarative order is the only merge/rank authority; staged activation
   input.generation.providers.push(late);
   input.generation.layout.layers.push({ name: "late", type: "static", providerId: "late", config: { mergeId: "deep" } });
   let runtime;
+  let server;
   try {
     await initializeWeaver(fixture.seed, input, fixture.administrator, { credentials: fixture.credentials });
-    runtime = await openWeaverRuntime(fixture.seed, { credentials: fixture.credentials });
+    server = await startWeaverServer({ seed: fixture.seed, credentials: fixture.credentials });
+    runtime = server.runtime;
     assert.equal((await runtime.configService.set("platform", "svc.value", 3)).success, true);
     assert.equal((await runtime.configService.set("tenant:one", "svc.value", 4)).success, true);
     assert.equal((await runtime.configService.set("late", "svc.value", 5)).success, true);
@@ -104,16 +106,23 @@ test("qkmd declarative order is the only merge/rank authority; staged activation
     const candidate = structuredClone(input.generation);
     const layer = candidate.layout.layers.pop();
     candidate.layout.layers.splice(2, 0, layer);
-    await runtime.stageInfrastructure("g2", candidate, runtime.configService.revision, fixture.administrator);
+    const revision = runtime.configService.revision;
+    await runtime.stageInfrastructure("g2", candidate, revision, fixture.administrator);
     assert.equal(runtime.status.activeGeneration, "g1");
-    await runtime.activateInfrastructure("g2", runtime.configService.revision, fixture.administrator);
+    await runtime.activateInfrastructure(
+      "g2",
+      runtime.status.revision,
+      fixture.administrator,
+    );
     assert.equal(runtime.state, "restart_required");
+    assert.equal((await request(server, "/v1/events")).status, 503);
     await assert.rejects(runtime.configService.resolveAll(), { code: "MAINTENANCE" });
-    await runtime.close();
+    await server.close();
+    server = undefined;
     runtime = await openWeaverRuntime(fixture.seed, { credentials: fixture.credentials });
     assert.equal(await runtime.configService.get("svc.value", { scopePath }), 4);
     assert.equal(runtime.configService.layout.getRank("tenant"), 3);
-  } finally { await runtime?.close(); await fixture.dispose(); }
+  } finally { await server?.close(); await runtime?.close(); await fixture.dispose(); }
 });
 
 test("qkmd fresh initialization validates unknown factories/merges/credentials before writes", { timeout: 30_000 }, async () => {
@@ -187,7 +196,7 @@ test("qkmd HTTP/CORS errors remain typed and maintenance closes established SSE 
     invalid.layout.layers[1].config.mergeId = "uninstalled";
     await assert.rejects(server.runtime.stageInfrastructure("bad", invalid, revision, fixture.administrator));
     assert.equal(server.runtime.status.activeGeneration, "g1");
-    assert.equal(server.runtime.configService.revision, revision);
+    assert.throws(() => server.runtime.configService.revision, { code: "MAINTENANCE" });
     assert.equal((await reader.read()).done, true);
     assert.equal((await request(server, "/readyz")).status, 503);
     assert.equal((await request(server, "/v1/events")).status, 503);

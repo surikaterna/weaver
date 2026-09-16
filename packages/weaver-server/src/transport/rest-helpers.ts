@@ -1,5 +1,6 @@
 // REST adapter helper utilities — extracted to keep rest-adapter.ts under 400 lines
 
+import { configServiceTransportRevision } from "../core/config-service-lifecycle";
 import type { WeaverConfigService } from "../core/config-service-types";
 import type { WeaverError } from "../types/index";
 import {
@@ -130,7 +131,7 @@ export function v1Response<T>(
   status: number,
   data: T,
 ): RestResponse {
-  const revision = service.revision;
+  const revision = configServiceTransportRevision(service);
   return {
     status,
     body: envelope(data, revision),
@@ -143,7 +144,7 @@ export function v1Error(
   code: WeaverErrorCode,
   message: string,
 ): RestResponse {
-  const revision = service.revision;
+  const revision = configServiceTransportRevision(service);
   return {
     status: httpStatusForError(code),
     body: errorEnvelope(createWeaverError(code, message), revision),

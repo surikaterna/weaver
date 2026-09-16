@@ -22,6 +22,7 @@ import { createSeedResource } from "../src/bootstrap/seed-resource.ts";
 import { openWeaverRuntime } from "../src/server-runtime.ts";
 import { readBuiltinRecoveryEnvelope } from "../src/core/builtin-catalog.ts";
 import { createStandaloneFixture } from "./standalone-fixture.ts";
+import { rawRuntimeProviders } from "./upgrade-test-providers.mjs";
 import { durableReplace } from "./upgrade-final-matrix-fixture.mjs";
 
 const sourceSchema = {
@@ -191,7 +192,7 @@ async function leavePreparedRun(t, fixture) {
     (await runtime.configService.set("platform", "svc.keep", true)).success,
     true,
   );
-  const control = runtime.configService.providers.find(
+  const control = rawRuntimeProviders(runtime).find(
     (provider) => provider.id === "control",
   );
   const commit = control.authority.commitLayer.bind(control.authority);

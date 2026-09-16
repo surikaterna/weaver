@@ -13,6 +13,7 @@ import type {
 } from "@weaver-conf/config-types";
 import { formatScopePath } from "@weaver-conf/config-types";
 import { WeaverConfig, type WeaverConfigContract } from "./contract";
+import { createSubscriptionFeedOwner } from "./subscription-feed";
 
 // --- Transport types (defined locally to avoid depending on weaver-client) ---
 
@@ -96,19 +97,15 @@ export function createScompTransport(
 ): WeaverTransport {
   const { peer } = options;
   const client = peer.consumes(WeaverConfig);
-
-  const activeFeeds: Array<{ abort: () => void }> = [];
+  const feeds = createSubscriptionFeedOwner(client, () => peer.close());
 
   return {
     ...readMethods(client),
     ...writeMethods(client),
     ...scopeMethods(client),
     ...registeredMethods(client),
-    ...subscriptionMethods(client, activeFeeds),
-    async close() {
-      for (const feed of activeFeeds) feed.abort();
-      activeFeeds.length = 0;
-    },
+    subscribe: feeds.subscribe,
+    close: feeds.close,
   };
 }
 
@@ -144,44 +141,6 @@ function readMethods(
 
     async inspect(key) {
       return client.inspect({ key });
-    },
-  };
-}
-
-function subscriptionMethods(
-  client: WeaverConfigContract,
-  activeFeeds: Array<{ abort: () => void }>,
-): Pick<WeaverTransport, "subscribe"> {
-  return {
-    subscribe(handler) {
-      const feed = client.subscribe({});
-      let aborted = false;
-
-      const consume = async () => {
-        try {
-          for await (const delta of feed) {
-            if (aborted) break;
-            handler(delta);
-          }
-        } catch {
-          // Feed closed or error — silently stop
-        }
-      };
-
-      consume();
-
-      const feedState = {
-        abort: () => {
-          aborted = true;
-        },
-      };
-      activeFeeds.push(feedState);
-
-      return () => {
-        feedState.abort();
-        const idx = activeFeeds.indexOf(feedState);
-        if (idx >= 0) activeFeeds.splice(idx, 1);
-      };
     },
   };
 }

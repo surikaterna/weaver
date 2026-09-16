@@ -347,7 +347,7 @@ async function refreshCompensatedSource(
   runtime: UpgradeRuntimeHost,
 ): Promise<void> {
   await runMaintenanceOperation(runtime.configService, (host) =>
-    host.reload([...host.providers], false),
+    host.reload([...host.providers], false, true),
   );
 }
 

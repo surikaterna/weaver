@@ -2,7 +2,6 @@ import {
   createWeaverError,
   type InternalRecoveryEnvelope,
   type InternalUpgradePlan,
-  internalRecoveryEnvelopeSchema,
   type UpgradeRecoveryRequest,
   upgradeRecoveryRequestSchema,
 } from "@weaver-conf/config-types";
@@ -17,10 +16,7 @@ import {
   runMaintenanceOperation,
 } from "./config-service-internal";
 import type { createControlService } from "./control-service";
-import {
-  type InternalUpgradeExecutionResult,
-  internalUpgradeResult,
-} from "./public-upgrade-status";
+import type { InternalUpgradeExecutionResult } from "./public-upgrade-status";
 import {
   validateUpgradeRecoveryControl,
   validateUpgradeRecoveryIdentity,
@@ -33,7 +29,18 @@ import { compensateUpgrade } from "./upgrade-compensation";
 import { reconstructFinalContexts } from "./upgrade-context-recovery";
 import { activateUpgradePlan, applyUpgradeStep } from "./upgrade-executor";
 import { validateFinalContexts } from "./upgrade-final-validation";
+import {
+  assertRecoveryAdoptionAuthorized,
+  createAdoptionJournal,
+  lacksSameOwnerFinalContextEvidence,
+} from "./upgrade-recovery-adoption";
 import { isProjectedTerminal } from "./upgrade-recovery-projection";
+import {
+  blockRecovery as block,
+  parseRecoveryJournal as parseJournal,
+  persistRecoveryJournal as persist,
+  recoveryResult as result,
+} from "./upgrade-recovery-result";
 import type { UpgradeRuntimeHost } from "./upgrade-runtime-host";
 import {
   assertJournalPlanBinding,
@@ -70,8 +77,9 @@ export async function recoverRuntimeUpgrade(
     .upgrades.plans[journal.planId];
   if (!plan)
     throw createWeaverError("CONFIG_NOT_READY", "Recovery plan is missing");
-  assertAdoptionAuthorized(control, journal, request);
+  assertRecoveryAdoptionAuthorized(control.owner, journal, request);
   await preflight(runtime, plan, journal, request.runId);
+  const adoptedByRecoveryAuthority = journal.owner !== control.owner;
   journal = await adopt(runtime, control, plan, journal, request);
   const adoptedTerminal = await recoverTerminalUpgrade(
     runtime,
@@ -93,18 +101,14 @@ export async function recoverRuntimeUpgrade(
         error instanceof Error ? error.message : "Compensation failed",
       );
     }
-  return resume(runtime, control, plan, journal, admission);
-}
-function assertAdoptionAuthorized(
-  control: Control,
-  journal: InternalRecoveryEnvelope,
-  request: UpgradeRecoveryRequest,
-): void {
-  if (journal.owner !== control.owner && !request.priorOwnerStopped)
-    throw createWeaverError(
-      "FORBIDDEN",
-      "Explicit prior-owner-stopped evidence is required",
-    );
+  return resume(
+    runtime,
+    control,
+    plan,
+    journal,
+    admission,
+    adoptedByRecoveryAuthority,
+  );
 }
 async function adopt(
   runtime: UpgradeRuntimeHost,
@@ -119,7 +123,7 @@ async function adopt(
       "FORBIDDEN",
       "Explicit prior-owner-stopped evidence is required",
     );
-  const adopted = adoptionJournal(control, journal, request);
+  const adopted = createAdoptionJournal(control.owner, journal, request);
   if (journal.activation?.status !== "intent") {
     await persist(control, adopted);
     return control.readRecovery(journal.runId);
@@ -151,27 +155,13 @@ async function adopt(
   await control.completeActivation(completed);
   return completed;
 }
-function adoptionJournal(
-  control: Control,
-  journal: InternalRecoveryEnvelope,
-  request: UpgradeRecoveryRequest,
-): InternalRecoveryEnvelope {
-  return parseJournal({
-    ...journal,
-    owner: control.owner,
-    adoption: {
-      previousOwner: journal.owner,
-      adoptedBy: control.owner,
-      priorOwnerStopped: request.priorOwnerStopped,
-    },
-  });
-}
 async function resume(
   runtime: UpgradeRuntimeHost,
   control: Control,
   plan: InternalUpgradePlan,
   journal: InternalRecoveryEnvelope,
   admission: UpgradeApplicationAdmission,
+  adoptedByRecoveryAuthority: boolean,
 ): Promise<InternalUpgradeExecutionResult> {
   if (["completed", "restart-required", "compensated"].includes(journal.phase))
     return result(journal);
@@ -181,6 +171,10 @@ async function resume(
       phase: "applying",
       cursor: journal.sourceRevisions,
     });
+  const recoveredUnrecordedEffect = lacksSameOwnerFinalContextEvidence(
+    journal,
+    adoptedByRecoveryAuthority,
+  );
   journal = await reconcileSteps(runtime, control, plan, journal);
   if (journal.phase === "blocked") return result(journal);
   if (journal.activation?.status === "intent")
@@ -188,13 +182,15 @@ async function resume(
   if (
     journal.activation?.status === "pending" &&
     journal.steps.every((step) => step.status === "complete")
-  ) {
-    if (journal.phase !== "verifying") {
-      journal = parseJournal({ ...journal, phase: "verifying" });
-      await persist(control, journal);
-    }
-    return activateUpgradePlan(runtime, control, plan, journal, admission);
-  }
+  )
+    return resumePendingActivation(
+      runtime,
+      control,
+      plan,
+      journal,
+      admission,
+      recoveredUnrecordedEffect,
+    );
   if (journal.activation?.status !== "complete")
     return block(
       control,
@@ -203,6 +199,27 @@ async function resume(
       "Validated final context evidence is unavailable after restart",
     );
   return result(journal);
+}
+async function resumePendingActivation(
+  runtime: UpgradeRuntimeHost,
+  control: Control,
+  plan: InternalUpgradePlan,
+  journal: InternalRecoveryEnvelope,
+  admission: UpgradeApplicationAdmission,
+  missingEvidence: boolean,
+) {
+  if (missingEvidence)
+    return block(
+      control,
+      journal,
+      "operator-required",
+      "Validated final context evidence is unavailable after an unrecorded effect",
+    );
+  if (journal.phase !== "verifying") {
+    journal = parseJournal({ ...journal, phase: "verifying" });
+    await persist(control, journal);
+  }
+  return activateUpgradePlan(runtime, control, plan, journal, admission);
 }
 async function reconcileSteps(
   runtime: UpgradeRuntimeHost,
@@ -359,41 +376,4 @@ async function preflight(
     await runMaintenanceOperation(runtime.configService, (host) =>
       validateUpgradeRecoverySources(host, plan, journal),
     );
-}
-
-async function block(
-  control: Control,
-  journal: InternalRecoveryEnvelope,
-  code: "conflict" | "unknown-commit" | "operator-required",
-  message: string,
-  stepId?: string,
-): Promise<InternalUpgradeExecutionResult> {
-  const blocked = parseJournal({
-    ...journal,
-    phase: "blocked",
-    failure: { code, message, ...(stepId ? { stepId } : {}) },
-  });
-  await persist(control, blocked);
-  return result(blocked);
-}
-
-function parseJournal(value: unknown): InternalRecoveryEnvelope {
-  return internalRecoveryEnvelopeSchema.parse(value);
-}
-async function persist(
-  control: Control,
-  journal: InternalRecoveryEnvelope,
-): Promise<void> {
-  const value = await control.replaceJournal(journal, control.revision);
-  if (!value.success)
-    throw createWeaverError(
-      "REVISION_CONFLICT",
-      value.error?.message ?? "Recovery journal write failed",
-    );
-}
-
-function result(
-  journal: InternalRecoveryEnvelope,
-): InternalUpgradeExecutionResult {
-  return internalUpgradeResult(journal);
 }

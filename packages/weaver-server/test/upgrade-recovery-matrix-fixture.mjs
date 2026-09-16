@@ -149,7 +149,7 @@ export function observeAdmission(t, runtime) {
 
 export async function rawState(runtime) {
   const entries = await Promise.all(
-    runtime.configService.providers.map(async (provider) => [
+    hostForControl(runtime.configService).providers.map(async (provider) => [
       provider.id,
       await provider.authority.readLayer(provider.layer),
     ]),

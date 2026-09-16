@@ -1,5 +1,9 @@
 import { compileInternalLayout, deepGet } from "@weaver-conf/config-engine";
-import type { ScopeInstance } from "@weaver-conf/config-types";
+import {
+  type ScopeInstance,
+  WeaverErrorInstance,
+  type WriteResult,
+} from "@weaver-conf/config-types";
 import { createWeaverError } from "../types/errors";
 import type { ConfigSnapshot } from "../types/index";
 import { activeInspectionLayers } from "./config-inspection-layers";
@@ -8,6 +12,7 @@ import {
   snapshotSchemaWriteContext,
   snapshotWriteContext,
 } from "./config-mutation-input";
+import { createProviderFacades } from "./config-provider-facade";
 import type { ConfigServiceController } from "./config-service-controller";
 import { validateRegisteredEffectiveConfiguration } from "./config-service-schema-writes";
 import type {
@@ -27,17 +32,21 @@ import { collectAuthoritySnapshot } from "./service-authority-snapshot";
 export function createConfigServiceFacade(
   host: ConfigServiceController,
 ): WeaverConfigService {
+  const providers = createProviderFacades(host);
   return {
     get providers() {
-      return host.providers;
+      return providers;
     },
     get degradedProviders() {
+      host.coordinator.assertApplicationAccess();
       return host.readiness.failedIds();
     },
     get revision() {
+      host.coordinator.assertApplicationAccess();
       return host.authority.revision();
     },
     get layout() {
+      host.coordinator.assertApplicationAccess();
       const state = host.pipeline.contracts.prepared().configuration;
       const generation =
         state.infrastructure.generations[state.infrastructure.activeGeneration];
@@ -46,6 +55,7 @@ export function createConfigServiceFacade(
       return compileInternalLayout(structuredClone(generation.layout));
     },
     async assertScopeMembership(path, signal) {
+      host.coordinator.assertApplicationAccess();
       signal?.throwIfAborted();
       host.assertReady();
       if (!host.inventory)
@@ -56,7 +66,7 @@ export function createConfigServiceFacade(
       assertInventoryContext(host.inventory, path);
     },
     authoritySnapshot: () =>
-      host.coordinator.run(() => collectAuthoritySnapshot(host)),
+      runApplicationOperation(host, () => collectAuthoritySnapshot(host)),
     ...readFacade(host),
     ...mutationFacade(host),
     ...lifecycleFacade(host),
@@ -70,26 +80,23 @@ function mutationFacade(
   "set" | "remove" | "setMany" | "setRegisteredObject" | "patchRegisteredPath"
 > {
   return {
-    async set(layer, key, value, options) {
-      const owned = snapshotMutationInput(value);
-      const context = snapshotWriteContext(options);
-      return host.coordinator.run(() =>
-        host.mutations.set(layer, key, owned, context),
-      );
-    },
-    async remove(layer, key, options) {
-      const context = snapshotWriteContext(options);
-      return host.coordinator.run(() =>
-        host.mutations.remove(layer, key, context),
-      );
-    },
-    async setMany(layer, entries, options) {
-      const owned = snapshotMutationInput(entries);
-      const context = snapshotWriteContext(options);
-      return host.coordinator.run(() =>
-        host.mutations.setMany(layer, owned, context),
-      );
-    },
+    set: (layer, key, value, options) =>
+      prepareApplicationMutation(host, () => {
+        const owned = snapshotMutationInput(value);
+        const context = snapshotWriteContext(options);
+        return () => host.mutations.set(layer, key, owned, context);
+      }),
+    remove: (layer, key, options) =>
+      prepareApplicationMutation(host, () => {
+        const context = snapshotWriteContext(options);
+        return () => host.mutations.remove(layer, key, context);
+      }),
+    setMany: (layer, entries, options) =>
+      prepareApplicationMutation(host, () => {
+        const owned = snapshotMutationInput(entries);
+        const context = snapshotWriteContext(options);
+        return () => host.mutations.setMany(layer, owned, context);
+      }),
     ...registeredMutationFacade(host),
   };
 }
@@ -98,22 +105,80 @@ function registeredMutationFacade(
   host: ConfigServiceController,
 ): Pick<WeaverConfigService, "setRegisteredObject" | "patchRegisteredPath"> {
   return {
-    async setRegisteredObject(layer, path, value, options) {
-      const owned = snapshotMutationInput(value);
-      const context = snapshotSchemaWriteContext(options);
-      return host.coordinator.run(() =>
-        host.mutations.setRegisteredObject(layer, path, owned, context),
-      );
-    },
-    async patchRegisteredPath(layer, path, value, options) {
-      const owned = snapshotMutationInput(value);
-      const context = snapshotSchemaWriteContext(options);
-      return host.coordinator.run(() =>
-        host.mutations.patchRegisteredPath(layer, path, owned, context),
-      );
-    },
+    setRegisteredObject: (layer, path, value, options) =>
+      prepareApplicationMutation(host, () => {
+        const owned = snapshotMutationInput(value);
+        const context = snapshotSchemaWriteContext(options);
+        return () =>
+          host.mutations.setRegisteredObject(layer, path, owned, context);
+      }),
+    patchRegisteredPath: (layer, path, value, options) =>
+      prepareApplicationMutation(host, () => {
+        const owned = snapshotMutationInput(value);
+        const context = snapshotSchemaWriteContext(options);
+        return () =>
+          host.mutations.patchRegisteredPath(layer, path, owned, context);
+      }),
   };
 }
+
+async function runApplicationMutation(
+  host: ConfigServiceController,
+  operation: () => Promise<WriteResult>,
+): Promise<WriteResult> {
+  try {
+    return await runApplicationOperation(host, operation);
+  } catch (error) {
+    return maintenanceWriteFailure(host, error);
+  }
+}
+
+async function prepareApplicationMutation(
+  host: ConfigServiceController,
+  prepare: () => () => Promise<WriteResult>,
+): Promise<WriteResult> {
+  try {
+    const lease = host.batchContext.current();
+    if (lease) host.coordinator.assertBatchLease(lease);
+    else host.coordinator.assertApplicationAccess();
+    return await runApplicationMutation(host, prepare());
+  } catch (error) {
+    return maintenanceWriteFailure(host, error);
+  }
+}
+
+function maintenanceWriteFailure(
+  host: ConfigServiceController,
+  error: unknown,
+): WriteResult {
+  if (
+    !(error instanceof WeaverErrorInstance) ||
+    !host.coordinator.isAdmissionFailure(error)
+  )
+    throw error;
+  return {
+    success: false,
+    error: { code: error.code, message: error.message },
+  };
+}
+
+function runApplicationOperation<T>(
+  host: ConfigServiceController,
+  operation: () => Promise<T> | T,
+): Promise<T> {
+  const lease = host.batchContext.current();
+  return lease
+    ? host.coordinator.submitBatch(lease, operation)
+    : host.coordinator.runApplication(operation);
+}
+
+function runApplicationBatch<T>(
+  host: ConfigServiceController,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return host.maintenance.batch(operation);
+}
+
 function lifecycleFacade(
   host: ConfigServiceController,
 ): Pick<
@@ -128,30 +193,31 @@ function lifecycleFacade(
 > {
   return {
     reloadProvider: (id) =>
-      host.coordinator.run(() =>
+      runApplicationOperation(host, () =>
         host.reload(
           host.providers.filter((provider) => provider.id === id),
           false,
         ),
       ),
     refreshProviders: () =>
-      host.coordinator.run(() => host.reload(host.providers, true)),
+      runApplicationOperation(host, () => host.reload(host.providers, true)),
     onDelta: (handler) => {
+      host.coordinator.assertApplicationAccess();
       host.assertReady();
       return host.runtime.onDelta(handler);
     },
-    batch: (fn) => host.batch(fn),
+    batch: (fn) => runApplicationBatch(host, fn),
     flush: () =>
-      host.coordinator.run(() => {
+      runApplicationOperation(host, () => {
         host.assertOpen();
         return host.flush();
       }),
     close: async () => {
-      host.coordinator.assertNotRunning();
+      host.coordinator.assertSubmissionAllowed();
       return host.close();
     },
     validateRegisteredEffective: (path, opts) =>
-      host.coordinator.run(() => validateEffective(host, path, opts)),
+      runApplicationOperation(host, () => validateEffective(host, path, opts)),
   };
 }
 
@@ -179,11 +245,13 @@ function readFacade(
 > {
   return {
     resolveAll: (opts) =>
-      host.coordinator.run(() => snapshot(host, opts?.scopePath)),
+      runApplicationOperation(host, () => snapshot(host, opts?.scopePath)),
     get: (key, opts) =>
-      host.coordinator.run(() => resolvedRead(host, key, opts?.scopePath)),
+      runApplicationOperation(host, () =>
+        resolvedRead(host, key, opts?.scopePath),
+      ),
     getNamespace: (prefix, opts) =>
-      host.coordinator.run(async () => {
+      runApplicationOperation(host, async () => {
         const value = await resolvedRead(host, prefix, opts?.scopePath);
         return value !== null &&
           typeof value === "object" &&
@@ -192,7 +260,7 @@ function readFacade(
           : {};
       }),
     inspect: (key) =>
-      host.coordinator.run(async () => {
+      runApplicationOperation(host, async () => {
         host.assertReady();
         if (!isProtectedConfigPath(key))
           assertRuntimeReadPath(host.getService(), key);

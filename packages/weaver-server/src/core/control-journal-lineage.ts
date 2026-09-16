@@ -9,7 +9,7 @@ import {
   type ProviderRevision,
 } from "@weaver-conf/config-types";
 import { computeProviderMutationDigest } from "@weaver-conf/storage-providers";
-import { controlProjection } from "./config-service-internal";
+import { controlProjection, hostForControl } from "./config-service-internal";
 import type { WeaverConfigService } from "./config-service-types";
 
 type LayerCommitReceipt = NonNullable<LayerEnvelope["lastCommit"]>;
@@ -115,7 +115,9 @@ async function exactLatestReceipt(
   key: string,
   value: unknown,
 ): Promise<LayerCommitReceipt> {
-  const provider = service.providers.find((item) => item.id === providerId);
+  const provider = hostForControl(service).providers.find(
+    (item) => item.id === providerId,
+  );
   const envelope = await provider?.authority?.readLayer(previous.layer);
   const receipt = envelope?.lastCommit;
   const expectedOperation = operationId ?? receipt?.operationId;

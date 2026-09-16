@@ -141,6 +141,7 @@ function writeResponse(
     service,
     result.error?.code === "REVISION_CONFLICT" ||
       result.error?.code === "MAINTENANCE" ||
+      result.error?.code === "SERVER_DEGRADED" ||
       result.error?.code === "CONFIG_NOT_READY"
       ? result.error.code
       : "VALIDATION_ERROR",

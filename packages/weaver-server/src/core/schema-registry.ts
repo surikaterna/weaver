@@ -21,11 +21,15 @@ import {
 import { z } from "zod";
 import { createWeaverError } from "../types/errors";
 import { prepareCanonicalRegistration } from "./canonical-registration";
+import type { ApplicationControlTransaction } from "./config-application-transaction";
 import { snapshotMutationInput } from "./config-mutation-input";
 import {
   applicationAdmission,
+  applicationControlTransaction,
+  applicationProjection,
   controlProjection,
   controlTransaction,
+  schemaRegistryTransactionMode,
 } from "./config-service-internal";
 import type { WeaverConfigService } from "./config-service-types";
 import { writeResultError } from "./config-write-errors";
@@ -94,7 +98,7 @@ export function createSchemaRegistry(
     register: (request, context) =>
       registerCanonical(service, request, context),
     async getSchema(serviceId, environment) {
-      const state = controlProjection(service).registrations().state;
+      const state = registryProjection(service).registrations().state;
       try {
         const { servicePath } = deriveServicePath(serviceId);
         return structuredClone(
@@ -106,14 +110,14 @@ export function createSchemaRegistry(
       }
     },
     async resolveAnchor(path, environment) {
-      const state = controlProjection(service).registrations().state;
+      const state = registryProjection(service).registrations().state;
       return structuredClone(
         findRegisteredAnchor(composeRegistryEntries(state), path, environment),
       );
     },
     listAll() {
       return structuredClone(
-        listSchemas(controlProjection(service).registrations().state),
+        listSchemas(registryProjection(service).registrations().state),
       );
     },
   };
@@ -124,29 +128,46 @@ async function registerCanonical(
   request: SchemaRegistrationRequest,
   context?: SchemaRegistrationContext,
 ): Promise<SchemaRegistrationResult> {
+  return registerCanonicalWithMode(service, request, context);
+}
+
+export function registerControlSchema(
+  service: WeaverConfigService,
+  request: SchemaRegistrationRequest,
+  context?: SchemaRegistrationContext,
+): Promise<SchemaRegistrationResult> {
+  return registerCanonicalWithMode(service, request, context);
+}
+
+async function registerCanonicalWithMode(
+  service: WeaverConfigService,
+  request: SchemaRegistrationRequest,
+  context: SchemaRegistrationContext | undefined,
+): Promise<SchemaRegistrationResult> {
   try {
+    const mode = schemaRegistryTransactionMode(service);
     const ownedRequest = snapshotMutationInput(request);
     const validatedContext = schemaRegistrationContextSchema.parse(
       context ?? {},
     );
-    return await controlTransaction(
+    return await registerTransaction(
       service,
-      "catalog",
-      async ({ read, write }) => {
+      mode,
+      async ({ read, write, revision }) => {
         const { record, id, existing, changed, evaluation, compatibility } =
           prepareCanonicalRegistration(read(), ownedRequest, validatedContext);
         if (!evaluation.result.success) return evaluation.result;
-        assertRegistrationRevision(service, !!changed, validatedContext);
+        assertRegistrationRevision(revision, !!changed, validatedContext);
         if (existing && !changed)
           return {
             ...evaluation.result,
             ...compatibility,
-            revision: service.revision,
+            revision,
           };
         const result = await write(
           `_weaver.catalog.registrations.${id}`,
           record,
-          { expectedRevision: service.revision },
+          { expectedRevision: revision },
         );
         if (!result.success) throw writeResultError(result);
         if (evaluation.entry && applicationAdmission(service))
@@ -155,7 +176,7 @@ async function registerCanonical(
           ...evaluation.result,
           isNewSchema: !existing,
           ...compatibility,
-          revision: service.revision,
+          revision: result.revision ?? revision,
         };
       },
     );
@@ -164,15 +185,35 @@ async function registerCanonical(
   }
 }
 
-function assertRegistrationRevision(
+function registerTransaction(
   service: WeaverConfigService,
+  mode: "application" | "draft-control",
+  operation: (
+    transaction: ApplicationControlTransaction,
+  ) => Promise<SchemaRegistrationResult>,
+): Promise<SchemaRegistrationResult> {
+  const run =
+    mode === "draft-control"
+      ? controlTransaction
+      : applicationControlTransaction;
+  return run(service, "catalog", operation);
+}
+
+function registryProjection(service: WeaverConfigService) {
+  return schemaRegistryTransactionMode(service) === "draft-control"
+    ? controlProjection(service)
+    : applicationProjection(service);
+}
+
+function assertRegistrationRevision(
+  revision: string,
   changed: boolean,
   context?: SchemaRegistrationContext,
 ): void {
   if (
     (changed && context?.expectedRevision === undefined) ||
     (context?.expectedRevision !== undefined &&
-      context.expectedRevision !== service.revision)
+      context.expectedRevision !== revision)
   )
     throw createWeaverError(
       "REVISION_CONFLICT",

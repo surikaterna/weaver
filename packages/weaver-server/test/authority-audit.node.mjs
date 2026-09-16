@@ -33,6 +33,10 @@ test("F3 offline Git close closes admission, retains replication, releases owner
     const closing = service.close();
     const rejected = assert.rejects(closing, (error) => error.code === "GIT_ERROR" && error.details.cleanup.some((failure) => failure.name === "replication:git"));
     assert.equal((await service.set("platform", "svc.b", 2)).error.code, "SERVER_DEGRADED");
+    assert.equal((await service.remove("platform", "svc.a")).error.code, "SERVER_DEGRADED");
+    await assert.rejects(service.batch(async () => undefined), {
+      code: "SERVER_DEGRADED",
+    });
     await rejected;
     await assert.rejects(service.get("svc.a"), { code: "SERVER_DEGRADED" });
     await assert.rejects(service.refreshProviders(), { code: "SERVER_DEGRADED" });

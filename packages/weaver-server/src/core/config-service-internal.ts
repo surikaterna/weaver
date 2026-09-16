@@ -1,14 +1,34 @@
 import { deepEqual, deepGet } from "@weaver-conf/config-engine";
 import { createWeaverError, type WriteResult } from "@weaver-conf/config-types";
 import {
+  type ApplicationControlTransaction,
+  type ManagedApplicationControlTransaction,
+  runApplicationControlTransaction,
+} from "./config-application-transaction";
+import {
   snapshotMutationInput,
   snapshotWriteContext,
 } from "./config-mutation-input";
 import type { ConfigServiceController } from "./config-service-controller";
+import { hostForControl } from "./config-service-host";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
 
+export {
+  runMaintenanceOperation,
+  suspendControlApplication,
+} from "./config-maintenance-admission";
+export { hostForControl } from "./config-service-host";
+export {
+  applicationAdmission,
+  applicationConfigurationAvailability,
+  applicationProjection,
+  assertApplicationAdmission,
+  controlProjection,
+  schemaRegistryTransactionMode,
+} from "./config-service-projection";
+
 type Family = "catalog" | "scope" | "bootstrap" | "maintenance";
-interface ControlTransaction {
+interface ControlTransaction extends ApplicationControlTransaction {
   readonly revision: string;
   readonly read: () => unknown;
   readonly write: (
@@ -31,22 +51,12 @@ const permissions = new WeakMap<
     operationId?: string;
   }
 >();
-const hosts = new WeakMap<WeaverConfigService, ConfigServiceController>();
 const roots = {
   catalog: "_weaver.catalog.registrations.",
   scope: "_weaver.scopeInventory",
   bootstrap: "_weaver",
   maintenance: "_weaver.upgrades.",
 };
-
-export function bindControlHost(
-  service: WeaverConfigService,
-  host: ConfigServiceController,
-): void {
-  if (hosts.has(service))
-    throw createWeaverError("FORBIDDEN", "Control host is already bound");
-  hosts.set(service, host);
-}
 
 export function internalPermission(
   options: WriteContext | undefined,
@@ -56,17 +66,6 @@ export function internalPermission(
   return !!permission && (key === undefined || permission.key === key);
 }
 
-export function hostForControl(
-  service: WeaverConfigService,
-): ConfigServiceController {
-  const host = hosts.get(service);
-  if (!host)
-    throw createWeaverError(
-      "FORBIDDEN",
-      "No control capability for this service",
-    );
-  return host;
-}
 const hostFor = hostForControl;
 
 export function setInternalPermission(
@@ -87,7 +86,7 @@ export function controlTransaction<T>(
   operation: (transaction: ControlTransaction) => Promise<T>,
 ): Promise<T> {
   const host = hostFor(service);
-  return host.coordinator.run(async () => {
+  return host.coordinator.runControl(async () => {
     host.assertReady(true);
     const root = roots[family].replace(/\.$/, "");
     let active = true;
@@ -124,6 +123,57 @@ export function controlTransaction<T>(
       await Promise.allSettled(pending);
     }
   });
+}
+
+export function applicationControlTransaction<T>(
+  service: WeaverConfigService,
+  family: "catalog" | "scope",
+  operation: (transaction: ApplicationControlTransaction) => Promise<T>,
+): Promise<T> {
+  const host = hostFor(service);
+  return runApplicationControlTransaction(
+    host,
+    () => createApplicationTransaction(host, family),
+    operation,
+  );
+}
+
+function createApplicationTransaction(
+  host: ConfigServiceController,
+  family: "catalog" | "scope",
+): ManagedApplicationControlTransaction {
+  host.assertReady();
+  const root = roots[family].replace(/\.$/, "");
+  let active = true;
+  const pending = new Set<Promise<WriteResult>>();
+  const write = (key: string, value: unknown, options?: WriteContext) => {
+    assertControlAccess(host, active);
+    if (pending.size)
+      return Promise.reject(
+        createWeaverError(
+          "FORBIDDEN",
+          "Control transaction is already writing",
+        ),
+      );
+    const result = writeControl(host, family, key, value, options);
+    pending.add(result);
+    void result.then(
+      () => pending.delete(result),
+      () => pending.delete(result),
+    );
+    return result;
+  };
+  return {
+    transaction: Object.freeze({
+      revision: host.authority.revision(),
+      read: () => readControl(host, root, active),
+      write,
+    }),
+    close: async () => {
+      active = false;
+      await Promise.allSettled(pending);
+    },
+  };
 }
 
 function assertControlAccess(
@@ -291,27 +341,6 @@ function assertActivationRoot(
     );
 }
 
-export function suspendControlApplication(
-  service: WeaverConfigService,
-): Promise<void> {
-  const host = hostFor(service);
-  return host.coordinator.run(async () => {
-    host.assertReady(true);
-    await host.maintenance.enter();
-  });
-}
-
-export function runMaintenanceOperation<T>(
-  service: WeaverConfigService,
-  operation: (host: ConfigServiceController) => Promise<T>,
-): Promise<T> {
-  const host = hostFor(service);
-  return host.coordinator.run(async () => {
-    host.assertReady(true);
-    return operation(host);
-  });
-}
-
 export async function validateControlCandidate(
   service: WeaverConfigService,
   id: string,
@@ -319,7 +348,7 @@ export async function validateControlCandidate(
   expectedRevision: string,
 ): Promise<void> {
   const host = hostFor(service);
-  await host.coordinator.run(async () => {
+  await host.coordinator.runControl(async () => {
     host.assertReady(true);
     if (host.authority.revision() !== expectedRevision)
       throw createWeaverError(
@@ -341,13 +370,9 @@ export async function validateControlCandidate(
   });
 }
 
-export function applicationAdmission(service: WeaverConfigService): boolean {
-  return hostFor(service).applicationActive;
-}
-
 export function activateControlApplication(service: WeaverConfigService) {
   const host = hostFor(service);
-  return host.coordinator.run(async () => {
+  return host.coordinator.runControl(async () => {
     host.pipeline.assertInitialized();
     for (const context of Object.values(
       host.pipeline.contracts.prepared().configuration.scopeInventory.contexts,
@@ -360,19 +385,6 @@ export function activateControlApplication(service: WeaverConfigService) {
     });
     host.openApplication();
     return service;
-  });
-}
-
-export function controlProjection(service: WeaverConfigService) {
-  const host = hostFor(service);
-  host.assertReady(true);
-  const contracts = host.pipeline.contracts;
-  return Object.freeze({
-    binding: Object.freeze({ ...contracts.binding }),
-    prepared: () => ({
-      configuration: structuredClone(contracts.prepared().configuration),
-    }),
-    registrations: () => structuredClone(contracts.registrations()),
   });
 }
 

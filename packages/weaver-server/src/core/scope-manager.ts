@@ -12,8 +12,9 @@ import {
   WeaverErrorInstance,
 } from "@weaver-conf/config-types";
 import {
-  controlProjection,
-  controlTransaction,
+  applicationControlTransaction,
+  applicationProjection,
+  assertApplicationAdmission,
 } from "./config-service-internal";
 import type { WeaverConfigService } from "./config-service-types";
 import { writeResultError } from "./config-write-errors";
@@ -38,7 +39,7 @@ export function createScopeManager({
   configService: service,
 }: ScopeManagerOptions): ScopeManager {
   const configuration = () =>
-    controlProjection(service).prepared().configuration;
+    applicationProjection(service).prepared().configuration;
   return {
     provision: (request) => transition(service, request, "active"),
     deprovision: (request) => transition(service, request, "retired"),
@@ -122,15 +123,16 @@ async function transition(
   state: "active" | "retired",
 ): Promise<ScopeProvisionResult> {
   try {
+    assertApplicationAdmission(service);
     const request = scopeLifecycleRequestSchema.parse(input);
     const scopePath = normalizedPath(request);
-    return await controlTransaction(
+    return await applicationControlTransaction(
       service,
       "scope",
-      async ({ read, write }) => {
+      async ({ read, write, revision }) => {
         if (
           request.expectedRevision !== undefined &&
-          request.expectedRevision !== service.revision
+          request.expectedRevision !== revision
         )
           throw createWeaverError(
             "REVISION_CONFLICT",
@@ -139,14 +141,20 @@ async function transition(
         const inventory = internalScopeInventorySchema.parse(read());
         if (updateInventory(inventory, scopePath, request, state)) {
           const result = await write("_weaver.scopeInventory", inventory, {
-            expectedRevision: service.revision,
+            expectedRevision: revision,
           });
           if (!result.success) throw writeResultError(result);
+          return scopeLifecycleResultSchema.parse({
+            success: true,
+            scopePath,
+            revision: result.revision ?? revision,
+            inventoryRevision: inventory.revision,
+          });
         }
         return scopeLifecycleResultSchema.parse({
           success: true,
           scopePath,
-          revision: service.revision,
+          revision,
           inventoryRevision: inventory.revision,
         });
       },

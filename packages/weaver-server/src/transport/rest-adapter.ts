@@ -8,6 +8,10 @@ import { ZodError } from "zod";
 import type { AuditService } from "../audit/audit-service";
 import type { AuthContext } from "../auth/auth-middleware";
 import type { WeaverConfigService } from "../core/config-service";
+import {
+  assertConfigServiceTransportOpen,
+  configServiceTransportRevision,
+} from "../core/config-service-lifecycle";
 import type { SchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
 import type { WeaverRuntime } from "../server-runtime";
@@ -144,6 +148,8 @@ export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
     };
 
     try {
+      if (!match.route.maintenance)
+        assertConfigServiceTransportOpen(configService);
       const response = await match.route.handler(fullReq);
       if (corsOrigins?.length) {
         response.headers = {
@@ -154,7 +160,7 @@ export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
       return response;
     } catch (err: unknown) {
       if (err instanceof ZodError) {
-        const rev = configService.revision;
+        const rev = configServiceTransportRevision(configService);
         return {
           status: 400,
           body: errorEnvelope(
@@ -167,7 +173,7 @@ export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
         };
       }
       if (err instanceof WeaverErrorInstance) {
-        const rev = configService.revision;
+        const rev = configServiceTransportRevision(configService);
         const effectiveInvalid =
           err.details?.kind === "effective-configuration-invalid";
         return {
@@ -177,7 +183,7 @@ export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
         };
       }
       const message = err instanceof Error ? err.message : String(err);
-      const rev = configService.revision;
+      const rev = configServiceTransportRevision(configService);
       return {
         status: 500,
         body: errorEnvelope(createWeaverError("INTERNAL_ERROR", message), rev),

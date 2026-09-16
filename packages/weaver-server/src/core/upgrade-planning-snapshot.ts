@@ -24,7 +24,7 @@ export function collectUpgradePlanningSnapshot(service: WeaverConfigService) {
       "UNSUPPORTED_AUTHORITY",
       "No internal upgrade planning capability",
     );
-  return host.coordinator.run(() => collectStableSnapshot(host));
+  return host.coordinator.runControl(() => collectStableSnapshot(host));
 }
 
 async function collectStableSnapshot(host: ConfigServiceController) {

@@ -10,6 +10,7 @@ import type { ConfigDelta } from "../types/index";
 import type { WeaverConfigService } from "./config-service-types";
 import { filterProtectedConfigEntries } from "./protected-config-paths";
 import { createResolutionPipeline } from "./resolution-pipeline";
+import { RuntimePublicationGate } from "./runtime-publication-gate";
 import {
   projectRuntimeMutation,
   projectRuntimeRegistration,
@@ -70,6 +71,8 @@ export interface RuntimeResolutionContexts {
     validated?: readonly ValidatedRuntimeContext[],
   ): Promise<void>;
   onDelta(handler: (delta: ConfigDelta) => void): () => void;
+  closePublication(): void;
+  openPublication(): void;
   dispose(): Promise<void>;
 }
 
@@ -101,11 +104,13 @@ export function createRuntimeResolutionContexts(
 class RuntimeResolutionContextManager implements RuntimeResolutionContexts {
   private readonly records = new Map<string, ContextRecord>();
   private readonly materialized = new Map<string, ScopeInstance[]>();
-  private readonly handlers = new Set<(delta: ConfigDelta) => void>();
+  private readonly publication: RuntimePublicationGate;
   private validated = new Map<string, Record<string, unknown>>();
   private queue = Promise.resolve();
 
-  constructor(private readonly options: RuntimeResolutionOptions) {}
+  constructor(private readonly options: RuntimeResolutionOptions) {
+    this.publication = new RuntimePublicationGate(options.logger);
+  }
 
   async resolveCandidate(
     entries: Record<string, unknown>,
@@ -214,8 +219,15 @@ class RuntimeResolutionContextManager implements RuntimeResolutionContexts {
   }
 
   onDelta(handler: (delta: ConfigDelta) => void): () => void {
-    this.handlers.add(handler);
-    return () => this.handlers.delete(handler);
+    return this.publication.subscribe(handler);
+  }
+
+  closePublication(): void {
+    this.publication.close();
+  }
+
+  openPublication(): void {
+    this.publication.reopen();
   }
 
   async dispose(): Promise<void> {
@@ -226,7 +238,7 @@ class RuntimeResolutionContextManager implements RuntimeResolutionContexts {
       this.records.clear();
       this.materialized.clear();
       this.validated.clear();
-      this.handlers.clear();
+      this.publication.close();
     });
   }
 
@@ -300,33 +312,18 @@ class RuntimeResolutionContextManager implements RuntimeResolutionContexts {
     return record;
   }
 
-  private dispatch(deltas: ReadonlyArray<ConfigDelta>): void {
-    for (const delta of deltas) {
-      for (const handler of [...this.handlers]) {
-        try {
-          handler(delta);
-        } catch (error: unknown) {
-          this.logError("[config] delta listener failed:", error);
-        }
-      }
-    }
-  }
-
   private async publish(
     job: () => Promise<ReadonlyArray<ConfigDelta>>,
   ): Promise<void> {
     try {
-      await this.run(async () => this.dispatch(await job()));
+      await this.run(async () => {
+        if (!this.publication.acceptsPublication()) return;
+        const deltas = await job();
+        this.publication.dispatch(deltas);
+        this.validated.clear();
+      });
     } catch (error: unknown) {
-      this.logError("[config] runtime projection failed:", error);
-    }
-  }
-
-  private logError(message: string, error: unknown): void {
-    try {
-      this.options.logger.error(message, error);
-    } catch {
-      // Logging must not change committed write semantics.
+      this.publication.logError("[config] runtime projection failed:", error);
     }
   }
 }

@@ -24,7 +24,7 @@ export function repairControlStep(
   expectedRevision: string,
 ) {
   const host = hostForControl(service);
-  return host.coordinator.run(async () => {
+  return host.coordinator.runControl(async () => {
     host.assertReady(true);
     const transition = await prepareSchemaTransition(
       host,
@@ -54,7 +54,7 @@ export function repairControlStep(
 
 export function controlRecovery(service: WeaverConfigService, runId: string) {
   const host = hostForControl(service);
-  return host.coordinator.run(async () => {
+  return host.coordinator.runControl(async () => {
     host.assertReady(true);
     if (!/^[a-f0-9-]{36}$/.test(runId))
       throw createWeaverError("VALIDATION_ERROR", "Invalid recovery identity");
@@ -74,7 +74,7 @@ export function activateUpgradeControl(
   expectedRevision: string,
 ) {
   const host = hostForControl(service);
-  return host.coordinator.run(async () => {
+  return host.coordinator.runControl(async () => {
     host.assertReady(true);
     if (host.applicationActive)
       throw createWeaverError(
@@ -129,7 +129,7 @@ export async function recordActivationCompletion(
   journal: InternalRecoveryEnvelope,
 ): Promise<void> {
   const host = hostForControl(service);
-  await host.coordinator.run(async () => {
+  await host.coordinator.runControl(async () => {
     host.assertReady(true);
     const state = host.pipeline.contracts.prepared().configuration;
     const projected = structuredClone(state);

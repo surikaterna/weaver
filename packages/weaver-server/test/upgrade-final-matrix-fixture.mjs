@@ -131,7 +131,7 @@ export function observeNoAdmission(t, runtime) {
   } catch (error) {
     assert.equal(error.code, "CONFIG_NOT_READY");
   }
-  const subscriptions = runtime.configService.providers.flatMap((item) =>
+  const subscriptions = hostForControl(runtime.configService).providers.flatMap((item) =>
     item.onExternalChange ? [t.mock.method(item, "onExternalChange")] : []);
   const install = t.mock.method(host, "installUpgradeSnapshot");
   const open = t.mock.method(host, "openApplication");
@@ -185,7 +185,7 @@ export function corruptActivationIntent(t, runtime, mutate) {
 }
 
 export function corruptIntentJournal(t, runtime, mutate) {
-  const control = runtime.configService.providers.find((item) => item.id === "control");
+  const control = hostForControl(runtime.configService).providers.find((item) => item.id === "control");
   assert.ok(control?.authority);
   const commit = control.authority.commitLayer.bind(control.authority);
   let corrupted = false;
@@ -250,7 +250,7 @@ export async function assertPreactivationRefusal(
 
 export async function authoritySnapshot(runtime) {
   const entries = await Promise.all(
-    runtime.configService.providers.map(async (provider) => [
+    hostForControl(runtime.configService).providers.map(async (provider) => [
       provider.id,
       await Promise.all(
         (await provider.authority.inventory()).revisions.map((revision) =>

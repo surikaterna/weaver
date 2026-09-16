@@ -85,9 +85,10 @@ describe("SSE pending creation ownership (weaver-becr/weaver-s64i)", () => {
     expect(fixture.resolve).not.toHaveBeenCalled();
     expect(fixture.subscribe).not.toHaveBeenCalled();
     expect(fixture.load).not.toHaveBeenCalled();
-    const later = await fixture.adapter.createClient();
-    expect(fixture.adapter.clientCount).toBe(1);
-    later.close();
+    await expect(fixture.adapter.createClient()).rejects.toMatchObject({
+      code: "MAINTENANCE",
+    });
+    expect(fixture.adapter.clientCount).toBe(0);
   });
 
   it.each([

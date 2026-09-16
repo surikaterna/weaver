@@ -11,6 +11,7 @@ import {
   type WeaverConfigContract,
 } from "@weaver-conf/transport-scomp";
 import type { AuthContext } from "../auth/auth-middleware";
+import { assertConfigServiceTransportOpen } from "../core/config-service-lifecycle";
 import type {
   EffectiveValidationContext,
   WeaverConfigService,
@@ -19,7 +20,7 @@ import type {
 import type { SchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
 import { parseScopeQuery } from "../core/scope-utils";
-import type { ConfigDelta } from "../types/index";
+import { scompSubscriptionMethods } from "./scomp-subscription";
 
 export interface ScompServiceDeps {
   configService: WeaverConfigService;
@@ -42,7 +43,7 @@ export function createWeaverScompService(deps: ScompServiceDeps) {
     ...objectMethods(deps),
     ...patchMethods(deps),
     ...validationMethods(deps),
-    ...subscriptionMethods(deps),
+    ...scompSubscriptionMethods(deps),
   });
 }
 
@@ -54,11 +55,13 @@ function readMethods({
 > {
   return {
     async resolveAll(input) {
+      assertConfigServiceTransportOpen(configService);
       const scopePath = input.scope ? parseScopeQuery(input.scope) : undefined;
       return configService.resolveAll(scopePath ? { scopePath } : undefined);
     },
 
     async get(input) {
+      assertConfigServiceTransportOpen(configService);
       const scopePath = input.scope ? parseScopeQuery(input.scope) : undefined;
       const value = await configService.get(
         input.key,
@@ -68,6 +71,7 @@ function readMethods({
     },
 
     async getNamespace(input) {
+      assertConfigServiceTransportOpen(configService);
       const scopePath = input.scope ? parseScopeQuery(input.scope) : undefined;
       const entries = await configService.getNamespace(
         input.prefix,
@@ -77,6 +81,7 @@ function readMethods({
     },
 
     async inspect(input) {
+      assertConfigServiceTransportOpen(configService);
       return configService.inspect(input.key);
     },
   };
@@ -88,6 +93,7 @@ function writeMethods({
 }: ScompServiceDeps): Pick<WeaverConfigContract, "set" | "setMany" | "remove"> {
   return {
     async set(input) {
+      assertConfigServiceTransportOpen(configService);
       authorizeMutation?.();
       const writeOpts: WriteContext = {
         ...(input.environment ? { environment: input.environment } : {}),
@@ -102,6 +108,7 @@ function writeMethods({
     },
 
     async setMany(input) {
+      assertConfigServiceTransportOpen(configService);
       authorizeMutation?.();
       const writeOpts: WriteContext = {
         ...(input.environment ? { environment: input.environment } : {}),
@@ -115,6 +122,7 @@ function writeMethods({
     },
 
     async remove(input) {
+      assertConfigServiceTransportOpen(configService);
       authorizeMutation?.();
       const writeOpts: WriteContext = {
         ...(input.environment ? { environment: input.environment } : {}),
@@ -137,14 +145,17 @@ function scopeMethods(
   const { scopeManager, schemaRegistry } = deps;
   return {
     async listScopes(_input) {
+      assertConfigServiceTransportOpen(deps.configService);
       return { scopes: scopeManager.listScopes() };
     },
 
     async listScopeValues(input) {
+      assertConfigServiceTransportOpen(deps.configService);
       return { values: scopeManager.listScopeValues(input.scopeId) };
     },
 
     async fetchSchemas(_input) {
+      assertConfigServiceTransportOpen(deps.configService);
       if (!deps.getAuthContext?.()?.isAdmin)
         throw createWeaverError("FORBIDDEN", "Admin access required");
       return { schemas: schemaRegistry.listAll() };
@@ -158,6 +169,7 @@ function registrationMethods(
   const { schemaRegistry } = deps;
   return {
     async registerSchema(input) {
+      assertConfigServiceTransportOpen(deps.configService);
       deps.authorizeMutation?.();
       const auth = deps.getAuthContext?.();
       if (!auth?.isAdmin)
@@ -194,6 +206,7 @@ function objectMethods({
 }: ScompServiceDeps): Pick<WeaverConfigContract, "setRegisteredObject"> {
   return {
     async setRegisteredObject(input) {
+      assertConfigServiceTransportOpen(configService);
       authorizeMutation?.();
       const request = registeredObjectWriteRequestSchema.parse(input);
       const writeOpts: WriteContext = {
@@ -220,6 +233,7 @@ function patchMethods({
 }: ScompServiceDeps): Pick<WeaverConfigContract, "patchRegisteredPath"> {
   return {
     async patchRegisteredPath(input) {
+      assertConfigServiceTransportOpen(configService);
       authorizeMutation?.();
       const request = registeredPathPatchRequestSchema.parse(input);
       const writeOpts: WriteContext = {
@@ -248,6 +262,7 @@ function validationMethods({
 > {
   return {
     async validateRegisteredEffective(input) {
+      assertConfigServiceTransportOpen(configService);
       const request = registeredEffectiveValidationRequestSchema.parse(input);
       const scopePath = request.scope
         ? parseScopeQuery(request.scope)
@@ -261,48 +276,6 @@ function validationMethods({
         request.anchorPath,
         context,
       );
-    },
-  };
-}
-
-function subscriptionMethods({
-  configService,
-  onMaintenance,
-}: ScompServiceDeps): Pick<WeaverConfigContract, "subscribe"> {
-  return {
-    async *subscribe(_input) {
-      const queue: ConfigDelta[] = [];
-      let resolve: (() => void) | null = null;
-      let stopped = false;
-      const stop = onMaintenance?.(() => {
-        stopped = true;
-        queue.length = 0;
-        resolve?.();
-      });
-
-      const unsub = configService.onDelta((delta) => {
-        queue.push(delta);
-        if (resolve) {
-          resolve();
-          resolve = null;
-        }
-      });
-
-      try {
-        while (!stopped) {
-          const next = queue.shift();
-          if (next !== undefined) {
-            yield next;
-            continue;
-          }
-          await new Promise<void>((r) => {
-            resolve = r;
-          });
-        }
-      } finally {
-        stop?.();
-        unsub();
-      }
     },
   };
 }

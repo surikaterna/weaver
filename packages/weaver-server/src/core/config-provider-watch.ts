@@ -1,3 +1,4 @@
+import { WeaverErrorInstance } from "@weaver-conf/config-types";
 import type { ConfigServiceController } from "./config-service-controller";
 
 export function watchConfigurationProviders(host: ConfigServiceController) {
@@ -11,8 +12,13 @@ export function watchConfigurationProviders(host: ConfigServiceController) {
         return;
       }
       host.coordinator
-        .run(() => host.reload([provider], false))
+        .runApplication(() => host.reload([provider], false))
         .catch((error) => {
+          if (
+            error instanceof WeaverErrorInstance &&
+            error.code === "MAINTENANCE"
+          )
+            return;
           try {
             host.logger.error("[config] external candidate refused:", error);
           } catch {
@@ -24,7 +30,7 @@ export function watchConfigurationProviders(host: ConfigServiceController) {
       {
         name: `watch:${provider.id}`,
         run: async () => {
-          dispose();
+          await dispose();
         },
       },
     ];

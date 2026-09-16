@@ -85,7 +85,10 @@ test("4z58: a generic mutable provider never supplies an implicit permissive sch
   t.after(() => f.configService.close());
   assert.equal((await f.control.finalize(f.control.revision)).success, false);
   await assert.rejects(f.configService.resolveAll(), { code: "CONFIG_NOT_READY" });
-  assert.equal((await f.registry.register(record("svc", schema).request)).success, true);
+  assert.equal(
+    (await f.control.registerSchema(record("svc", schema).request)).success,
+    true,
+  );
   await f.activate();
   const revision = f.configService.revision;
   for (const result of [

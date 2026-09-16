@@ -2,6 +2,7 @@ import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import { vi } from "vitest";
 import { createTestService } from "../../test/setup-service";
 import { createWeaverConfigService } from "../core/config-service";
+import { hostForControl } from "../core/config-service-internal";
 import { createSchemaRegistry } from "../core/schema-registry";
 import { scopeContextId } from "../core/scope-inventory";
 import { createScopeManager } from "../core/scope-manager";
@@ -175,10 +176,11 @@ describe("transport scope boundaries (weaver-becr)", () => {
         actor: "admin",
       }),
     ).toMatchObject({ success: true });
+    const providers = hostForControl(configService).providers;
     await configService.close?.();
     const restarted = await createWeaverConfigService({
       environment: "dev",
-      providers: [...configService.providers],
+      providers: [...providers],
       controlLayer: "control",
     });
     const restartedSse = createSSEAdapter({ configService: restarted });
