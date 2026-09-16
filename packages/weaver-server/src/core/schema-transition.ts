@@ -1,17 +1,22 @@
 import { createHash } from "node:crypto";
 import { deepGet, parseCanonicalConfigPath } from "@weaver-conf/config-engine";
 import {
-  type ConfigurationStorageProvider,
   canonicalInternalJson,
   createWeaverError,
   type InternalConfiguration,
+  type InternalRecoveryEnvelope,
   type InternalUpgradePlan,
-  internalUpgradeLayerDigest,
-  providerInventorySchema,
+  internalConfigurationSchema,
+  type LayerEnvelope,
 } from "@weaver-conf/config-types";
-import { getProviderRevision } from "@weaver-conf/storage-providers";
+import {
+  getProviderRevision,
+  validateProviderEnvelope,
+} from "@weaver-conf/storage-providers";
 import { projectCanonicalRegistrations } from "./canonical-projection";
 import type { ConfigServiceController } from "./config-service-controller";
+import { assertCurrentJournalReceipt } from "./control-journal-lineage";
+import { assertTransitionSources } from "./upgrade-source-validation";
 
 export function transitionDigest(value: unknown): string {
   return createHash("sha256")
@@ -39,6 +44,150 @@ export async function prepareSchemaTransition(
   assertSourceIdentity(intent);
   await assertTransitionSources(host, intent.plan, intent.journal);
   return prepareRepairTarget(host, intent);
+}
+
+export async function validateUpgradeRecoverySources(
+  host: ConfigServiceController,
+  plan: InternalUpgradePlan,
+  journal: InternalRecoveryEnvelope,
+): Promise<void> {
+  const { state } = await readRecoveryControl(host);
+  assertRecoverySourceIdentity({ plan, state, journal });
+  await assertTransitionSources(host, plan, journal, false);
+}
+
+export async function validateUpgradeRecoveryIdentity(
+  host: ConfigServiceController,
+  plan: InternalUpgradePlan,
+  journal: InternalRecoveryEnvelope,
+  requestedRunId = journal.runId,
+): Promise<InternalConfiguration> {
+  const state = await validateUpgradeRecoveryControl(
+    host,
+    plan,
+    journal,
+    requestedRunId,
+  );
+  assertRecoverySourceIdentity({ plan, state, journal });
+  const projected = host.pipeline.contracts.prepared().configuration;
+  for (const step of plan.steps)
+    prepareTargetCatalog(host, projected, plan, step.target.path);
+  return state;
+}
+
+export async function validateUpgradeRecoveryControl(
+  host: ConfigServiceController,
+  plan: InternalUpgradePlan,
+  journal: InternalRecoveryEnvelope,
+  requestedRunId = journal.runId,
+): Promise<InternalConfiguration> {
+  const { state, envelope } = await readRecoveryControl(host);
+  const selected = selectRawRecovery(state, requestedRunId);
+  if (selected.journal.activation?.status !== "intent")
+    assertCurrentJournalReceipt(envelope, selected.journal);
+  host.authority.assertCapturedSnapshot(
+    host.pipeline.controlProvider,
+    envelope,
+  );
+  assertSelectedRecovery(selected, plan, journal, requestedRunId);
+  return state;
+}
+
+async function readRecoveryControl(host: ConfigServiceController): Promise<{
+  readonly state: InternalConfiguration;
+  readonly envelope: LayerEnvelope;
+}> {
+  const control = host.pipeline.controlProvider;
+  const raw = await control.authority?.readLayer(control.layer);
+  const envelope = validateProviderEnvelope(raw);
+  if (
+    envelope.storeId !== host.pipeline.contracts.binding.storeId ||
+    envelope.environment !== host.pipeline.contracts.binding.environment ||
+    envelope.environment !== host.options.environment ||
+    envelope.layer !== control.layer
+  )
+    throw createWeaverError(
+      "REVISION_CONFLICT",
+      "Recovery control authority binding changed",
+    );
+  const parsed = internalConfigurationSchema.safeParse(
+    envelope.entries._weaver,
+  );
+  if (!parsed.success)
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Recovery control authority is malformed",
+      { issues: parsed.error.issues },
+    );
+  return { state: parsed.data, envelope };
+}
+
+interface SelectedRecovery {
+  readonly journal: InternalRecoveryEnvelope;
+  readonly plan: InternalUpgradePlan;
+}
+
+function selectRawRecovery(
+  state: InternalConfiguration,
+  runId: string,
+): SelectedRecovery {
+  const matches = Object.entries(state.upgrades.journal).filter(
+    ([key, value]) => key === runId || value.runId === runId,
+  );
+  const rawJournal = state.upgrades.journal[runId];
+  const rawPlan = rawJournal && state.upgrades.plans[rawJournal.planId];
+  if (
+    matches.length !== 1 ||
+    !rawJournal ||
+    rawJournal.runId !== runId ||
+    !rawPlan
+  )
+    throw createWeaverError(
+      "REVISION_CONFLICT",
+      "Requested recovery input is missing from durable control authority",
+    );
+  return { journal: rawJournal, plan: rawPlan };
+}
+
+function assertSelectedRecovery(
+  raw: SelectedRecovery,
+  plan: InternalUpgradePlan,
+  journal: InternalRecoveryEnvelope,
+  runId: string,
+): void {
+  const planMatches = raw.plan.id === plan.id && raw.journal.planId === plan.id;
+  if (
+    journal.runId !== runId ||
+    !planMatches ||
+    !sameCanonical(raw.plan, plan) ||
+    !sameCanonical(raw.journal, journal)
+  )
+    throw createWeaverError(
+      "REVISION_CONFLICT",
+      "Projected recovery input differs from durable control authority",
+    );
+}
+
+function sameCanonical(left: unknown, right: unknown): boolean {
+  return canonicalInternalJson(left) === canonicalInternalJson(right);
+}
+
+function assertRecoverySourceIdentity({
+  plan,
+  state,
+  journal,
+}: RecoverySourceIntent): void {
+  if (
+    plan.source.catalogDigest !== transitionDigest(state.catalog) ||
+    plan.source.inventoryRevision !== state.scopeInventory.revision ||
+    plan.source.infrastructureGeneration !==
+      state.infrastructure.activeGeneration ||
+    journal.infrastructureGeneration !== state.infrastructure.activeGeneration
+  )
+    throw createWeaverError(
+      "REVISION_CONFLICT",
+      "Recovery catalog, inventory, or generation changed",
+    );
 }
 
 function repairIntent(
@@ -75,6 +224,11 @@ function repairIntent(
 }
 
 type RepairIntent = ReturnType<typeof repairIntent>;
+interface RecoverySourceIntent {
+  readonly plan: InternalUpgradePlan;
+  readonly state: InternalConfiguration;
+  readonly journal: InternalRecoveryEnvelope;
+}
 
 function assertPlanIntent({ plan, step }: RepairIntent): void {
   const planned = plan.steps.find((item) => item.id === step.id);
@@ -96,7 +250,11 @@ function assertPlanIntent({ plan, step }: RepairIntent): void {
     );
 }
 
-function assertSourceIdentity({ plan, state, journal }: RepairIntent): void {
+function assertSourceIdentity({
+  plan,
+  state,
+  journal,
+}: RecoverySourceIntent): void {
   if (
     plan.source.catalogDigest !== transitionDigest(state.catalog) ||
     plan.source.inventoryRevision !== state.scopeInventory.revision ||
@@ -217,113 +375,6 @@ function prepareTargetCatalog(
       "Repair target is not a registered object anchor",
     );
   return prepared;
-}
-
-async function assertTransitionSources(
-  host: ConfigServiceController,
-  plan: InternalUpgradePlan,
-  journal: RepairIntent["journal"],
-): Promise<void> {
-  const control = host.pipeline.controlProvider;
-  if (
-    Object.keys(host.layerData.get(control.id) ?? {}).some(
-      (key) => key !== "_weaver",
-    )
-  )
-    throw createWeaverError(
-      "UNSUPPORTED_AUTHORITY",
-      "Repair requires an isolated control data layer",
-    );
-  for (const provider of host.providers) {
-    if (provider === control) continue;
-    await assertProviderSource(host, plan, journal, provider);
-  }
-}
-
-async function assertProviderSource(
-  host: ConfigServiceController,
-  plan: InternalUpgradePlan,
-  journal: RepairIntent["journal"],
-  provider: ConfigurationStorageProvider,
-): Promise<void> {
-  if (!provider.authority)
-    throw createWeaverError(
-      "UNSUPPORTED_AUTHORITY",
-      "Repair sources require owned authority",
-    );
-  const inventory = providerInventorySchema.parse(
-    await provider.authority.inventory(),
-  );
-  const original = plan.source.providerRevisions.find(
-    (item) => item.providerId === provider.id,
-  );
-  const expected = original?.revisions.map(
-    (revision) =>
-      journal.cursor?.find(
-        (entry) =>
-          entry.providerId === provider.id &&
-          entry.revision.layer === revision.layer,
-      )?.revision ?? revision,
-  );
-  const canonical = (items: readonly unknown[]) =>
-    items.map(canonicalInternalJson).sort().join("\n");
-  if (!expected || canonical(expected) !== canonical(inventory.revisions))
-    throw createWeaverError(
-      "REVISION_CONFLICT",
-      "Repair source vector changed or is incomplete",
-    );
-  for (const revision of inventory.revisions) {
-    const advanced = original?.revisions.find(
-      (item) => item.layer === revision.layer,
-    );
-    const cursor = journal.cursor?.find(
-      (entry) =>
-        entry.providerId === provider.id &&
-        entry.revision.layer === revision.layer,
-    )?.revision;
-    if (
-      journal.control?.revision.storeId === revision.storeId &&
-      journal.control.revision.layer === revision.layer
-    )
-      continue;
-    if (
-      advanced &&
-      cursor &&
-      (revision.sequence !== advanced.sequence ||
-        cursor.sequence !== advanced.sequence)
-    )
-      continue;
-    const digest = plan.source.dataDigests.find(
-      (item) =>
-        item.providerId === provider.id &&
-        item.layer === revision.layer &&
-        item.storeId === revision.storeId,
-    );
-    if (!digest)
-      throw createWeaverError(
-        "REVISION_CONFLICT",
-        `Repair source digest changed or is incomplete: ${provider.id}/${revision.layer}`,
-      );
-    if (
-      journal.steps.some(
-        (step) =>
-          step.status === "intent" &&
-          step.target.providerId === provider.id &&
-          step.target.layer === revision.layer,
-      )
-    )
-      continue;
-    const snapshot = await host.authority.load(provider, revision.layer);
-    const actualDigest = internalUpgradeLayerDigest(
-      snapshot.entries,
-      digest.contentDomain,
-    );
-    if (digest.digest !== actualDigest)
-      throw createWeaverError(
-        "REVISION_CONFLICT",
-        `Repair source digest changed or is incomplete: ${provider.id}/${revision.layer}`,
-      );
-  }
 }
 
 function sameRevisionIdentity(

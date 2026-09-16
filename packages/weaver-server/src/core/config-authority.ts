@@ -39,6 +39,10 @@ export class ConfigAuthority {
     ConfigurationStorageProvider,
     ProviderCapabilities
   >();
+  private readonly snapshots = new Map<
+    ConfigurationStorageProvider,
+    Map<string, LayerEnvelope>
+  >();
   private layerOrder: string[] = [];
   private readonly fallback = new Map<
     string,
@@ -153,10 +157,40 @@ export class ConfigAuthority {
       layer,
       this.expected(provider, layer),
     );
+    this.rememberSnapshot(provider, snapshot);
     return {
       entries: snapshot.entries,
       revision: JSON.stringify(getProviderRevision(snapshot)),
     };
+  }
+  assertCapturedSnapshot(
+    provider: ConfigurationStorageProvider,
+    snapshot: LayerEnvelope,
+  ): void {
+    const captured = this.snapshots.get(provider)?.get(snapshot.layer);
+    const capabilities = this.capabilities.get(provider);
+    const currentCapabilities = provider.authority
+      ? providerCapabilitiesSchema.parse(provider.authority.capabilities)
+      : undefined;
+    if (
+      !captured ||
+      !capabilities ||
+      !deepEqual(capabilities, currentCapabilities) ||
+      !deepEqual(captured, snapshot)
+    )
+      throw createWeaverError(
+        "REVISION_CONFLICT",
+        "Provider snapshot differs from the captured authority",
+      );
+  }
+  private rememberSnapshot(
+    provider: ConfigurationStorageProvider,
+    snapshot: LayerEnvelope,
+  ): void {
+    const layers =
+      this.snapshots.get(provider) ?? new Map<string, LayerEnvelope>();
+    layers.set(snapshot.layer, structuredClone(snapshot));
+    this.snapshots.set(provider, layers);
   }
   trackFallback(
     provider: ConfigurationStorageProvider,
@@ -272,6 +306,7 @@ export class ConfigAuthority {
       capabilities,
     );
     if (!committed.success) return { result: committed };
+    this.rememberSnapshot(provider, committed.snapshot);
     await this.captureMany([provider], {
       provider,
       snapshot: committed.snapshot,

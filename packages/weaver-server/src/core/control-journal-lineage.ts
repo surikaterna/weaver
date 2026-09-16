@@ -14,6 +14,29 @@ import type { WeaverConfigService } from "./config-service-types";
 
 type LayerCommitReceipt = NonNullable<LayerEnvelope["lastCommit"]>;
 
+export function assertCurrentJournalReceipt(
+  envelope: LayerEnvelope,
+  journal: InternalRecoveryEnvelope,
+): void {
+  const control = requiredControl(journal);
+  const previous = control.receipts.at(-1)?.revision ?? control.revision;
+  const digest = computeProviderMutationDigest({
+    layer: previous.layer,
+    expectedRevision: previous,
+    operationId: control.operationId,
+    mutation: {
+      action: "set",
+      key: `_weaver.upgrades.journal.${journal.runId}`,
+      value: JSON.parse(canonicalInternalJson(journal)),
+    },
+  });
+  if (!exactReceipt(envelope.lastCommit, control.operationId, digest, previous))
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Current recovery journal does not match durable receipt lineage",
+    );
+}
+
 export async function prepareInitialJournal(
   service: WeaverConfigService,
   journal: InternalRecoveryEnvelope,

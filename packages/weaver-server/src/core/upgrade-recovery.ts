@@ -21,20 +21,26 @@ import {
   type InternalUpgradeExecutionResult,
   internalUpgradeResult,
 } from "./public-upgrade-status";
+import {
+  validateUpgradeRecoveryControl,
+  validateUpgradeRecoveryIdentity,
+  validateUpgradeRecoverySources,
+} from "./schema-transition";
 import { recoverTerminalUpgrade } from "./terminal-upgrade-recovery";
 import { completeRecoveredActivation } from "./upgrade-activation-completion";
 import type { UpgradeApplicationAdmission } from "./upgrade-application-admission";
 import { compensateUpgrade } from "./upgrade-compensation";
 import { reconstructFinalContexts } from "./upgrade-context-recovery";
-import {
-  committedReceipt,
-  exactPrestate,
-  providerFor,
-  replaceCursor,
-} from "./upgrade-execution-support";
 import { activateUpgradePlan, applyUpgradeStep } from "./upgrade-executor";
+import { validateFinalContexts } from "./upgrade-final-validation";
 import { isProjectedTerminal } from "./upgrade-recovery-projection";
 import type { UpgradeRuntimeHost } from "./upgrade-runtime-host";
+import {
+  assertJournalPlanBinding,
+  inspectUpgradeStepIntent,
+  recoverUpgradeStepIntent,
+  validateRecoveredStepPoststate,
+} from "./upgrade-step-recovery";
 
 type Control = Awaited<ReturnType<typeof createControlService>>;
 export async function recoverRuntimeUpgrade(
@@ -57,12 +63,15 @@ export async function recoverRuntimeUpgrade(
   }
   const terminal = await recoverTerminalUpgrade(runtime, journal, admission);
   if (terminal) return terminal;
+  if (journal.phase === "blocked") return result(journal);
   assertSupportedSourceBuiltinCatalog(journal.source);
   await runtime.enterMaintenance();
   const plan = controlProjection(runtime.configService).prepared().configuration
     .upgrades.plans[journal.planId];
   if (!plan)
     throw createWeaverError("CONFIG_NOT_READY", "Recovery plan is missing");
+  assertAdoptionAuthorized(control, journal, request);
+  await preflight(runtime, plan, journal, request.runId);
   journal = await adopt(runtime, control, plan, journal, request);
   const adoptedTerminal = await recoverTerminalUpgrade(
     runtime,
@@ -85,6 +94,17 @@ export async function recoverRuntimeUpgrade(
       );
     }
   return resume(runtime, control, plan, journal, admission);
+}
+function assertAdoptionAuthorized(
+  control: Control,
+  journal: InternalRecoveryEnvelope,
+  request: UpgradeRecoveryRequest,
+): void {
+  if (journal.owner !== control.owner && !request.priorOwnerStopped)
+    throw createWeaverError(
+      "FORBIDDEN",
+      "Explicit prior-owner-stopped evidence is required",
+    );
 }
 async function adopt(
   runtime: UpgradeRuntimeHost,
@@ -146,7 +166,6 @@ function adoptionJournal(
     },
   });
 }
-
 async function resume(
   runtime: UpgradeRuntimeHost,
   control: Control,
@@ -170,8 +189,10 @@ async function resume(
     journal.activation?.status === "pending" &&
     journal.steps.every((step) => step.status === "complete")
   ) {
-    journal = parseJournal({ ...journal, phase: "verifying" });
-    await persist(control, journal);
+    if (journal.phase !== "verifying") {
+      journal = parseJournal({ ...journal, phase: "verifying" });
+      await persist(control, journal);
+    }
     return activateUpgradePlan(runtime, control, plan, journal, admission);
   }
   if (journal.activation?.status !== "complete")
@@ -183,7 +204,6 @@ async function resume(
     );
   return result(journal);
 }
-
 async function reconcileSteps(
   runtime: UpgradeRuntimeHost,
   control: Control,
@@ -214,12 +234,16 @@ async function reconcileSteps(
       continue;
     }
     if (recorded.status === "complete") continue;
-    current = await reconcileIntent(runtime, control, plan, current, step.id);
-    if (current.phase === "blocked") return current;
+    current = await recoverUpgradeStepIntent(
+      runtime,
+      control,
+      plan,
+      current,
+      step.id,
+    );
   }
   return current;
 }
-
 async function reconcileActivation(
   runtime: UpgradeRuntimeHost,
   control: Control,
@@ -262,7 +286,6 @@ async function reconcileActivation(
     admission,
   );
 }
-
 async function recoverActivationEvidence(
   runtime: UpgradeRuntimeHost,
   control: Control,
@@ -294,65 +317,48 @@ async function recoverActivationEvidence(
   }
   return evidence;
 }
-
-async function reconcileIntent(
+async function preflight(
   runtime: UpgradeRuntimeHost,
-  control: Control,
   plan: InternalUpgradePlan,
   journal: InternalRecoveryEnvelope,
-  id: string,
-) {
-  const index = journal.steps.findIndex((step) => step.id === id);
-  const step = plan.steps[index];
-  const recorded = journal.steps[index];
-  if (!step || recorded?.status !== "intent")
-    throw createWeaverError(
-      "VALIDATION_ERROR",
-      "Recovery intent is inconsistent",
-    );
-  const envelope = await runMaintenanceOperation(
-    runtime.configService,
-    async (host) => {
-      const provider = providerFor(host, step);
-      return provider.authority?.readLayer(step.target.layer);
-    },
+  runId: string,
+): Promise<void> {
+  assertJournalPlanBinding(plan, journal);
+  await runMaintenanceOperation(runtime.configService, (host) =>
+    validateUpgradeRecoveryControl(host, plan, journal, runId),
   );
-  if (!envelope)
-    throw createWeaverError(
-      "COMMIT_OUTCOME_UNKNOWN",
-      "Provider read is uncertain",
-    );
-  const receipt = committedReceipt(
-    { ...step, id: recorded.operationId },
-    envelope,
-  );
-  if (!receipt) {
-    const pre = exactPrestate(step, envelope);
-    if (pre)
-      return block(
-        control,
-        journal,
-        "operator-required",
-        "Intent has exact prestate; operator must choose resume or compensation",
-        step.id,
-      ).then((value) => value.journal);
-    return block(
-      control,
-      journal,
-      "conflict",
-      "Intent matches neither exact prestate nor committed receipt",
-      step.id,
-    ).then((value) => value.journal);
+  const intent = journal.steps.find((step) => step.status === "intent");
+  const intentEvidence = intent
+    ? await inspectUpgradeStepIntent(runtime, plan, journal, intent.id)
+    : undefined;
+  if (journal.activation?.status === "intent") {
+    const evidence = await inspectActivationEvidence(runtime, plan, journal);
+    if (evidence.status === "mismatch")
+      throw createWeaverError(
+        "VALIDATION_ERROR",
+        "Activation recovery authority is stale",
+      );
+    if (evidence.status === "prestate")
+      await reconstructFinalContexts(runtime, plan, journal);
+    return;
   }
-  const complete = { ...recorded, status: "complete" as const, receipt };
-  const next = parseJournal({
-    ...journal,
-    phase: "applying",
-    steps: journal.steps.map((item, i) => (i === index ? complete : item)),
-    cursor: replaceCursor(journal, step.target.providerId, receipt.revision),
-  });
-  await persist(control, next);
-  return next;
+  await runMaintenanceOperation(runtime.configService, (host) =>
+    validateUpgradeRecoveryIdentity(host, plan, journal, runId),
+  );
+  if (intentEvidence?.status === "poststate") {
+    await runMaintenanceOperation(runtime.configService, (host) =>
+      validateUpgradeRecoverySources(host, plan, intentEvidence.journal),
+    );
+    await validateRecoveredStepPoststate(runtime, plan, intentEvidence.journal);
+  } else if (
+    journal.phase === "verifying" ||
+    journal.steps.every((step) => step.status === "complete")
+  )
+    await validateFinalContexts(runtime, plan, journal);
+  else
+    await runMaintenanceOperation(runtime.configService, (host) =>
+      validateUpgradeRecoverySources(host, plan, journal),
+    );
 }
 
 async function block(
