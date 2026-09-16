@@ -8,7 +8,10 @@ import {
   weaverInspectionSchema,
 } from "@weaver-conf/config-types";
 import { controlProjection } from "../core/config-service-internal";
-import { createControlService } from "../core/control-service";
+import {
+  createControlService,
+  createPinnedControlService,
+} from "../core/control-service";
 import {
   CONTROL_LAYER,
   compileBootstrapLayout,
@@ -18,6 +21,11 @@ import {
 import { withinBootstrapDeadline } from "./deadline";
 import type { BootstrapRuntimeOptions } from "./initialize";
 import { sameConfiguration } from "./manifest";
+import {
+  inspectPinnedRecovery,
+  type PinnedRecoveryOpen,
+  validatePinnedAuthorities,
+} from "./pinned-recovery-open";
 import {
   assertResourceReferences,
   createBuiltinProviderFactories,
@@ -86,21 +94,31 @@ export async function openRuntimeResources(
   }
 }
 async function compileRuntime(opening: OpeningRuntime) {
-  const { seed, seedResource, factories, options } = opening;
-  const initial = await inspectSeedResource(seed, seedResource, true);
-  if (
-    initial.incomplete &&
-    !Object.values(initial.state.upgrades.journal).some(
-      (journal) =>
-        !["completed", "compensated", "restart-required"].includes(
-          journal.phase,
-        ),
-    )
-  )
-    throw createWeaverError(
-      "MAINTENANCE",
-      "Initialization is incomplete and requires bootstrap recovery",
+  let initial: Awaited<ReturnType<typeof inspectSeedResource>>;
+  try {
+    initial = await inspectSeedResource(
+      opening.seed,
+      opening.seedResource,
+      true,
     );
+  } catch (ordinaryError) {
+    const pinned = await inspectPinnedRecovery(
+      opening.seed,
+      opening.seedResource,
+    );
+    if (!pinned) throw ordinaryError;
+    return compilePinnedRuntime(opening, pinned);
+  }
+  return compileOrdinaryRuntime(opening, initial);
+}
+
+async function compileOrdinaryRuntime(
+  opening: OpeningRuntime,
+  initial: Awaited<ReturnType<typeof inspectSeedResource>>,
+) {
+  const { seed, seedResource, factories, options } = opening;
+  if (initial.incomplete && !hasRecovery(initial.state))
+    throw createWeaverError("MAINTENANCE", "Initialization is incomplete");
   const generation = activeGeneration(initial.state);
   compileBootstrapLayout(seed, generation, factories);
   const jwtSecret = await resolveGenerationCredentials(
@@ -126,16 +144,49 @@ async function compileRuntime(opening: OpeningRuntime) {
     initial.incomplete,
   );
 }
+
+async function compilePinnedRuntime(
+  opening: OpeningRuntime,
+  pinned: PinnedRecoveryOpen,
+) {
+  const { seed, seedResource, factories, options } = opening;
+  const generation = activeGeneration(pinned.configuration);
+  compileBootstrapLayout(seed, generation, factories);
+  const jwtSecret = await resolveGenerationCredentials(
+    generation,
+    options.credentials,
+  );
+  opening.resources = await instantiateGeneration(
+    seed,
+    generation,
+    pinned.configuration.scopeInventory,
+    options.credentials,
+    factories,
+    false,
+    seedResource,
+  );
+  assertResourceReferences(opening.resources);
+  await validatePinnedAuthorities(pinned, opening.resources);
+  return activateRuntime(
+    opening,
+    pinned.configuration,
+    generation,
+    jwtSecret,
+    true,
+    pinned,
+  );
+}
 async function activateRuntime(
   opening: OpeningRuntime,
   expected: InternalConfiguration,
   generation: InternalInfrastructureGeneration,
   jwtSecret: string,
   maintenance: boolean,
+  pinnedRecovery?: PinnedRecoveryOpen,
 ) {
   const { seed, options, factories, resources } = opening;
   const secretBackend = boundedSecrets(options.secretBackend);
-  const control = await createControlService({
+  const controlOptions = {
     providers: resources.map((resource) => resource.provider),
     environment: seed.environment,
     controlLayer: CONTROL_LAYER,
@@ -143,7 +194,10 @@ async function activateRuntime(
     requireDurableAuthority: true,
     ...(options.logger ? { logger: options.logger } : {}),
     ...(secretBackend ? { secretBackend } : {}),
-  });
+  };
+  const control = pinnedRecovery
+    ? await createPinnedControlService(controlOptions, pinnedRecovery)
+    : await createControlService(controlOptions);
   opening.control = control;
   if (
     !sameConfiguration(
@@ -170,6 +224,13 @@ async function activateRuntime(
     options,
     maintenance,
   };
+}
+
+function hasRecovery(state: InternalConfiguration): boolean {
+  return Object.values(state.upgrades.journal).some(
+    (journal) =>
+      !["completed", "compensated", "restart-required"].includes(journal.phase),
+  );
 }
 function boundedSecrets(backend?: SecretBackend): SecretBackend | undefined {
   return backend

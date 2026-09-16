@@ -65,16 +65,6 @@ for (const boundary of [
           evidence: "prior durable fixture runtime was closed",
         },
       };
-      if (["before-intent", "after-intent"].includes(boundary)) {
-        if (boundary === "before-intent") {
-          const blocked = await runtime.recoverUpgrade(request);
-          assert.equal(blocked.status, "blocked");
-        } else await assert.rejects(runtime.recoverUpgrade(request));
-        assert.equal(runtime.state, "maintenance");
-        assert.equal(counts.activation, 0);
-        assert.equal(counts.completion, 0);
-        return;
-      }
       const recovered = await runtime.recoverUpgrade(request);
       assert.equal(recovered.status, "completed");
       assert.equal((await runtime.recoverUpgrade(request)).status, "completed");

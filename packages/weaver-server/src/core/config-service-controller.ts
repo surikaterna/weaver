@@ -26,6 +26,7 @@ import {
 import type { ValidatedFinalContexts } from "./final-context-evidence";
 import { installUpgradeSnapshot } from "./install-upgrade-snapshot";
 import { MaintenanceController } from "./maintenance-controller";
+import { pinnedEntries } from "./pinned-recovery-context";
 import { createProviderReadiness } from "./provider-readiness";
 import { createRuntimeResolutionContexts } from "./runtime-resolution-contexts";
 import { assertInventoryContext, scopeContextId } from "./scope-inventory";
@@ -112,7 +113,9 @@ export class ConfigServiceController {
         dynamic: boolean,
         entries: Record<string, unknown>,
         validation?: ValidatedCandidate,
-      ) => this.install(provider, layer, dynamic, entries, validation),
+        candidate?: Record<string, unknown>,
+      ) =>
+        this.install(provider, layer, dynamic, entries, validation, candidate),
       publish: (delta: ConfigDelta, validation?: ValidatedCandidate) =>
         this.publish(delta, validation),
       autoFlush: () => this.autoFlush(),
@@ -211,6 +214,7 @@ export class ConfigServiceController {
     dynamic: boolean,
     entries: Record<string, unknown>,
     validation?: ValidatedCandidate,
+    candidate?: Record<string, unknown>,
   ): void {
     this.committedValidation = validation;
     if (validation) {
@@ -224,7 +228,13 @@ export class ConfigServiceController {
           this.runtime.materialize(context.scopePath);
     }
     if (dynamic) this.dynamicScopeEntries.set(layer, structuredClone(entries));
-    else this.layerData.set(provider.id, structuredClone(entries));
+    else
+      this.layerData.set(
+        provider.id,
+        structuredClone(
+          pinnedEntries(this, provider, entries, candidate, validation),
+        ),
+      );
     this.updateRevision();
     if (provider === this.pipeline.controlProvider && layer === provider.layer)
       this.pipeline.installCurrent();

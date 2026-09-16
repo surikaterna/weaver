@@ -18,7 +18,10 @@ import {
   recordActivationCompletion,
   repairControlStep,
 } from "./config-maintenance-internal";
-import { createWeaverConfigService } from "./config-service";
+import {
+  createPinnedWeaverConfigService,
+  createWeaverConfigService,
+} from "./config-service";
 import {
   activateControlApplication,
   controlProjection,
@@ -45,6 +48,21 @@ export async function createControlService(
     ...options,
     serviceMode: "control",
   });
+  return controlService(service);
+}
+
+export async function createPinnedControlService(
+  options: WeaverConfigServiceOptions,
+  pinnedRecovery: unknown,
+) {
+  const service = await createPinnedWeaverConfigService(
+    { ...options, serviceMode: "control" },
+    pinnedRecovery,
+  );
+  return controlService(service);
+}
+
+function controlService(service: WeaverConfigService) {
   const owner = randomUUID();
   return Object.freeze({
     owner,

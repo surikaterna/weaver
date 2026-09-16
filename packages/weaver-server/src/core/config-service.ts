@@ -1,5 +1,6 @@
 import { runIndependentCleanup } from "@weaver-conf/config-engine";
 import { createWeaverError } from "@weaver-conf/config-types";
+import { consumePinnedRecoveryContext } from "../bootstrap/pinned-recovery-open";
 import { ConfigAuthority } from "./config-authority";
 import { ConfigServiceController } from "./config-service-controller";
 import { createConfigServiceFacade } from "./config-service-facade";
@@ -8,6 +9,7 @@ import type {
   WeaverConfigService,
   WeaverConfigServiceOptions,
 } from "./config-service-types";
+import { bindPinnedRecoveryContext } from "./pinned-recovery-context";
 import { bindRuntimeResolutionContexts } from "./runtime-resolution-contexts";
 import {
   bindSchemaReadRegistry,
@@ -31,6 +33,24 @@ export type {
 
 export async function createWeaverConfigService(
   options: WeaverConfigServiceOptions,
+): Promise<WeaverConfigService> {
+  return createConfigService(options);
+}
+
+export async function createPinnedWeaverConfigService(
+  options: WeaverConfigServiceOptions,
+  pinnedRecovery: unknown,
+): Promise<WeaverConfigService> {
+  const configuration = await consumePinnedRecoveryContext(
+    pinnedRecovery,
+    options.providers,
+  );
+  return createConfigService(options, configuration);
+}
+
+async function createConfigService(
+  options: WeaverConfigServiceOptions,
+  pinnedRecovery?: import("@weaver-conf/config-types").InternalConfiguration,
 ): Promise<WeaverConfigService> {
   const providers = Object.freeze([...options.providers]);
   const inventory =
@@ -68,6 +88,7 @@ export async function createWeaverConfigService(
   );
   const service = createConfigServiceFacade(host);
   host.bind(service);
+  if (pinnedRecovery) bindPinnedRecoveryContext(host, pinnedRecovery);
   bindService(host, service);
   await initializeService(host, authority);
   return service;

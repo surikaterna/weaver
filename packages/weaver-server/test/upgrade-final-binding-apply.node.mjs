@@ -74,6 +74,10 @@ async function captureStartupFailure(reopen) {
     assert.fail("fresh runtime unexpectedly opened");
   } catch (error) {
     assert.equal(error.code, "VALIDATION_ERROR");
-    assert.equal(error.message, "WeaverError: Invalid built-in value at /_weaver");
+    assert.match(
+      error.message,
+      /Pinned recovery evidence is malformed, unsupported, or divergent/,
+    );
+    assert.equal(error.message.includes("finalContexts"), false);
   }
 }

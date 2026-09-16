@@ -1,8 +1,10 @@
-import { deepGet } from "@weaver-conf/config-engine";
+import { deepEqual, deepGet } from "@weaver-conf/config-engine";
 import {
   createWeaverError,
+  type InternalConfiguration,
   type InternalRecoveryEnvelope,
   type InternalUpgradePlan,
+  internalConfigurationSchema,
 } from "@weaver-conf/config-types";
 import { activationCompletionOperationId } from "./activation-completion-operation";
 import { readBuiltinRecoveryEnvelope } from "./builtin-catalog";
@@ -79,11 +81,13 @@ export function activateUpgradeControl(
         "FORBIDDEN",
         "Upgrade activation requires maintenance",
       );
-    const next = activationCandidate(
+    const projected = activationCandidate(
       host.pipeline.contracts.prepared().configuration,
       plan,
       journal,
     );
+    const durable = await completeControlState(host, plan, journal);
+    const next = activationCandidate(durable, plan, journal);
     const operationId =
       journal.activation?.status === "intent"
         ? journal.activation.operationId
@@ -98,7 +102,7 @@ export function activateUpgradeControl(
       family: "maintenance",
       key: "_weaver",
       transition: {
-        prepared: host.pipeline.contracts.prepare(next),
+        prepared: host.pipeline.contracts.prepare(projected),
         operationId,
       },
     });
@@ -128,7 +132,14 @@ export async function recordActivationCompletion(
   await host.coordinator.run(async () => {
     host.assertReady(true);
     const state = host.pipeline.contracts.prepared().configuration;
-    const next = structuredClone(state);
+    const projected = structuredClone(state);
+    projected.upgrades.journal[journal.runId] = journal;
+    const durable = await completeControlState(
+      host,
+      state.upgrades.plans[journal.planId],
+      state.upgrades.journal[journal.runId],
+    );
+    const next = structuredClone(durable);
     next.upgrades.journal[journal.runId] = journal;
     if (journal.activation?.status !== "complete")
       throw createWeaverError(
@@ -140,7 +151,7 @@ export async function recordActivationCompletion(
       family: "maintenance",
       key: "_weaver",
       transition: {
-        prepared: host.pipeline.contracts.prepare(next),
+        prepared: host.pipeline.contracts.prepare(projected),
         operationId: activationCompletionOperationId(journal.runId),
       },
     });
@@ -162,6 +173,33 @@ export async function recordActivationCompletion(
   });
 }
 
+async function completeControlState(
+  host: ReturnType<typeof hostForControl>,
+  plan: InternalUpgradePlan | undefined,
+  journal: InternalRecoveryEnvelope | undefined,
+): Promise<InternalConfiguration> {
+  if (!plan || !journal) return failCompleteControl();
+  const provider = host.pipeline.controlProvider;
+  const envelope = await provider.authority?.readLayer(provider.layer);
+  const parsed = internalConfigurationSchema.safeParse(
+    envelope?.entries._weaver,
+  );
+  if (
+    !parsed.success ||
+    !deepEqual(parsed.data.upgrades.plans[plan.id], plan) ||
+    !deepEqual(parsed.data.upgrades.journal[journal.runId], journal)
+  )
+    return failCompleteControl();
+  return parsed.data;
+}
+
+function failCompleteControl(): never {
+  throw createWeaverError(
+    "VALIDATION_ERROR",
+    "Complete durable control state differs from selected recovery",
+  );
+}
+
 function activationCandidate(
   state: import("@weaver-conf/config-types").InternalConfiguration,
   plan: InternalUpgradePlan,
@@ -170,8 +208,9 @@ function activationCandidate(
   const next = structuredClone(state);
   if (plan.target.registrations)
     next.catalog.registrations = structuredClone(plan.target.registrations);
-  if (plan.target.builtinCatalog)
-    next.format.builtinCatalog = structuredClone(plan.target.builtinCatalog);
+  next.format.builtinCatalog = structuredClone(
+    plan.target.builtinCatalog ?? journal.target,
+  );
   if (plan.target.infrastructureGeneration)
     next.infrastructure.activeGeneration = plan.target.infrastructureGeneration;
   next.upgrades.journal[journal.runId] = journal;

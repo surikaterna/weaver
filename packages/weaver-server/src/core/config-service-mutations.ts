@@ -64,6 +64,7 @@ interface MutationHost {
     dynamic: boolean,
     entries: Record<string, unknown>,
     validation?: ValidatedCandidate,
+    candidate?: Record<string, unknown>,
   ) => void;
   readonly publish: (
     delta: ConfigDelta,
@@ -289,6 +290,7 @@ export class ConfigServiceMutations {
         target.dynamic,
         result.snapshot?.entries ?? candidate,
         validation,
+        candidate,
       );
       return result.result;
     } catch (error) {

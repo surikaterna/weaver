@@ -16,6 +16,7 @@ import {
   assertConstructedFinalContexts,
   type ValidatedFinalContexts,
 } from "./final-context-evidence";
+import { releasePinnedRecoveryContext } from "./pinned-recovery-context";
 import { filterProtectedConfigEntries } from "./protected-config-paths";
 import type { TerminalControlSnapshot } from "./terminal-control-authority";
 
@@ -51,6 +52,7 @@ export function createUpgradeApplicationAdmission(
         host.pipeline.contracts.prepare(control.state),
       );
     host.maintenance.resume();
+    releasePinnedRecoveryContext(host);
     markReady();
   };
   const admit = (

@@ -32,7 +32,7 @@ import {
   providerFor,
   replaceCursor,
 } from "./upgrade-execution-support";
-import { applyUpgradeStep } from "./upgrade-executor";
+import { activateUpgradePlan, applyUpgradeStep } from "./upgrade-executor";
 import { isProjectedTerminal } from "./upgrade-recovery-projection";
 import type { UpgradeRuntimeHost } from "./upgrade-runtime-host";
 
@@ -102,7 +102,7 @@ async function adopt(
   const adopted = adoptionJournal(control, journal, request);
   if (journal.activation?.status !== "intent") {
     await persist(control, adopted);
-    return adopted;
+    return control.readRecovery(journal.runId);
   }
   const evidence = await inspectActivationEvidence(runtime, plan, journal);
   if (evidence.status === "mismatch")
@@ -111,10 +111,12 @@ async function adopt(
       "Activation cannot be adopted from ambiguous authority",
     );
   if (evidence.status === "prestate") {
-    throw createWeaverError(
-      "SERVER_DEGRADED",
-      "Validated final context evidence is unavailable for activation adoption",
-    );
+    const retry = parseJournal({
+      ...adopted,
+      activation: { status: "pending" },
+    });
+    await persist(control, retry);
+    return control.readRecovery(journal.runId);
   }
   const completed = parseJournal({
     ...journal,
@@ -164,6 +166,14 @@ async function resume(
   if (journal.phase === "blocked") return result(journal);
   if (journal.activation?.status === "intent")
     return reconcileActivation(runtime, control, plan, journal, admission);
+  if (
+    journal.activation?.status === "pending" &&
+    journal.steps.every((step) => step.status === "complete")
+  ) {
+    journal = parseJournal({ ...journal, phase: "verifying" });
+    await persist(control, journal);
+    return activateUpgradePlan(runtime, control, plan, journal, admission);
+  }
   if (journal.activation?.status !== "complete")
     return block(
       control,

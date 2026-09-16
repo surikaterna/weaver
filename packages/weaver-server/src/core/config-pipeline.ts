@@ -25,6 +25,7 @@ import {
 import type { ConfigServiceController } from "./config-service-controller";
 import { transitionPermission } from "./config-service-internal";
 import type { WriteContext } from "./config-service-types";
+import { pinnedRecoveryContext } from "./pinned-recovery-context";
 import { trustedProviderDefinition } from "./provider-definition-binding";
 import {
   assertInventoryTransition,
@@ -82,6 +83,11 @@ export class ConfigPipeline {
       controlOnly,
       controlOnly ? [] : trustedProviderAuthorities(this.host),
     );
+    const recovery = pinnedRecoveryContext(this.host);
+    if (recovery) {
+      const current = this.host.layerData.get(provider.id) ?? {};
+      this.host.layerData.set(provider.id, { ...current, _weaver: recovery });
+    }
     const raw = this.host.layerData.get(provider.id)?._weaver;
     if (raw === undefined && this.host.options.serviceMode === "control")
       return;

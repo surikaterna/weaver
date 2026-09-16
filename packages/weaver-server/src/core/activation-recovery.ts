@@ -108,8 +108,9 @@ export function activationCandidate(
   const next = replaceJournal(state, journal);
   if (plan.target.registrations)
     next.catalog.registrations = structuredClone(plan.target.registrations);
-  if (plan.target.builtinCatalog)
-    next.format.builtinCatalog = structuredClone(plan.target.builtinCatalog);
+  next.format.builtinCatalog = structuredClone(
+    plan.target.builtinCatalog ?? journal.target,
+  );
   if (plan.target.infrastructureGeneration)
     next.infrastructure.activeGeneration = plan.target.infrastructureGeneration;
   return next;
