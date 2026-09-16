@@ -8,6 +8,7 @@ import { initialRegistrationRecord } from "../src/bootstrap/initial-registration
 import { authenticateBootstrapAdministrator } from "../src/bootstrap/seed-trust.ts";
 import { openWeaverRuntime } from "../src/server-runtime.ts";
 import { createStandaloneFixture, testAdmin, testJwt } from "./standalone-fixture.ts";
+import { rawRuntimeProviders } from "./upgrade-test-providers.mjs";
 
 const sourceSchema = {
   type: "object",
@@ -23,22 +24,22 @@ const targetSchema = {
   additionalProperties: false,
 };
 
-test("runtime planner snapshots real FS authority without writes or lifecycle effects", { timeout: 30_000 }, async () => {
+test("runtime planner snapshots real FS authority without writes or lifecycle effects", { timeout: 30_000 }, async (t) => {
   const fixture = await createStandaloneFixture({ schemas: { svc: sourceSchema } });
   let runtime;
   try {
     await initializeWeaver(fixture.seed, fixture.request, fixture.administrator, { credentials: fixture.credentials });
     runtime = await openWeaverRuntime(fixture.seed, { credentials: fixture.credentials });
     assert.equal((await runtime.configService.set("platform", "svc.keep", false)).success, true);
-    const provider = runtime.configService.providers.find((item) => item.id === "platform");
+    const provider = rawRuntimeProviders(runtime).find((item) => item.id === "platform");
     const authority = provider.authority;
     const writes = { commit: 0, legacy: 0, flush: 0 };
     const commit = authority.commitLayer.bind(authority);
-    authority.commitLayer = async (...args) => { writes.commit++; return commit(...args); };
+    t.mock.method(authority, "commitLayer", async (...args) => { writes.commit++; return commit(...args); });
     for (const method of ["write", "remove", "writeLayer", "removeLayer", "flush"])
       if (typeof provider[method] === "function") {
         const original = provider[method].bind(provider);
-        provider[method] = async (...args) => { method === "flush" ? writes.flush++ : writes.legacy++; return original(...args); };
+        t.mock.method(provider, method, async (...args) => { method === "flush" ? writes.flush++ : writes.legacy++; return original(...args); });
       }
     const revision = runtime.configService.revision;
     const request = planRequest(runtime, fixture.request, targetSchema);
@@ -105,7 +106,7 @@ test("runtime planner reads real Mongo authority without mutation", { skip: !pro
   }
 });
 
-test("snapshot final pass detects a cross-provider race", async () => {
+test("snapshot final pass detects a cross-provider race", async (t) => {
   const fixture = await createStandaloneFixture({ schemas: { svc: sourceSchema } });
   const input = structuredClone(fixture.request);
   input.generation.providers.push({ id: "second", factory: "fs", options: { filePath: `${fixture.directory}/second/entries.json` } });
@@ -115,20 +116,20 @@ test("snapshot final pass detects a cross-provider race", async () => {
     await initializeWeaver(fixture.seed, input, fixture.administrator, { credentials: fixture.credentials });
     runtime = await openWeaverRuntime(fixture.seed, { credentials: fixture.credentials });
     assert.equal((await runtime.configService.set("platform", "svc.keep", false)).success, true);
-    const first = runtime.configService.providers.find((provider) => provider.id === "platform");
-    const second = runtime.configService.providers.find((provider) => provider.id === "second");
+    const first = rawRuntimeProviders(runtime).find((provider) => provider.id === "platform");
+    const second = rawRuntimeProviders(runtime).find((provider) => provider.id === "second");
     const firstInventory = first.authority.inventory.bind(first.authority);
     const secondInventory = second.authority.inventory.bind(second.authority);
     let changed = false;
-    first.authority.inventory = async () => {
+    t.mock.method(first.authority, "inventory", async () => {
       const value = await firstInventory();
       if (!changed) return value;
       return { ...value, revisions: value.revisions.map((revision) => ({ ...revision, sequence: String(BigInt(revision.sequence) + 1n) })) };
-    };
-    second.authority.inventory = async () => {
+    });
+    t.mock.method(second.authority, "inventory", async () => {
       changed = true;
       return secondInventory();
-    };
+    });
     const result = await runtime.planUpgrade(planRequest(runtime, input, targetSchema));
     assert.equal(result.result.status, "blocked");
     assert.equal(result.result.refusals[0].code, "stale-binding");

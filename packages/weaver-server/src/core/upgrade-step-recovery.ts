@@ -5,6 +5,7 @@ import {
   type InternalRecoveryStep,
   type InternalUpgradePlan,
   internalRecoveryEnvelopeSchema,
+  type ProviderRevision,
   providerInventorySchema,
 } from "@weaver-conf/config-types";
 import { runMaintenanceOperation } from "./config-service-internal";
@@ -145,7 +146,9 @@ export function assertJournalPlanBinding(
       recorded &&
         recorded.id === step.id &&
         deepEqual(recorded.target, step.target) &&
-        deepEqual(recorded.preRevision, step.expectedRevision) &&
+        sameRevisionIdentity(recorded.preRevision, step.expectedRevision) &&
+        BigInt(recorded.preRevision.sequence) >=
+          BigInt(step.expectedRevision.sequence) &&
         recorded.preDigest === step.preDigest &&
         recorded.postDigest === step.postDigest &&
         deepEqual(recorded.mutation, step.mutation) &&
@@ -164,6 +167,13 @@ export function assertJournalPlanBinding(
       "VALIDATION_ERROR",
       "Recovery journal does not match its bound plan",
     );
+}
+
+function sameRevisionIdentity(
+  left: ProviderRevision,
+  right: ProviderRevision,
+): boolean {
+  return deepEqual({ ...left, sequence: right.sequence }, right);
 }
 
 export async function validateRecoveredStepPoststate(

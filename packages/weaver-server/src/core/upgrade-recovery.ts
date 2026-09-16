@@ -70,7 +70,8 @@ export async function recoverRuntimeUpgrade(
   }
   const terminal = await recoverTerminalUpgrade(runtime, journal, admission);
   if (terminal) return terminal;
-  if (journal.phase === "blocked") return result(journal);
+  if (journal.phase === "blocked" && request.action !== "compensate")
+    return result(journal);
   assertSupportedSourceBuiltinCatalog(journal.source);
   await runtime.enterMaintenance();
   const plan = controlProjection(runtime.configService).prepared().configuration
@@ -78,7 +79,7 @@ export async function recoverRuntimeUpgrade(
   if (!plan)
     throw createWeaverError("CONFIG_NOT_READY", "Recovery plan is missing");
   assertRecoveryAdoptionAuthorized(control.owner, journal, request);
-  await preflight(runtime, plan, journal, request.runId);
+  await preflight(runtime, plan, journal, request.runId, request.action);
   const adoptedByRecoveryAuthority = journal.owner !== control.owner;
   journal = await adopt(runtime, control, plan, journal, request);
   const adoptedTerminal = await recoverTerminalUpgrade(
@@ -339,6 +340,7 @@ async function preflight(
   plan: InternalUpgradePlan,
   journal: InternalRecoveryEnvelope,
   runId: string,
+  action: UpgradeRecoveryRequest["action"],
 ): Promise<void> {
   assertJournalPlanBinding(plan, journal);
   await runMaintenanceOperation(runtime.configService, (host) =>
@@ -362,6 +364,7 @@ async function preflight(
   await runMaintenanceOperation(runtime.configService, (host) =>
     validateUpgradeRecoveryIdentity(host, plan, journal, runId),
   );
+  if (action === "compensate") return;
   if (intentEvidence?.status === "poststate") {
     await runMaintenanceOperation(runtime.configService, (host) =>
       validateUpgradeRecoverySources(host, plan, intentEvidence.journal),

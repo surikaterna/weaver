@@ -14,6 +14,7 @@ import { activationCompletionOperationId } from "../src/core/activation-completi
 import { hostForControl } from "../src/core/config-service-internal.ts";
 import { openWeaverRuntime } from "../src/server-runtime.ts";
 import { createStandaloneFixture } from "./standalone-fixture.ts";
+import { rawRuntimeProviders } from "./upgrade-test-providers.mjs";
 
 const sourceSchema = objectSchema({ keep: { type: "boolean" } });
 const targetSchema = objectSchema({
@@ -78,7 +79,7 @@ function installRace(t, fixture) {
 }
 
 function wrapCommits(t, fixture, state) {
-  for (const candidate of fixture.runtime.configService.providers) {
+  for (const candidate of rawRuntimeProviders(fixture.runtime)) {
     const commit = candidate.authority.commitLayer.bind(candidate.authority);
     t.mock.method(candidate.authority, "commitLayer", async (request, handle) => {
       const kind = commitKind(candidate.id, request);
@@ -268,7 +269,7 @@ function observeEffects(t, runtime) {
   const open = t.mock.method(host, "openApplication");
   const resume = t.mock.method(host.maintenance, "resume");
   const subscriptions = t.mock.method(runtime.configService, "onDelta");
-  const providerSubscriptions = runtime.configService.providers.flatMap((item) =>
+  const providerSubscriptions = rawRuntimeProviders(runtime).flatMap((item) =>
     item.onExternalChange ? [t.mock.method(item, "onExternalChange")] : [],
   );
   return {
@@ -373,7 +374,7 @@ function planRequest(runtime, initialization) {
 }
 
 function provider(runtime, id) {
-  const result = runtime.configService.providers.find((item) => item.id === id);
+  const result = rawRuntimeProviders(runtime).find((item) => item.id === id);
   assert.ok(result?.authority);
   return result;
 }

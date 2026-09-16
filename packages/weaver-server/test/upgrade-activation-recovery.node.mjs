@@ -9,6 +9,7 @@ import { initializeWeaver } from "../src/bootstrap/initialize.ts";
 import { initialRegistrationRecord } from "../src/bootstrap/initial-registrations.ts";
 import { openWeaverRuntime } from "../src/server-runtime.ts";
 import { createStandaloneFixture } from "./standalone-fixture.ts";
+import { rawRuntimeProviders } from "./upgrade-test-providers.mjs";
 
 const sourceSchema = {
   type: "object",
@@ -89,7 +90,7 @@ for (const boundary of [
 }
 
 function instrument(t, runtime, counts, boundary) {
-  const provider = runtime.configService.providers.find(
+  const provider = rawRuntimeProviders(runtime).find(
     (candidate) => candidate.id === "control",
   );
   const commit = provider.authority.commitLayer.bind(provider.authority);

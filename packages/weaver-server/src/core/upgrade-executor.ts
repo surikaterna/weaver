@@ -29,18 +29,18 @@ import {
 import { transitionDigest } from "./schema-transition";
 import { readTerminalControlSnapshot } from "./terminal-control-authority";
 import type { UpgradeApplicationAdmission } from "./upgrade-application-admission";
+import { prepareUpgradeExecution } from "./upgrade-apply-preparation";
 import {
   cursorFor,
   providerFor,
   replaceCursor,
-  samePlan,
   stepKey,
 } from "./upgrade-execution-support";
 import {
   recheckFinalAuthorities,
   validateFinalContexts,
 } from "./upgrade-final-validation";
-import { planRuntimeUpgrade } from "./upgrade-planner";
+import type { InstalledUpgradeSelection } from "./upgrade-plan-selection";
 import type { UpgradeRuntimeHost } from "./upgrade-runtime-host";
 
 export async function applyRuntimeUpgrade(
@@ -50,31 +50,14 @@ export async function applyRuntimeUpgrade(
   admission: UpgradeApplicationAdmission,
 ): Promise<InternalUpgradeExecutionResult> {
   const request = upgradeApplyRequestSchema.parse(structuredClone(input));
-  const planned = await planRuntimeUpgrade(
-    runtime.configService,
-    request.request,
-  );
-  if (planned.result.status !== "ready")
-    throw createWeaverError("REVISION_CONFLICT", "Upgrade plan is stale");
-  await runtime.enterMaintenance();
-  const recomputed = await planRuntimeUpgrade(
-    runtime.configService,
-    request.request,
-  );
-  if (
-    recomputed.result.status !== "ready" ||
-    !samePlan(recomputed.result.plan, planned.result.plan)
-  )
-    throw createWeaverError(
-      "REVISION_CONFLICT",
-      "Upgrade authority changed before persistence",
-    );
+  const prepared = await prepareUpgradeExecution(runtime, request.request);
   return executeNew(
     runtime,
     control,
-    planned.result.plan,
+    prepared.plan,
     admission,
     request.runId,
+    prepared.installed,
   );
 }
 
@@ -84,9 +67,11 @@ async function executeNew(
   plan: InternalUpgradePlan,
   admission: UpgradeApplicationAdmission,
   requestedRunId?: string,
+  installed?: InstalledUpgradeSelection,
 ) {
   const runId = requestedRunId ?? randomUUID();
-  assertWrite(await control.storePlan(plan, control.revision));
+  if (installed === undefined)
+    assertWrite(await control.storePlan(plan, control.revision));
   let journal: InternalRecoveryEnvelope = {
     version: 1,
     runId,
@@ -118,11 +103,29 @@ async function executeNew(
     cursor: cursorFor(plan),
   });
   await persist(control, journal);
-  for (const step of plan.steps)
-    journal = await applyUpgradeStep(runtime, control, plan, journal, step.id);
+  journal = await executeSteps(runtime, control, plan, journal, installed);
   journal = parseJournal({ ...journal, phase: "verifying" });
   await persist(control, journal);
   return activateUpgradePlan(runtime, control, plan, journal, admission);
+}
+
+async function executeSteps(
+  runtime: UpgradeRuntimeHost,
+  control: Awaited<ReturnType<typeof createControlService>>,
+  plan: InternalUpgradePlan,
+  journal: InternalRecoveryEnvelope,
+  installed?: InstalledUpgradeSelection,
+) {
+  for (const [index, step] of plan.steps.entries())
+    journal = await applyUpgradeStep(
+      runtime,
+      control,
+      plan,
+      journal,
+      step.id,
+      index === 0 ? installed?.revalidate : undefined,
+    );
+  return journal;
 }
 
 function controlBinding(
@@ -161,6 +164,7 @@ export async function applyUpgradeStep(
   plan: InternalUpgradePlan,
   journal: InternalRecoveryEnvelope,
   id: string,
+  beforeMutation?: (journal: InternalRecoveryEnvelope) => Promise<void>,
 ): Promise<InternalRecoveryEnvelope> {
   const index = journal.steps.findIndex((step) => step.id === id);
   const step = plan.steps[index];
@@ -172,6 +176,8 @@ export async function applyUpgradeStep(
     steps: journal.steps.map((value, i) => (i === index ? intent : value)),
   });
   await persist(control, journal, intent.intentOperationId);
+  if (beforeMutation) journal = await control.readRecovery(journal.runId);
+  await beforeMutation?.(journal);
   const result = await control.repairStep(journal.runId, id, control.revision);
   assertWrite(result);
   const receipt = await readStepReceipt(runtime, step, intent.operationId);

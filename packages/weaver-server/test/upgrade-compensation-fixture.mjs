@@ -12,6 +12,7 @@ import {
   hostForControl,
 } from "../src/core/config-service-internal.ts";
 import { openWeaverRuntime } from "../src/server-runtime.ts";
+import { rawRuntimeProviders } from "./upgrade-test-providers.mjs";
 import { createStandaloneFixture } from "./standalone-fixture.ts";
 import {
   assertLifecycle,
@@ -291,7 +292,7 @@ export async function persistCompensationIntent(runtime, runId, counters) {
     "maintenance",
     ({ write }) =>
       write(`_weaver.upgrades.journal.${runId}`, journal, {
-        expectedRevision: runtime.configService.revision,
+        expectedRevision: hostForControl(runtime.configService).authority.revision(),
         operationId: journalOperationId,
       }),
   );
@@ -307,7 +308,7 @@ export async function rawJournal(runtime, runId) {
 }
 
 export function provider(runtime, id) {
-  const found = runtime.configService.providers.find((item) => item.id === id);
+  const found = rawRuntimeProviders(runtime).find((item) => item.id === id);
   assert.ok(found?.authority);
   return found;
 }

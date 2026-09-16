@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { open, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { hostForControl } from "../src/core/config-service-internal.ts";
 import {
   assertSanitizedSurfaces,
   authoritySnapshot,
@@ -72,8 +73,7 @@ for (const [name, code, message, corrupt] of authorityRows)
       );
       const after = await rawAuthorityProof(path, name);
       assert.notDeepEqual(await durableFileSnapshot(fixture), rawInitial);
-      const control = provider(runtime, "control");
-      const journal = onlyJournal(await control.authority.readLayer(control.layer));
+      const journal = onlyJournal(await controlAuthoritySnapshot(runtime));
       assert.equal(journal.phase, "verifying");
       const preparedJournal = onlyJournal(prepared.control);
       assertExactDurableDeltas(initial, prepared, preparedJournal);
@@ -98,6 +98,12 @@ async function rawAuthorityProof(path, name) {
   return readFile(path, "utf8");
 }
 
+async function controlAuthoritySnapshot(runtime) {
+  const host = hostForControl(runtime.configService);
+  const control = host.pipeline.controlProvider;
+  return control.authority.readLayer(control.layer);
+}
+
 async function readEnvelope(path) {
   return JSON.parse(await readFile(path, "utf8"));
 }
@@ -109,12 +115,6 @@ async function syncDirectory(path) {
   } finally {
     await handle.close();
   }
-}
-
-function provider(runtime, id) {
-  const result = runtime.configService.providers.find((item) => item.id === id);
-  assert.ok(result?.authority);
-  return result;
 }
 
 function revision(envelope) {

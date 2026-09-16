@@ -40,7 +40,8 @@ export function countingFactories(counters) {
 }
 
 export function observeRuntime(t, runtime, counters, recordCommit) {
-  const unsubscribe = hostForControl(runtime.configService).runtime.onDelta(
+  const host = hostForControl(runtime.configService);
+  const unsubscribe = host.runtime.onDelta(
     () => counters.publicEvents++,
   );
   counters.publicSubscriptions++;
@@ -48,7 +49,7 @@ export function observeRuntime(t, runtime, counters, recordCommit) {
   let closed = false;
   return {
     snapshot: () => ({
-      revision: runtime.configService.revision,
+      revision: host.authority.revision(),
       events: counters.publicEvents,
       subscriptions: counters.publicSubscriptions,
       providerSubscriptions: counters.providerSubscriptions,
@@ -96,14 +97,22 @@ export function assertNoLifecycleLeaks(run, counters) {
 }
 
 function countRuntimeWrites(t, runtime, recordCommit) {
-  for (const item of runtime.configService.providers) {
-    const commit = item.authority.commitLayer.bind(item.authority);
-    t.mock.method(item.authority, "commitLayer", async (request, handle) => {
-      const result = await commit(request, handle);
-      recordCommit(item, result, request);
-      return result;
-    });
-  }
+  const host = hostForControl(runtime.configService);
+  const commit = host.authority.commit.bind(host.authority);
+  t.mock.method(
+    host.authority,
+    "commit",
+    async (provider, layer, key, value, remove, operationId) => {
+      const outcome = await commit(provider, layer, key, value, remove, operationId);
+      recordCommit(provider, outcome.result, {
+        operationId: operationId ?? outcome.snapshot?.lastCommit?.operationId,
+        mutation: remove
+          ? { action: "remove", key }
+          : { action: "set", key, value },
+      });
+      return outcome;
+    },
+  );
 }
 
 function instrumentProvider(provider, counters) {

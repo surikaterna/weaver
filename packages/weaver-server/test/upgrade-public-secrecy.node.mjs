@@ -195,7 +195,9 @@ test("REST upgrade envelopes preserve statuses without revision or cache authori
 
 async function blockedRecovery(runtime, fixture, message) {
   await runtime.configService.set("platform", "svc.keep", true);
-  const control = runtime.configService.providers.find((item) => item.id === "control");
+  const control = hostForControl(runtime.configService).providers.find(
+    (item) => item.id === "control",
+  );
   const original = control.authority.commitLayer.bind(control.authority);
   mock.method(control.authority, "commitLayer", async (request, handle) => {
     if (request.mutation.action === "set" && request.mutation.value?.activation?.status === "complete")
