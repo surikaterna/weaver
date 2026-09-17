@@ -1,3 +1,5 @@
+import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
+
 const MAX_ARRAY_INDEX = 4_294_967_294;
 
 export type SchemaPatchResult =
@@ -23,17 +25,19 @@ export function buildSchemaPatch(
   baseValue: unknown,
   segments: readonly string[],
   value: unknown,
+  schema: ConfigurationPropertySchema | undefined,
 ): SchemaPatchResult {
   const root = baseValue === undefined ? {} : clonePatchValue(baseValue);
   let current: unknown = root;
+  let schemas = schema === undefined ? undefined : [schema];
   for (let position = 0; position < segments.length; position++) {
     const segment = segments[position];
     if (segment === undefined) continue;
     const final = position === segments.length - 1;
-    const nextSegment = segments[position + 1];
+    schemas = resolvePatchMemberSchemas(schemas, segment);
     const result = Array.isArray(current)
-      ? patchArray(current, segment, nextSegment, value, final)
-      : patchObject(current, segment, nextSegment, value, final);
+      ? patchArray(current, segment, schemas, value, final)
+      : patchObject(current, segment, schemas, value, final);
     if (!result.success) return result;
     current = result.next;
   }
@@ -57,7 +61,7 @@ function clonePatchValue(value: unknown): unknown {
     if (frame === undefined) continue;
     for (const [key, member] of Object.entries(frame.source)) {
       const cloned = cloneMember(member, clones, pending);
-      Reflect.set(frame.target, key, cloned);
+      defineOwnDataProperty(frame.target, key, cloned);
     }
   }
   return root;
@@ -88,7 +92,7 @@ type StepResult =
 function patchArray(
   current: unknown[],
   segment: string,
-  nextSegment: string | undefined,
+  schemas: readonly ConfigurationPropertySchema[] | undefined,
   value: unknown,
   final: boolean,
 ): StepResult {
@@ -109,7 +113,7 @@ function patchArray(
     else current[index] = value;
     return { success: true, next: value };
   }
-  const next = current[index] ?? createContainer(nextSegment);
+  const next = current[index] ?? createContainer(schemas);
   if (index === current.length) current.push(next);
   else current[index] = next;
   return { success: true, next };
@@ -118,7 +122,7 @@ function patchArray(
 function patchObject(
   current: unknown,
   segment: string,
-  nextSegment: string | undefined,
+  schemas: readonly ConfigurationPropertySchema[] | undefined,
   value: unknown,
   final: boolean,
 ): StepResult {
@@ -126,7 +130,7 @@ function patchObject(
     return { success: false, reason: "invalid-container", segment };
   }
   if (final) {
-    current[segment] = value;
+    defineOwnDataProperty(current, segment, value);
     return { success: true, next: value };
   }
   const existing = Object.hasOwn(current, segment)
@@ -135,17 +139,79 @@ function patchObject(
   const next =
     isRecord(existing) || Array.isArray(existing)
       ? existing
-      : createContainer(nextSegment);
-  current[segment] = next;
+      : createContainer(schemas);
+  defineOwnDataProperty(current, segment, next);
   return { success: true, next };
 }
 
 function createContainer(
-  nextSegment: string | undefined,
+  schemas: readonly ConfigurationPropertySchema[] | undefined,
 ): unknown[] | Record<string, unknown> {
-  return nextSegment !== undefined && parseArrayIndex(nextSegment) !== undefined
+  return schemas?.length !== 0 && schemas?.every(allowsArrayOnly) === true
     ? []
     : {};
+}
+
+function resolvePatchMemberSchemas(
+  schemas: readonly ConfigurationPropertySchema[] | undefined,
+  segment: string,
+): ConfigurationPropertySchema[] | undefined {
+  if (schemas === undefined) return undefined;
+  return schemas.flatMap((schema) => {
+    if (allowsType(schema, "object"))
+      return objectMemberSchemas(schema, segment);
+    if (!allowsType(schema, "array")) return [];
+    const items = schema.items;
+    if (items === undefined) return [];
+    if (!Array.isArray(items)) return [items];
+    const item = items[Number(segment)];
+    return item === undefined ? [] : [item];
+  });
+}
+
+function objectMemberSchemas(
+  schema: ConfigurationPropertySchema,
+  key: string,
+): ConfigurationPropertySchema[] {
+  const schemas: ConfigurationPropertySchema[] = [];
+  const declared = schema.properties?.[key];
+  if (declared !== undefined) schemas.push(declared);
+  for (const [pattern, memberSchema] of Object.entries(
+    schema.patternProperties ?? {},
+  )) {
+    if (new RegExp(pattern).test(key)) schemas.push(memberSchema);
+  }
+  if (schemas.length > 0) return schemas;
+  const additional = schema.additionalProperties;
+  return additional !== null && typeof additional === "object"
+    ? [additional]
+    : [];
+}
+
+function allowsArrayOnly(schema: ConfigurationPropertySchema): boolean {
+  return allowsType(schema, "array") && !allowsType(schema, "object");
+}
+
+function allowsType(
+  schema: ConfigurationPropertySchema,
+  type: "array" | "object",
+): boolean {
+  return Array.isArray(schema.type)
+    ? schema.type.includes(type)
+    : schema.type === type;
+}
+
+function defineOwnDataProperty(
+  target: CloneContainer,
+  key: string,
+  value: unknown,
+): void {
+  Reflect.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  });
 }
 
 function parseArrayIndex(segment: string): number | undefined {
