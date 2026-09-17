@@ -2,6 +2,7 @@ import { runIndependentCleanup } from "@weaver-conf/config-engine";
 import {
   createWeaverError,
   type InternalInfrastructureGeneration,
+  type InternalRecoveryEnvelope,
   type InternalUpgradePlanRequest,
   type MaintenanceStatus,
   maintenanceStatusSchema,
@@ -9,6 +10,7 @@ import {
   type UpgradeApplyRequest,
   type UpgradeExecutionResult,
   type UpgradeRecoveryRequest,
+  WeaverErrorInstance,
   type WeaverRuntimeState,
   weaverRuntimeStatusSchema,
 } from "@weaver-conf/config-types";
@@ -40,6 +42,7 @@ import {
 import {
   type InternalUpgradeExecutionResult,
   publicUpgradeEffects,
+  publicUpgradeError,
   publicUpgradeFailure,
   publicUpgradeResult,
 } from "./core/public-upgrade-status";
@@ -191,18 +194,26 @@ export class WeaverRuntime {
     return this.publicExecution(() => this.#recoverUpgrade(request));
   }
   maintenanceStatus(): MaintenanceStatus {
-    const journals = Object.values(
-      controlProjection(this.configService).prepared().configuration.upgrades
-        .journal,
-    ).filter(
-      (journal) => !["completed", "compensated"].includes(journal.phase),
-    );
+    let state: WeaverRuntimeState;
+    let journals: InternalRecoveryEnvelope[];
+    try {
+      state = this.state;
+      journals = Object.values(
+        controlProjection(this.configService).prepared().configuration.upgrades
+          .journal,
+      ).filter(
+        (journal) => !["completed", "compensated"].includes(journal.phase),
+      );
+    } catch (error) {
+      if (isUnknownCommit(error)) throw publicUpgradeError(error);
+      throw error;
+    }
     const active = journals.at(-1);
     return maintenanceStatusSchema.parse({
       version: 1,
-      state: this.state,
-      ready: this.state === "ready",
-      ...(this.state === "failed"
+      state,
+      ready: state === "ready",
+      ...(state === "failed"
         ? { failure: publicMaintenanceFailure("storage") }
         : {}),
       ...(active
@@ -233,11 +244,7 @@ export class WeaverRuntime {
       } catch {
         /* Diagnostics cannot replace the sanitized public failure. */
       }
-      const failure = publicUpgradeFailure(error);
-      throw createWeaverError(publicErrorCode(error), failure.message, {
-        maintenanceCode: failure.code,
-        category: failure.category,
-      });
+      throw publicUpgradeError(error);
     }
   }
   async enterMaintenance(
@@ -376,23 +383,9 @@ export async function openWeaverRuntime(
   }
 }
 
-function publicErrorCode(error: unknown) {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof error.code === "string"
-  )
-    return error.code === "REVISION_CONFLICT"
-      ? ("REVISION_CONFLICT" as const)
-      : error.code === "VALIDATION_ERROR"
-        ? ("VALIDATION_ERROR" as const)
-        : error.code === "UNSUPPORTED_AUTHORITY"
-          ? ("UNSUPPORTED_AUTHORITY" as const)
-          : error.code === "COMMIT_OUTCOME_UNKNOWN"
-            ? ("COMMIT_OUTCOME_UNKNOWN" as const)
-            : error.code === "FORBIDDEN"
-              ? ("FORBIDDEN" as const)
-              : ("INTERNAL_ERROR" as const);
-  return "INTERNAL_ERROR" as const;
+function isUnknownCommit(error: unknown): boolean {
+  return (
+    error instanceof WeaverErrorInstance &&
+    error.code === "COMMIT_OUTCOME_UNKNOWN"
+  );
 }

@@ -7,6 +7,7 @@ import {
   type UpgradeExecutionResult,
   upgradeExecutionResultSchema,
   type WeaverErrorCode,
+  WeaverErrorInstance,
 } from "@weaver-conf/config-types";
 
 export interface InternalUpgradeExecutionResult {
@@ -50,6 +51,14 @@ export function publicUpgradeFailure(
   fallback: PublicMaintenanceFailureCode = "internal",
 ) {
   return publicMaintenanceFailure(errorCode(error) ?? fallback);
+}
+
+export function publicUpgradeError(error: unknown): WeaverErrorInstance {
+  const failure = publicUpgradeFailure(error);
+  return new WeaverErrorInstance(publicErrorCode(error), failure.message, {
+    maintenanceCode: failure.code,
+    category: failure.category,
+  });
 }
 
 export function publicUpgradeEffects(
@@ -124,3 +133,16 @@ const publicCodeByWeaverCode: Readonly<
   PROVIDER_LOAD_FAILED: "storage",
   WRITE_ERROR: "storage",
 };
+
+function publicErrorCode(error: unknown): WeaverErrorCode {
+  if (!isErrorWithCode(error)) return "INTERNAL_ERROR";
+  if (
+    error.code === "REVISION_CONFLICT" ||
+    error.code === "VALIDATION_ERROR" ||
+    error.code === "UNSUPPORTED_AUTHORITY" ||
+    error.code === "COMMIT_OUTCOME_UNKNOWN" ||
+    error.code === "FORBIDDEN"
+  )
+    return error.code;
+  return "INTERNAL_ERROR";
+}

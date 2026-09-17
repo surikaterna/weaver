@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import {
   canonicalInternalJson,
   createWeaverError,
@@ -11,12 +12,17 @@ import { initializeWeaver } from "../src/bootstrap/initialize.ts";
 import { initialRegistrationRecord } from "../src/bootstrap/initial-registrations.ts";
 import { controlProjection } from "../src/core/config-service-internal.ts";
 import { hostForControl } from "../src/core/config-service-internal.ts";
-import { internalUpgradeResult, publicUpgradeResult } from "../src/core/public-upgrade-status.ts";
+import {
+  internalUpgradeResult,
+  publicUpgradeError,
+  publicUpgradeResult,
+} from "../src/core/public-upgrade-status.ts";
 import { openWeaverRuntime } from "../src/server-runtime.ts";
 import { createServerRest } from "../src/server-transport.ts";
 import { publicUpgradeCliError, publicUpgradeOutput } from "../src/cli-upgrade.ts";
 import { buildUpgradeRoutes } from "../src/transport/rest-upgrade-routes.ts";
 import { createStandaloneFixture } from "./standalone-fixture.ts";
+import { rawRuntimeProviders } from "./upgrade-test-providers.mjs";
 
 const raw = [
   "/home/user/secret",
@@ -134,6 +140,74 @@ test("upgrade CLI status, apply, recover and stderr surfaces serialize only publ
   const status = { version: 1, state: "failed", ready: false, failure: blocked.failure };
   for (const value of [status, blocked, blocked]) assertPublic(publicUpgradeOutput(value));
   assertPublic(publicUpgradeCliError());
+});
+
+test("durable uncertain status is sanitized across public surfaces", { timeout: 30_000 }, async () => {
+  const fixture = await createStandaloneFixture({ schemas: { svc: sourceSchema } });
+  let runtime;
+  try {
+    await initializeWeaver(fixture.seed, fixture.request, fixture.administrator, { credentials: fixture.credentials });
+    runtime = await openWeaverRuntime(fixture.seed, { credentials: fixture.credentials });
+    assert.equal((await runtime.configService.set("platform", "svc.keep", true)).success, true);
+    const control = rawRuntimeProviders(runtime).find((item) => item.id === "control");
+    assert.ok(control);
+    const commit = control.authority.commitLayer.bind(control.authority);
+    const diagnostic = ["hostile-uncertain-status-7d9a", fixture.directory, "provider:control", "inventory:private"].join("|");
+    let committedVerifying = false;
+    mock.method(control.authority, "commitLayer", async (request, handle) => {
+      const result = await commit(request, handle);
+      if (!committedVerifying && request.mutation.action === "set" && request.mutation.value?.phase === "verifying") {
+        committedVerifying = true;
+        const hostile = new Error(diagnostic, { cause: { providerId: "control" } });
+        hostile.details = { providerId: "control", filePath: fixture.seed.store.locator.filePath };
+        throw hostile;
+      }
+      return result;
+    });
+    const applyError = await captureAsyncError(runtime.applyUpgrade({ version: 1, request: planRequest(runtime, fixture.request) }));
+    assert.equal(committedVerifying, true);
+    assertExactUnknown(applyError);
+
+    const statusErrors = [captureSyncError(() => runtime.maintenanceStatus()), captureSyncError(() => runtime.maintenanceStatus())];
+    for (const error of statusErrors) assertExactUnknown(error);
+    const route = buildUpgradeRoutes(runtime).find((item) => item.path === "/v1/admin/upgrades/status");
+    assert.ok(route);
+    const response = await route.handler({ authContext: { isAdmin: true } });
+    assert.deepEqual(response, {
+      status: 503,
+      body: { data: null, error: { code: "COMMIT_OUTCOME_UNKNOWN", message: "Upgrade outcome is uncertain; operator action is required" } },
+      headers: { "Content-Type": "application/json" },
+    });
+    const cli = publicUpgradeCliError();
+    assert.deepEqual(cli, { error: { code: "internal", category: "internal", message: "Upgrade could not be completed" } });
+
+    const envelope = JSON.parse(await readFile(fixture.seed.store.locator.filePath, "utf8"));
+    const journals = Object.values(envelope.entries._weaver.upgrades.journal);
+    assert.equal(journals.length, 1);
+    assert.equal(journals[0].phase, "verifying");
+    const forbidden = privateFragments(fixture, journals[0], diagnostic);
+    const surfaces = [applyError, ...statusErrors, response, cli];
+    for (const value of surfaces) {
+      const serialized = serializeSurface(value);
+      assertSecretFree(serialized, forbidden);
+      assertSecretFree(JSON.parse(serialized), forbidden);
+    }
+  } finally {
+    mock.restoreAll();
+    await runtime?.close();
+    await fixture.dispose();
+  }
+});
+
+test("public upgrade errors retain approved non-unknown codes only", () => {
+  const source = createWeaverError("REVISION_CONFLICT", raw, { providerId: raw });
+  const error = publicUpgradeError(source);
+  assert.deepEqual(
+    { code: error.code, message: error.message, details: error.details },
+    { code: "REVISION_CONFLICT", message: "Upgrade plan is no longer current", details: { maintenanceCode: "stale-plan", category: "conflict" } },
+  );
+  assert.equal(error.cause, undefined);
+  assert.equal(error.message.includes(raw), false);
 });
 
 test("REST upgrade envelopes preserve statuses without revision or cache authority", async () => {
@@ -263,6 +337,52 @@ function assertPublic(value) {
   for (const fragment of ["/home/user/secret", "mongodb://", "user:pass", "operator-token", "SecretReference", "\u001b", "stack\\nline"])
     assert.equal(text.includes(fragment), false, fragment);
   assert.ok(text.length < 4096);
+}
+
+function assertExactUnknown(error) {
+  assert.equal(error.code, "COMMIT_OUTCOME_UNKNOWN");
+  assert.equal(error.message, "Upgrade outcome is uncertain; operator action is required");
+  assert.deepEqual(error.details, { maintenanceCode: "unknown-commit", category: "uncertainty" });
+  assert.equal(error.cause, undefined);
+}
+
+function assertSecretFree(value, forbidden) {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  for (const fragment of forbidden) assert.equal(text.includes(fragment), false);
+}
+
+function serializeSurface(value) {
+  return JSON.stringify(value instanceof Error
+    ? { name: value.name, code: value.code, message: value.message, details: value.details, cause: value.cause, stack: value.stack }
+    : value);
+}
+
+function privateFragments(fixture, journal, diagnostic) {
+  const revisions = [journal.control?.revision, ...journal.sourceRevisions,
+    ...journal.steps.flatMap((step) => [step.preRevision, step.receipt?.revision])];
+  return [diagnostic, "hostile-uncertain-status-7d9a", "inventory:private",
+    fixture.directory, fixture.seed.store.locator.filePath,
+    ...fixture.request.generation.providers.map((provider) => provider.id),
+    journal.runId, journal.planId, journal.nonce, journal.aggregateDigest,
+    ...journal.steps.flatMap((step) => [step.operationId, step.receipt?.operationId, step.receipt?.mutationDigest]),
+    ...revisions.map((revision) => JSON.stringify(revision)), JSON.stringify(journal)]
+    .filter((value) => typeof value === "string" && value.length > 3);
+}
+
+async function captureAsyncError(promise) {
+  return promise.then(
+    () => assert.fail("expected public upgrade rejection"),
+    (error) => error,
+  );
+}
+
+function captureSyncError(operation) {
+  try {
+    operation();
+  } catch (error) {
+    return error;
+  }
+  return assert.fail("expected public upgrade rejection");
 }
 
 function planRequest(runtime, initialization) {
