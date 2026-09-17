@@ -27,7 +27,6 @@ const boundaries = [
   ["after-activation", "after-activation"],
   ["final-read", "final-read"],
 ];
-
 for (const [name, boundary] of boundaries)
   test(`durable application boundary ${name} is fenced`, async (t) => {
     await withRuntime(t, async ({ runtime, initialization, directory }) => {
@@ -77,16 +76,17 @@ function installRace(t, fixture) {
   if (fixture.boundary === "final-read") wrapFinalRead(t, fixture, state);
   return state;
 }
-
 function wrapCommits(t, fixture, state) {
   for (const candidate of rawRuntimeProviders(fixture.runtime)) {
     const commit = candidate.authority.commitLayer.bind(candidate.authority);
     t.mock.method(candidate.authority, "commitLayer", async (request, handle) => {
       const kind = commitKind(candidate.id, request);
-      fixture.effects.record(candidate.id, kind, request.operationId);
       if (fixture.boundary === "before-intent" && kind === "intent")
         state.injected = await commitExternalData(fixture);
-      const result = await commit(request, handle);
+      const result = await observeSuccessfulOperation(
+        () => commit(request, handle),
+        () => fixture.effects.record(candidate.id, kind, request.operationId),
+      );
       if (!result.success) return result;
       if (kind === "completion") fixture.effects.markCompleted();
       if (
@@ -99,7 +99,6 @@ function wrapCommits(t, fixture, state) {
     });
   }
 }
-
 function wrapFinalRead(t, fixture, state) {
   let releaseControlRead;
   const controlReadComplete = new Promise((resolve) => {
@@ -124,7 +123,7 @@ function wrapFinalRead(t, fixture, state) {
     if (state.postCompleteReads === 2) {
       await controlReadComplete;
       state.attempt = {
-        ...(await attemptCompetingWrite(fixture.directory)),
+        ...(await attemptCompetingWrite(t, fixture.directory)),
         atRead: state.postCompleteReads,
       };
     }
@@ -147,8 +146,7 @@ async function commitExternalData({ host, platform, boundary }) {
   const after = await platform.authority.readLayer(platform.layer);
   return { operationId, before, after };
 }
-
-async function attemptCompetingWrite(directory) {
+async function attemptCompetingWrite(t, directory) {
   const competing = createFileSystemStorageProvider({
     id: "competing-platform",
     layer: "platform",
@@ -156,17 +154,23 @@ async function attemptCompetingWrite(directory) {
     writable: true,
     authority: { environment: "dev", initialize: false },
   });
+  const successfulRecords = [];
+  const write = t.mock.method(competing, "write");
   const before = await competing.authority.readLayer("platform");
-  const result = await competing.write("svc.keep", false);
+  const result = await observeSuccessfulOperation(
+    () => competing.write("svc.keep", false),
+    () => successfulRecords.push({ providerId: "competing-platform", kind: "unexpected-success" }),
+  );
   const after = await competing.authority.readLayer("platform");
-  return { before, result, after };
+  return { before, result, after, attempts: write.mock.callCount(), successfulRecords };
 }
-
 function assertDurableRace(boundary, before, after, race) {
   if (boundary === "final-read") {
     assert.equal(race.attempt.atRead, 2);
+    assert.equal(race.attempt.attempts, 1);
     assert.equal(race.attempt.result.success, false);
     assert.equal(race.attempt.result.error?.code, "WRITER_CONFLICT");
+    assert.deepEqual(race.attempt.successfulRecords, []);
     assert.deepEqual(race.attempt.after, race.attempt.before);
     assert.deepEqual(after.platform, race.attempt.before);
   } else {
@@ -189,7 +193,6 @@ function assertDurableRace(boundary, before, after, race) {
   assert.equal(journals.length, 1);
   assertJournalEvidence(boundary, journals[0], after);
 }
-
 function assertJournalEvidence(boundary, journal, authorities) {
   assert.equal(journal.steps.length, 1);
   assert.equal(journal.steps[0].status, "complete");
@@ -213,7 +216,6 @@ function assertJournalEvidence(boundary, journal, authorities) {
     journal.activation.receipt.revision,
   );
 }
-
 function assertExactEffects(boundary, effects) {
   assert.deepEqual(effects.commits, {
     control: { other: 6, intent: 1, activation: isEarly(boundary) ? 0 : 1,
@@ -229,7 +231,6 @@ function assertExactEffects(boundary, effects) {
     providerSubscriptions: 0,
   });
 }
-
 async function assertRejectedRecoveryIsEffectFree(runtime, rejected, effects) {
   const runId = Object.keys(rejected.control.entries._weaver.upgrades.journal)[0];
   const before = effects.snapshot();
@@ -240,7 +241,6 @@ async function assertRejectedRecoveryIsEffectFree(runtime, rejected, effects) {
   assert.deepEqual(after, rejected);
   await assertNonready(runtime);
 }
-
 async function assertCompletedRecoveryIsEffectFree(runtime, completed, effects) {
   const runId = Object.keys(completed.control.entries._weaver.upgrades.journal)[0];
   const before = effects.snapshot();
@@ -252,13 +252,11 @@ async function assertCompletedRecoveryIsEffectFree(runtime, completed, effects) 
   assert.equal(runtime.state, "ready");
   assert.deepEqual(await runtime.configService.get("svc"), { keep: true, added: "planned" });
 }
-
 async function assertNonready(runtime) {
   assert.notEqual(runtime.state, "ready");
   assert.equal(runtime.maintenanceStatus().ready, false);
   await assert.rejects(runtime.configService.get("svc"), { code: "MAINTENANCE" });
 }
-
 function observeEffects(t, runtime) {
   const host = hostForControl(runtime.configService);
   const events = [];
@@ -283,7 +281,6 @@ function observeEffects(t, runtime) {
     close: unsubscribe,
   };
 }
-
 function effectSnapshot(records, events, install, open, resume, subscriptions, providerSubscriptions) {
   const count = (providerId, kind) =>
     records.filter((item) => item.providerId === providerId && item.kind === kind).length;
@@ -301,6 +298,11 @@ function effectSnapshot(records, events, install, open, resume, subscriptions, p
   };
 }
 
+async function observeSuccessfulOperation(operation, record) {
+  const result = await operation();
+  if (result.success === true) record();
+  return result;
+}
 function commitKind(providerId, request) {
   if (providerId !== "control")
     return request.operationId.startsWith("00000000-0000-4000-8000-00000000010")
@@ -318,14 +320,12 @@ function commitKind(providerId, request) {
   if (activation?.status !== "intent") return "other";
   return request.operationId === activation.operationId ? "after-activation" : "intent";
 }
-
 async function rawAuthorities(platform, control) {
   return {
     platform: await platform.authority.readLayer(platform.layer),
     control: await control.authority.readLayer(control.layer),
   };
 }
-
 function assertRevisionAdvance(before, after, count) {
   assert.equal(after.storeId, before.storeId);
   assert.equal(after.environment, before.environment);
@@ -333,7 +333,6 @@ function assertRevisionAdvance(before, after, count) {
   assert.equal(after.epoch, before.epoch);
   assert.equal(BigInt(after.sequence), BigInt(before.sequence) + count);
 }
-
 function revision(envelope) {
   const { storeId, environment, layer, epoch, sequence } = envelope;
   return { storeId, environment, layer, epoch, sequence };
