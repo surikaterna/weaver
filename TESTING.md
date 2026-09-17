@@ -24,7 +24,19 @@ Use this location for:
 
 ## Running tests
 
-Both patterns are discovered and executed by `pnpm run test`.
+`pnpm run test` at the repository root is the canonical, non-forced gate.
+Turborepo runs at concurrency 8, while each server partition runs its assigned
+files serially. Jenkins builds first in the same workspace, so this gate reuses
+the successful server build instead of forcing a second DTS build.
+The server manifest must assign every discovered Node and Vitest file exactly
+once; missing, stale, duplicate, wrong-suite, unknown, and empty assignments
+fail before a partition starts.
+
+Run one server partition directly with, for example,
+`pnpm --filter @weaver-conf/weaver-server run test:core-pipeline`. The CLI
+partition alone depends on the built server executable; source-based Node and
+Vitest partitions depend only on dependency-package builds. Partitioning must
+not be used to skip tests, increase timeouts, or delete coverage.
 
 ## Guidance for new tests
 

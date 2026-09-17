@@ -22,6 +22,7 @@ import {
 import { transitionDigest } from "../src/core/schema-transition.ts";
 import { activateUpgradePlan } from "../src/core/upgrade-executor.ts";
 import { onlyJournal } from "./upgrade-final-matrix-fixture.mjs";
+import { rawRuntimeProviders } from "./upgrade-test-providers.mjs";
 
 export async function prepareDurableFinalFailure(
   fixture,
@@ -126,7 +127,7 @@ function simulateStep(envelopes, step) {
 
 async function readEnvelopes(runtime) {
   const result = new Map();
-  for (const candidate of runtime.configService.providers) {
+  for (const candidate of rawRuntimeProviders(runtime)) {
     const inventory = await candidate.authority.inventory();
     for (const revision of inventory.revisions)
       result.set(
@@ -138,9 +139,9 @@ async function readEnvelopes(runtime) {
 }
 
 async function storePlan(runtime, plan) {
-  const result = await controlTransaction(runtime.configService, "maintenance", ({ write }) =>
+  const result = await controlTransaction(runtime.configService, "maintenance", ({ revision, write }) =>
     write(`_weaver.upgrades.plans.${plan.id}`, plan, {
-      expectedRevision: runtime.configService.revision,
+      expectedRevision: revision,
     }));
   assert.equal(result.success, true);
 }
@@ -235,9 +236,9 @@ async function replaceJournal(runtime, previous, next) {
 }
 
 async function writeJournal(runtime, journal) {
-  const result = await controlTransaction(runtime.configService, "maintenance", ({ write }) =>
+  const result = await controlTransaction(runtime.configService, "maintenance", ({ revision, write }) =>
     write(`_weaver.upgrades.journal.${journal.runId}`, journal, {
-      expectedRevision: runtime.configService.revision,
+      expectedRevision: revision,
       ...(journal.control ? { operationId: journal.control.operationId } : {}),
     }));
   assert.equal(result.success, true);
@@ -260,7 +261,7 @@ function provider(runtime, id) {
 }
 
 function providerForId(runtime, id) {
-  const result = runtime.configService.providers.find((item) => item.id === id);
+  const result = rawRuntimeProviders(runtime).find((item) => item.id === id);
   assert.ok(result?.authority);
   return result;
 }

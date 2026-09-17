@@ -17,7 +17,7 @@
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",
     "format": "biome check --write .",
-    "test": "turbo test",
+    "test": "turbo test --concurrency=8",
     "docs": "typedoc",
     "docs:build": "turbo build && typedoc && cp -r apps/demo/dist/* docs-dist/",
     "changeset": "changeset",

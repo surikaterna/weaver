@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { canonicalInternalJson, internalRegistrationId } from "@weaver-conf/config-types";
 import { initializeWeaver } from "../src/bootstrap/initialize.ts";
 import { initialRegistrationRecord } from "../src/bootstrap/initial-registrations.ts";
@@ -155,7 +156,7 @@ test("data-committed recovery remains closed without ephemeral final context evi
   }
 });
 
-test("unrecorded schema-valid final revision blocks before activation", async () => {
+test("post-control-write data conflict reports uncertainty before activation", async () => {
   const fixture = await createStandaloneFixture({ schemas: { svc: sourceSchema } });
   let runtime;
   try {
@@ -165,6 +166,7 @@ test("unrecorded schema-valid final revision blocks before activation", async ()
     const data = rawRuntimeProviders(runtime).find((item) => item.id === "platform");
     const control = rawRuntimeProviders(runtime).find((item) => item.id === "control");
     const original = control.authority.commitLayer.bind(control.authority);
+    let platformBefore;
     let injected = false;
     let activations = 0;
     mock.method(control.authority, "commitLayer", async (request, handle) => {
@@ -172,14 +174,25 @@ test("unrecorded schema-valid final revision blocks before activation", async ()
       const result = await original(request, handle);
       if (!injected && request.mutation.action === "set" && request.mutation.value?.phase === "verifying") {
         injected = true;
-        assert.equal((await data.write("svc", { keep: true, added: "unrecorded" })).success, true);
+        platformBefore = structuredClone(await readFixtureEnvelope(fixture, "platform"));
+        const nested = await data.write("svc", { keep: true, added: "unrecorded" });
+        assert.equal(nested.success, false);
+        assert.equal(nested.error.code, "WRITER_CONFLICT");
+        throw new Error("synthetic known post-control-write failure");
       }
       return result;
     });
-    await assert.rejects(runtime.applyUpgrade({ version: 1, request: planRequest(runtime, fixture.request) }), { code: "REVISION_CONFLICT" });
+    const error = await publicRejection(
+      runtime.applyUpgrade({ version: 1, request: planRequest(runtime, fixture.request) }),
+    );
+    assertUncertainPublicError(error);
     assert.equal(injected, true);
+    assert.ok(platformBefore);
     assert.equal(activations, 0);
-    assert.equal(runtime.state, "maintenance");
+    const platformAfter = await readFixtureEnvelope(fixture, "platform");
+    assert.deepEqual(platformAfter, platformBefore);
+    assert.equal(canonicalInternalJson(platformAfter), canonicalInternalJson(platformBefore));
+    await assertVerifyingState(runtime, fixture);
   } finally {
     mock.restoreAll();
     await runtime?.close();
@@ -187,7 +200,7 @@ test("unrecorded schema-valid final revision blocks before activation", async ()
   }
 });
 
-test("unrecorded control self-write blocks before activation", async () => {
+test("post-control-write control authority divergence reports uncertainty", async () => {
   const fixture = await createStandaloneFixture({ schemas: { svc: sourceSchema } });
   let runtime;
   try {
@@ -216,15 +229,63 @@ test("unrecorded control self-write blocks before activation", async () => {
       const envelope = await originalRead(layer);
       return injected ? { ...envelope, sequence: String(BigInt(envelope.sequence) + 8n), entries: { ...envelope.entries, tampered: true } } : envelope;
     });
-    await assert.rejects(runtime.applyUpgrade({ version: 1, request: planRequest(runtime, fixture.request) }), { code: "REVISION_CONFLICT" });
+    const error = await publicRejection(
+      runtime.applyUpgrade({ version: 1, request: planRequest(runtime, fixture.request) }),
+    );
+    assertUncertainPublicError(error);
     assert.equal(injected, true);
     assert.equal(activations, 0);
+    await assertVerifyingState(runtime, fixture);
   } finally {
     mock.restoreAll();
     await runtime?.close();
     await fixture.dispose();
   }
 });
+
+async function publicRejection(promise) {
+  return promise.then(
+    () => assert.fail("expected public upgrade rejection"),
+    (error) => error,
+  );
+}
+
+function assertUncertainPublicError(error) {
+  assert.equal(error.code, "COMMIT_OUTCOME_UNKNOWN");
+  assert.equal(error.message, "Upgrade outcome is uncertain; operator action is required");
+  assert.equal(error.details.maintenanceCode, "unknown-commit");
+  assert.equal(error.details.category, "uncertainty");
+  assert.equal(error.message.includes("synthetic known post-control-write failure"), false);
+}
+
+async function assertVerifyingState(runtime, fixture) {
+  assert.equal(runtime.state, "maintenance");
+  assertUncertainPublicError(captureSyncError(() => runtime.maintenanceStatus()));
+  const envelope = await readFixtureEnvelope(fixture, "control");
+  const journals = Object.values(envelope.entries._weaver.upgrades.journal);
+  assert.equal(journals.length, 1);
+  assert.equal(journals[0].phase, "verifying");
+}
+
+function captureSyncError(operation) {
+  let caught;
+  try {
+    operation();
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught);
+  return caught;
+}
+
+async function readFixtureEnvelope(fixture, providerId) {
+  assert.ok(providerId === "control" || providerId === "platform");
+  const filePath = providerId === "control"
+    ? fixture.seed.store.locator.filePath
+    : fixture.request.generation.providers.find((item) => item.id === providerId)?.options.filePath;
+  assert.equal(typeof filePath, "string");
+  return JSON.parse(await readFile(filePath, "utf8"));
+}
 
 test("upgrade REST routes require admin and remain callable during maintenance", async () => {
   const fixture = await createStandaloneFixture({ schemas: { svc: sourceSchema } });

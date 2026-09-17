@@ -117,7 +117,7 @@ async function assertSuccessApply(t, runtime, initialization) {
   const observed = observeFinalValidation(t, runtime);
   const events = [];
   const unsubscribe = runtime.configService.onDelta((event) => events.push(event));
-  const subscriptions = runtime.configService.providers.flatMap((item) =>
+  const subscriptions = hostForControl(runtime.configService).providers.flatMap((item) =>
     item.onExternalChange ? [t.mock.method(item, "onExternalChange")] : [],
   );
   const lifecycle = lifecycleValues(runtime);

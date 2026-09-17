@@ -136,30 +136,42 @@ describe("standalone HTTP SSE scope ingress (weaver-becr/weaver-s64i)", () => {
   });
 
   describe("stateful scope ingress", () => {
-    afterEach(() => vi.restoreAllMocks());
+    let statefulFixture:
+      | Awaited<ReturnType<typeof startObservedServer>>
+      | undefined;
+
+    beforeEach(async () => {
+      statefulFixture = await startObservedServer();
+    });
+
+    afterEach(async () => {
+      const fixture = statefulFixture;
+      statefulFixture = undefined;
+      try {
+        await fixture?.server.close();
+      } finally {
+        vi.restoreAllMocks();
+      }
+    });
 
     it.each([
       "tenant:unknown",
       "missing:unknown",
       "tenant:acme/region:unknown",
     ])("rejects unprovisioned %s without warming", async (scope) => {
-      const fixture = await startObservedServer();
-      try {
-        const response = await getEvents(fixture.server.port, scope);
-        expectJsonError(response, 404);
-        const body: unknown = await response.json();
-        expect(body).toMatchObject({ error: { code: "SCOPE_NOT_FOUND" } });
-        expect(JSON.stringify(body)).not.toContain("_DATA");
-        expect(fixture.resolve).not.toHaveBeenCalled();
-        expect(fixture.subscribe).not.toHaveBeenCalled();
-        expect(fixture.load.mock.calls).toEqual([]);
-      } finally {
-        await fixture.server.close();
-      }
+      const fixture = getStatefulFixture(statefulFixture);
+      const response = await getEvents(fixture.server.port, scope);
+      expectJsonError(response, 404);
+      const body: unknown = await response.json();
+      expect(body).toMatchObject({ error: { code: "SCOPE_NOT_FOUND" } });
+      expect(JSON.stringify(body)).not.toContain("_DATA");
+      expect(fixture.resolve).not.toHaveBeenCalled();
+      expect(fixture.subscribe).not.toHaveBeenCalled();
+      expect(fixture.load.mock.calls).toEqual([]);
     });
 
     it("maps a typed membership denial to403 before stream headers", async () => {
-      const fixture = await startObservedServer();
+      const fixture = getStatefulFixture(statefulFixture);
       const admission = fixture.service.assertScopeMembership?.bind(
         fixture.service,
       );
@@ -171,17 +183,13 @@ describe("standalone HTTP SSE scope ingress (weaver-becr/weaver-s64i)", () => {
           private: "SECRET",
         }),
       );
-      try {
-        const response = await getEvents(fixture.server.port, "tenant:dynamic");
-        expectJsonError(response, 403);
-        expect(await response.json()).toEqual({
-          error: { code: "FORBIDDEN", message: "Scope access denied" },
-        });
-        expect(fixture.resolve).not.toHaveBeenCalled();
-        expect(fixture.subscribe).not.toHaveBeenCalled();
-      } finally {
-        await fixture.server.close();
-      }
+      const response = await getEvents(fixture.server.port, "tenant:dynamic");
+      expectJsonError(response, 403);
+      expect(await response.json()).toEqual({
+        error: { code: "FORBIDDEN", message: "Scope access denied" },
+      });
+      expect(fixture.resolve).not.toHaveBeenCalled();
+      expect(fixture.subscribe).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -191,37 +199,33 @@ describe("standalone HTTP SSE scope ingress (weaver-becr/weaver-s64i)", () => {
       "tenant:acme/region:eu",
       "tenant:acme,region:eu",
     ])("keeps valid scope=%s snapshots and live updates working", async (scope) => {
-      const fixture = await startObservedServer();
-      try {
-        const response = await getEvents(fixture.server.port, scope);
-        expect(response.status).toBe(200);
-        expect(response.headers.get("content-type")).toBe("text/event-stream");
-        expect(response.headers.get("access-control-allow-origin")).toBe(
-          origin,
+      const fixture = getStatefulFixture(statefulFixture);
+      const response = await getEvents(fixture.server.port, scope);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/event-stream");
+      expect(response.headers.get("access-control-allow-origin")).toBe(
+        origin,
+      );
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Expected SSE response stream");
+      const snapshot = await readEvent(reader);
+      expect(snapshot).toContain("event: snapshot");
+      expect(snapshot).toContain("BASE_DATA");
+      expect(snapshot).not.toContain("OTHER_TENANT_DATA");
+      expect(snapshot).not.toContain("_weaver");
+      if (scope) {
+        expect(snapshot).toContain(
+          scope.includes("dynamic") ? "DYNAMIC_DATA" : "ACME_DATA",
         );
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error("Expected SSE response stream");
-        const snapshot = await readEvent(reader);
-        expect(snapshot).toContain("event: snapshot");
-        expect(snapshot).toContain("BASE_DATA");
-        expect(snapshot).not.toContain("OTHER_TENANT_DATA");
-        expect(snapshot).not.toContain("_weaver");
-        if (scope) {
-          expect(snapshot).toContain(
-            scope.includes("dynamic") ? "DYNAMIC_DATA" : "ACME_DATA",
-          );
-        }
-        await fixture.service.set("platform", "app.base", "UPDATED_BASE");
-        const change = await readEvent(reader);
-        expect(change).toContain("event: change");
-        expect(change).toContain("UPDATED_BASE");
-        if (scope)
-          expect(change).toContain(`"layer":"${scope.replaceAll(",", "/")}"`);
-        if (scope) expect(change).not.toContain("OTHER_TENANT_DATA");
-        await reader.cancel();
-      } finally {
-        await fixture.server.close();
       }
+      await fixture.service.set("platform", "app.base", "UPDATED_BASE");
+      const change = await readEvent(reader);
+      expect(change).toContain("event: change");
+      expect(change).toContain("UPDATED_BASE");
+      if (scope)
+        expect(change).toContain(`"layer":"${scope.replaceAll(",", "/")}"`);
+      if (scope) expect(change).not.toContain("OTHER_TENANT_DATA");
+      await reader.cancel();
     });
   });
 });
@@ -230,5 +234,12 @@ function getSharedFixture(
   fixture: Awaited<ReturnType<typeof startObservedServer>> | undefined,
 ) {
   if (!fixture) throw new Error("Expected shared malformed-scope fixture");
+  return fixture;
+}
+
+function getStatefulFixture(
+  fixture: Awaited<ReturnType<typeof startObservedServer>> | undefined,
+) {
+  if (!fixture) throw new Error("Expected fresh stateful-scope fixture");
   return fixture;
 }
