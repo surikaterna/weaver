@@ -203,9 +203,7 @@ describe("standalone HTTP SSE scope ingress (weaver-becr/weaver-s64i)", () => {
       const response = await getEvents(fixture.server.port, scope);
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toBe("text/event-stream");
-      expect(response.headers.get("access-control-allow-origin")).toBe(
-        origin,
-      );
+      expect(response.headers.get("access-control-allow-origin")).toBe(origin);
       const reader = response.body?.getReader();
       if (!reader) throw new Error("Expected SSE response stream");
       const snapshot = await readEvent(reader);
