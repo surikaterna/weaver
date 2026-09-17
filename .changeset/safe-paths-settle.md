@@ -5,4 +5,4 @@
 "@weaver-conf/weaver-client": patch
 ---
 
-Reject unsafe, malformed, and non-object schema registration paths before mutation, and keep canonical path storage round trips lexically stable.
+Reject unsafe persisted paths and environments plus non-object schema roots before mutation, and expose an enforced runtime schema for lexically stable canonical path round trips.
