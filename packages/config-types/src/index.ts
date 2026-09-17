@@ -203,6 +203,14 @@ export {
   syncStatusSyncingSchema,
   writeResultSchema,
 } from "./schemas-providers";
+export {
+  providerIdPattern,
+  providerIdSchema,
+  publicConfigPathSchema,
+  serviceIdPattern,
+  serviceIdSchema,
+  slotPathSchema,
+} from "./schemas-registration-paths";
 // schemas-schema-registration.ts — Zod schemas for path-first schema registration contracts
 export {
   fragmentSchemaRegistrationRequestSchema,
