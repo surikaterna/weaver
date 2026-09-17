@@ -25,7 +25,6 @@ import {
 import { recoverTerminalUpgrade } from "./terminal-upgrade-recovery";
 import { completeRecoveredActivation } from "./upgrade-activation-completion";
 import type { UpgradeApplicationAdmission } from "./upgrade-application-admission";
-import { compensateUpgrade } from "./upgrade-compensation";
 import { reconstructFinalContexts } from "./upgrade-context-recovery";
 import { activateUpgradePlan, applyUpgradeStep } from "./upgrade-executor";
 import { validateFinalContexts } from "./upgrade-final-validation";
@@ -34,6 +33,7 @@ import {
   createAdoptionJournal,
   lacksSameOwnerFinalContextEvidence,
 } from "./upgrade-recovery-adoption";
+import { recoverCompensation } from "./upgrade-recovery-compensation";
 import { isProjectedTerminal } from "./upgrade-recovery-projection";
 import {
   blockRecovery as block,
@@ -90,19 +90,7 @@ export async function recoverRuntimeUpgrade(
   );
   if (adoptedTerminal) return adoptedTerminal;
   if (request.action === "compensate")
-    try {
-      return result(await compensateUpgrade(runtime, control, plan, journal));
-    } catch (error) {
-      const durable = await control.readRecovery(request.runId);
-      return block(
-        control,
-        durable,
-        error instanceof Error && error.message.includes("acknowledged")
-          ? "unknown-commit"
-          : "operator-required",
-        error instanceof Error ? error.message : "Compensation failed",
-      );
-    }
+    return recoverCompensation(runtime, control, plan, journal, request.runId);
   return resume(
     runtime,
     control,
