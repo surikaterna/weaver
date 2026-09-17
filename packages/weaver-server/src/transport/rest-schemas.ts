@@ -1,3 +1,7 @@
+import {
+  fragmentSchemaRegistrationRequestSchema,
+  serviceSchemaRegistrationRequestSchema,
+} from "@weaver-conf/config-types";
 import { z } from "zod";
 
 /** PUT /v1/config/*keyPath body — value is required */
@@ -21,3 +25,11 @@ export const scopeProvisionBodySchema = z.object({
   value: z.string().min(1),
   displayName: z.string().optional(),
 });
+
+/** POST /v1/admin/schemas/services body */
+export const serviceSchemaRegistrationBodySchema =
+  serviceSchemaRegistrationRequestSchema;
+
+/** POST /v1/admin/schemas/fragments body */
+export const fragmentSchemaRegistrationBodySchema =
+  fragmentSchemaRegistrationRequestSchema;
