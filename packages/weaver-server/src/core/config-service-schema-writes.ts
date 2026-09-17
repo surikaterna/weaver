@@ -11,6 +11,10 @@ import {
   validatePartialConfiguration,
 } from "@weaver-conf/config-engine";
 import type { ScopeInstance, WriteResult } from "@weaver-conf/config-types";
+import {
+  buildSchemaPatch,
+  type SchemaPatchResult,
+} from "./config-service-schema-patches";
 import type {
   EffectiveValidationContext,
   SchemaWriteContext,
@@ -171,15 +175,15 @@ async function preparePatchedValue(
   const baseValue = await getLayerValue(anchor.storageKey);
   const baseValidation = validateExistingLayerValue(baseValue, resolved);
   if (!baseValidation.success) return baseValidation;
-  const nextValue = baseValue === undefined ? {} : structuredClone(baseValue);
-  setNestedValue(nextValue, segments, value);
+  const patch = buildSchemaPatch(baseValue, segments, value);
+  if (!patch.success) return patchFailure(patch, resolved);
   const validation = validatePartialConfiguration(
     resolved.anchor.schema,
-    nextValue,
+    patch.value,
     { path: anchor.segments },
   );
   if (!validation.valid) return validationFailure(validation, resolved);
-  return preparedWrite(resolved.anchor, nextValue);
+  return preparedWrite(resolved.anchor, patch.value);
 }
 
 function validatePatchTarget(
@@ -307,6 +311,27 @@ function writeFailure(
   };
 }
 
+function patchFailure(
+  failure: Exclude<SchemaPatchResult, { readonly success: true }>,
+  resolved: ResolvedWriteAnchor,
+): FailedSchemaWrite {
+  const details = {
+    path: resolved.path,
+    anchorPath: resolved.anchor.path,
+    environment: resolved.environment,
+  };
+  if (failure.reason === "array-index-out-of-range") {
+    return writeFailure(
+      `Array patch index ${String(failure.index)} exceeds current length ${String(failure.length)}`,
+      { ...details, index: failure.index, length: failure.length },
+    );
+  }
+  return writeFailure("Configuration patch cannot traverse the current value", {
+    ...details,
+    segment: failure.segment,
+  });
+}
+
 type NormalizedPath =
   | { readonly success: true; readonly value: CanonicalConfigPath }
   | { readonly success: false; readonly message: string };
@@ -322,44 +347,6 @@ function normalizeCanonicalPath(path: string): NormalizedPath {
       success: false,
       message: error instanceof Error ? error.message : String(error),
     };
-  }
-}
-
-function setNestedValue(
-  current: unknown,
-  segments: readonly string[],
-  value: unknown,
-): void {
-  const [segment, ...remaining] = segments;
-  if (segment === undefined) return;
-  if (remaining.length === 0) {
-    assignMember(current, segment, value);
-    return;
-  }
-  const existing = readMember(current, segment);
-  const next =
-    isRecord(existing) || Array.isArray(existing)
-      ? existing
-      : isArrayIndex(remaining[0])
-        ? []
-        : {};
-  if (next !== existing) assignMember(current, segment, next);
-  setNestedValue(next, remaining, value);
-}
-
-function readMember(current: unknown, segment: string): unknown {
-  if (Array.isArray(current) && isArrayIndex(segment))
-    return current[Number(segment)];
-  return isRecord(current) && Object.hasOwn(current, segment)
-    ? current[segment]
-    : undefined;
-}
-
-function assignMember(current: unknown, segment: string, value: unknown): void {
-  if (Array.isArray(current) && isArrayIndex(segment)) {
-    current[Number(segment)] = value;
-  } else if (isRecord(current)) {
-    current[segment] = value;
   }
 }
 
@@ -381,14 +368,4 @@ function invalidPathValidation(
       },
     ],
   };
-}
-
-function isArrayIndex(segment: string | undefined): boolean {
-  if (segment === undefined) return false;
-  const index = Number(segment);
-  return Number.isInteger(index) && index >= 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

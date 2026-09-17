@@ -12,6 +12,7 @@ import {
   type SchemaValidationError,
   type SchemaValidationPathSegment,
   type ValidationContext,
+  type ValidationErrorPath,
 } from "./schema-validation-support";
 
 export function resolveMemberSchemas(
@@ -21,19 +22,16 @@ export function resolveMemberSchemas(
 ): MemberSchemaResult {
   let candidates: ConfigurationPropertySchema[] = [schema];
   const errors: SchemaValidationError[] = [];
+  const prefix = [...basePath];
 
-  for (const [index, segment] of path.entries()) {
+  for (const segment of path) {
     if (candidates.length === 0) return { schemas: [], errors };
     const next = candidates.flatMap((candidate) =>
-      resolveNextSchemas(
-        candidate,
-        segment,
-        [...basePath, ...path.slice(0, index)],
-        errors,
-      ),
+      resolveNextSchemas(candidate, segment, prefix, errors),
     );
     if (errors.length > 0) return { schemas: [], errors };
     candidates = next;
+    prefix.push(segment);
   }
 
   return { schemas: candidates, errors };
@@ -42,7 +40,7 @@ export function resolveMemberSchemas(
 export function collectMemberSchemas(
   schema: ConfigurationPropertySchema,
   key: string,
-  path: readonly SchemaValidationPathSegment[],
+  path: ValidationErrorPath,
   context: ValidationContext,
 ): ConfigurationPropertySchema[] {
   const schemas: ConfigurationPropertySchema[] = [];
@@ -117,7 +115,7 @@ function resolveArrayMemberSchema(
       makeError(
         "invalid-path",
         [...path, segment],
-        "Array member path must use a non-negative integer index",
+        "Array member path must use a canonical index between 0 and 4294967294",
       ),
     );
     return [];
@@ -132,7 +130,7 @@ function resolveArrayMemberSchema(
 function patternSchemas(
   schema: ConfigurationPropertySchema,
   key: string,
-  path: readonly SchemaValidationPathSegment[],
+  path: ValidationErrorPath,
   context: ValidationContext,
 ): ConfigurationPropertySchema[] {
   const entries = Object.entries(schema.patternProperties ?? {});

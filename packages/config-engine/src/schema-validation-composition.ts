@@ -1,16 +1,15 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-
 import {
   addContextError,
-  type SchemaValidationPathSegment,
   type ValidationContext,
+  type ValidationErrorPath,
 } from "./schema-validation-support";
 
 const COMPOSITION_KEYWORDS = ["oneOf", "anyOf", "allOf", "not"] as const;
 
 export function rejectUnsupportedComposition(
   schema: ConfigurationPropertySchema,
-  path: readonly SchemaValidationPathSegment[],
+  path: ValidationErrorPath,
   context: ValidationContext,
 ): boolean {
   const keywords = COMPOSITION_KEYWORDS.filter(

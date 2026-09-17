@@ -4,14 +4,15 @@ import { deepEqual } from "./deep-equal";
 import {
   addBoundedContextError,
   addContextError,
-  type SchemaValidationPathSegment,
+  appendValidationPath,
   type ValidationContext,
+  type ValidationPath,
 } from "./schema-validation-support";
 
 export function validateObjectSize(
   schema: ConfigurationPropertySchema,
   value: Record<string, unknown>,
-  path: readonly SchemaValidationPathSegment[],
+  path: ValidationPath,
   context: ValidationContext,
 ): void {
   if (context.mode === "effective") {
@@ -37,7 +38,7 @@ export function validateObjectSize(
 export function validateArraySize(
   schema: ConfigurationPropertySchema,
   value: readonly unknown[],
-  path: readonly SchemaValidationPathSegment[],
+  path: ValidationPath,
   context: ValidationContext,
 ): void {
   addBoundedContextError(
@@ -61,16 +62,21 @@ export function validateArraySize(
 export function validateUniqueItems(
   schema: ConfigurationPropertySchema,
   value: readonly unknown[],
-  path: readonly SchemaValidationPathSegment[],
+  path: ValidationPath,
   context: ValidationContext,
 ): void {
   if (schema.uniqueItems !== true) return;
   for (let left = 0; left < value.length; left++) {
+    if (!Object.hasOwn(value, left)) continue;
     for (let right = left + 1; right < value.length; right++) {
+      if (!Object.hasOwn(value, right)) continue;
       if (deepEqual(value[left], value[right])) {
-        addContextError(context, "invalid-value", [...path, right], {
-          message: "Array item must be unique",
-        });
+        addContextError(
+          context,
+          "invalid-value",
+          appendValidationPath(path, right),
+          { message: "Array item must be unique" },
+        );
       }
     }
   }

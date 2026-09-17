@@ -8,6 +8,17 @@ import { getCachedRegex, isSafePattern } from "./regex-cache";
 
 export type SchemaValidationPathSegment = string | number;
 
+export interface ValidationPath {
+  readonly kind: "validation-path";
+  readonly base: readonly SchemaValidationPathSegment[];
+  readonly parent?: ValidationPath | undefined;
+  readonly segment?: SchemaValidationPathSegment | undefined;
+}
+
+export type ValidationErrorPath =
+  | readonly SchemaValidationPathSegment[]
+  | ValidationPath;
+
 export type SchemaValidationErrorCode =
   | "invalid-type"
   | "invalid-value"
@@ -44,7 +55,7 @@ export interface ValidationContext {
 export interface ValidationState {
   schema: ConfigurationPropertySchema;
   value: unknown;
-  path: readonly SchemaValidationPathSegment[];
+  path: ValidationPath;
   context: ValidationContext;
 }
 
@@ -56,6 +67,37 @@ export interface MemberSchemaResult {
 export interface PathSegmentsResult {
   segments: readonly SchemaValidationPathSegment[];
   error?: SchemaValidationError | undefined;
+}
+
+export function createValidationPath(
+  base: readonly SchemaValidationPathSegment[],
+): ValidationPath {
+  return { kind: "validation-path", base };
+}
+
+export function appendValidationPath(
+  parent: ValidationPath,
+  segment: SchemaValidationPathSegment,
+): ValidationPath {
+  return { kind: "validation-path", base: parent.base, parent, segment };
+}
+
+export function materializeValidationPath(
+  path: ValidationErrorPath,
+): readonly SchemaValidationPathSegment[] {
+  if (!isValidationPath(path)) return path;
+  const suffix: SchemaValidationPathSegment[] = [];
+  let cursor = path;
+  while (cursor.parent !== undefined) {
+    if (cursor.segment !== undefined) suffix.push(cursor.segment);
+    cursor = cursor.parent;
+  }
+  suffix.reverse();
+  return cursor.base.length === 0 ? suffix : [...cursor.base, ...suffix];
+}
+
+function isValidationPath(path: ValidationErrorPath): path is ValidationPath {
+  return !Array.isArray(path);
 }
 
 export function addError(
@@ -70,14 +112,16 @@ export function addError(
 export function addContextError(
   context: ValidationContext,
   code: SchemaValidationErrorCode,
-  path: readonly SchemaValidationPathSegment[],
+  path: ValidationErrorPath,
   details: {
     message: string;
     expected?: string | undefined;
     actual?: string | undefined;
   },
 ): void {
-  context.errors.push(makeError(code, path, details.message, details));
+  context.errors.push(
+    makeError(code, materializeValidationPath(path), details.message, details),
+  );
 }
 
 export function makeError(
@@ -114,7 +158,7 @@ export function addBoundedError(
 
 export function addBoundedContextError(
   context: ValidationContext,
-  path: readonly SchemaValidationPathSegment[],
+  path: ValidationErrorPath,
   name: string,
   actual: number,
   expected: number | undefined,
@@ -128,7 +172,7 @@ export function addBoundedContextError(
 
 export function compileSchemaPattern(
   pattern: string,
-  path: readonly SchemaValidationPathSegment[],
+  path: ValidationErrorPath,
   context: ValidationContext,
 ): RegExp | undefined {
   if (!isSafePattern(pattern)) {
@@ -274,8 +318,21 @@ export function hasOwn(value: Record<string, unknown>, key: string): boolean {
 export function getArrayIndex(
   segment: SchemaValidationPathSegment,
 ): number | undefined {
-  const index = typeof segment === "number" ? segment : Number(segment);
-  return Number.isInteger(index) && index >= 0 ? index : undefined;
+  if (typeof segment === "number") {
+    return Number.isSafeInteger(segment) &&
+      segment >= 0 &&
+      !Object.is(segment, -0)
+      ? boundedArrayIndex(segment)
+      : undefined;
+  }
+  if (!/^(?:0|[1-9][0-9]*)$/.test(segment)) return undefined;
+  return boundedArrayIndex(Number(segment));
+}
+
+function boundedArrayIndex(index: number): number | undefined {
+  return Number.isSafeInteger(index) && index <= 4_294_967_294
+    ? index
+    : undefined;
 }
 
 export function isSchemaArray(

@@ -1,5 +1,5 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-
+import { deepEqual } from "../src/deep-equal.js";
 import {
   validateConfigurationPatch,
   validateEffectiveConfiguration,
@@ -76,6 +76,36 @@ function schemaWithAncestorPatchComposition(
     },
     additionalProperties: false,
   };
+}
+
+function deepFixture(
+  depth: number,
+  leaf: unknown,
+): {
+  readonly schema: ConfigurationPropertySchema;
+  readonly value: unknown;
+  readonly path: readonly string[];
+} {
+  let schema: ConfigurationPropertySchema = { type: "string" };
+  let value = leaf;
+  const path: string[] = [];
+  for (let index = 0; index < depth; index++) {
+    schema = {
+      type: "object",
+      properties: { next: schema },
+      additionalProperties: false,
+    };
+    value = { next: value };
+    path.push("next");
+  }
+  path.reverse();
+  return { schema, value, path };
+}
+
+function cyclicObject(): Record<string, unknown> {
+  const value: Record<string, unknown> = {};
+  value.self = value;
+  return value;
 }
 
 describe("schema validation", () => {
@@ -376,6 +406,226 @@ describe("schema validation", () => {
       code: "invalid-schema",
       path: "$.group",
     });
+    expectPublicResultCompatible(result);
+  });
+
+  it("validates depth-5000 values and patches without recursive overflow", () => {
+    const valid = deepFixture(5_000, "ok");
+    const invalid = deepFixture(5_000, 1);
+
+    const results = [
+      validatePartialConfiguration(valid.schema, valid.value),
+      validateEffectiveConfiguration(valid.schema, valid.value),
+      validatePartialConfiguration(invalid.schema, invalid.value),
+      validateEffectiveConfiguration(invalid.schema, invalid.value),
+      validateConfigurationPatch(valid.schema, valid.path, "ok"),
+      validateConfigurationPatch(valid.schema, valid.path, 1),
+    ];
+
+    expect(results.map((result) => result.valid)).toEqual([
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+    ]);
+    expect(results[2]?.errors[0]?.segments).toEqual(invalid.path);
+    expect(results[3]?.errors[0]?.segments).toEqual(invalid.path);
+    expect(results[5]?.errors[0]?.segments).toEqual(valid.path);
+    results.forEach(expectPublicResultCompatible);
+  });
+
+  it("returns typed errors for cyclic schemas and schema constraints", () => {
+    const cyclicSchema: ConfigurationPropertySchema = { type: "object" };
+    cyclicSchema.properties = { self: cyclicSchema };
+    const cyclicConstraint = cyclicObject();
+    const cyclicEnum: unknown[] = [];
+    cyclicEnum.push(cyclicEnum);
+    const schemas: ConfigurationPropertySchema[] = [
+      cyclicSchema,
+      { type: "object", default: cyclicConstraint },
+      { type: "object", const: cyclicConstraint },
+      { type: "object", enum: cyclicEnum },
+    ];
+
+    for (const schema of schemas) {
+      const result = validatePartialConfiguration(schema, {});
+      expect(result.errors).toEqual([
+        expect.objectContaining({ code: "invalid-schema", path: "$" }),
+      ]);
+      expectPublicResultCompatible(result);
+    }
+  });
+
+  it("rejects value cycles, including unconstrained branches", () => {
+    const direct = cyclicObject();
+    const hidden = cyclicObject();
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      additionalProperties: true,
+    };
+
+    const directResult = validatePartialConfiguration(schema, direct);
+    const hiddenResult = validateEffectiveConfiguration(schema, { hidden });
+
+    expect(directResult.errors[0]).toMatchObject({
+      code: "invalid-value",
+      path: "$.self",
+    });
+    expect(hiddenResult.errors[0]).toMatchObject({
+      code: "invalid-value",
+      path: "$.hidden.self",
+    });
+    expectPublicResultCompatible(directResult);
+    expectPublicResultCompatible(hiddenResult);
+  });
+
+  it("allows shared acyclic schema and value references", () => {
+    const memberSchema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      additionalProperties: false,
+    };
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: { left: memberSchema, right: memberSchema },
+      additionalProperties: false,
+    };
+    const shared = { name: "same" };
+
+    expect(
+      validatePartialConfiguration(schema, { left: shared, right: shared }),
+    ).toEqual({ valid: true, errors: [] });
+  });
+
+  it("deep equality terminates for deep and cyclic pairs", () => {
+    const left = deepFixture(5_000, "same").value;
+    const right = deepFixture(5_000, "same").value;
+    const leftCycle = cyclicObject();
+    const rightCycle = cyclicObject();
+
+    expect(deepEqual(left, right)).toBe(true);
+    expect(deepEqual(leftCycle, rightCycle)).toBe(true);
+    rightCycle.different = true;
+    expect(deepEqual(leftCycle, rightCycle)).toBe(false);
+  });
+
+  it.each([
+    { name: "homogeneous partial", effective: false, tuple: false },
+    { name: "homogeneous effective", effective: true, tuple: false },
+    { name: "tuple partial", effective: false, tuple: true },
+    { name: "tuple effective", effective: true, tuple: true },
+  ])("rejects sparse arrays in $name mode", ({ effective, tuple }) => {
+    const value = new Array<unknown>(2);
+    value[1] = "ok";
+    const schema: ConfigurationPropertySchema = {
+      type: "array",
+      items: tuple
+        ? [{ type: "string" }, { type: "string" }]
+        : { type: "string" },
+    };
+    const result = effective
+      ? validateEffectiveConfiguration(schema, value)
+      : validatePartialConfiguration(schema, value);
+
+    expect(result.errors[0]).toMatchObject({
+      code: "invalid-value",
+      path: "$[0]",
+      segments: [0],
+    });
+    expectPublicResultCompatible(result);
+  });
+
+  it("accepts dense arrays and canonical array member indexes", () => {
+    const schema: ConfigurationPropertySchema = {
+      type: "array",
+      items: { type: "string" },
+    };
+
+    expect(validatePartialConfiguration(schema, ["a", "b"])).toEqual({
+      valid: true,
+      errors: [],
+    });
+    expect(validateConfigurationPatch(schema, "0", "ok").valid).toBe(true);
+    expect(
+      validateConfigurationPatch(schema, [4_294_967_294], "ok").valid,
+    ).toBe(true);
+  });
+
+  it.each([
+    "00",
+    "+1",
+    "1e0",
+    "1.0",
+    "-0",
+    4_294_967_295,
+    -0,
+  ])("rejects noncanonical array member index %s", (index) => {
+    const result = validateConfigurationPatch(
+      { type: "array", items: { type: "string" } },
+      [index],
+      "ok",
+    );
+
+    expect(result.errors[0]).toMatchObject({ code: "invalid-path" });
+    expectPublicResultCompatible(result);
+  });
+
+  it.each([
+    { value: "a", minLength: 1, maxLength: 1, valid: true },
+    { value: "😀", minLength: 1, maxLength: 1, valid: true },
+    { value: "😀a", maxLength: 1, valid: false, count: 2 },
+    { value: "e\u0301", maxLength: 1, valid: false, count: 2 },
+    { value: "😀", minLength: 2, valid: false, count: 1 },
+  ])("counts Unicode code points in string bounds", (testCase) => {
+    const result = validatePartialConfiguration(
+      {
+        type: "string",
+        minLength: testCase.minLength,
+        maxLength: testCase.maxLength,
+      },
+      testCase.value,
+    );
+
+    expect(result.valid).toBe(testCase.valid);
+    if (!testCase.valid) {
+      expect(result.errors[0]?.message).toContain(String(testCase.count));
+    }
+    expectPublicResultCompatible(result);
+  });
+
+  it.each([
+    { value: 0.3, multipleOf: 0.1, valid: true },
+    { value: -0.3, multipleOf: 0.1, valid: true },
+    { value: 0, multipleOf: 0.1, valid: true },
+    { value: 1.2, multipleOf: 0.03, valid: true },
+    { value: 3e-7, multipleOf: 1e-7, valid: true },
+    { value: 3e21, multipleOf: 1e21, valid: true },
+    { value: 0.31, multipleOf: 0.1, valid: false },
+    { value: 0.30000000000000004, multipleOf: 0.1, valid: false },
+  ])("uses exact decimal arithmetic for multipleOf", (testCase) => {
+    const result = validatePartialConfiguration(
+      { type: "number", multipleOf: testCase.multipleOf },
+      testCase.value,
+    );
+
+    expect(result.valid).toBe(testCase.valid);
+    expectPublicResultCompatible(result);
+  });
+
+  it.each([
+    0,
+    -1,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+  ])("rejects invalid multipleOf divisor %s as invalid-schema", (multipleOf) => {
+    const result = validatePartialConfiguration(
+      { type: "number", multipleOf },
+      1,
+    );
+
+    expect(result.errors[0]).toMatchObject({ code: "invalid-schema" });
     expectPublicResultCompatible(result);
   });
 });
