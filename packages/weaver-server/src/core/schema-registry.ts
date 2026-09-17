@@ -1,14 +1,23 @@
-import { deriveServicePath } from "@weaver-conf/config-engine";
+import {
+  assertPublicConfigPath,
+  deriveServicePath,
+} from "@weaver-conf/config-engine";
 import type {
   ConfigurationPropertySchema,
+  ObjectConfigurationPropertySchema,
   SchemaRegistrationRequest as PathSchemaRegistrationRequest,
   SchemaRegistrationAuditMetadata,
   SchemaRegistrationMetadata,
 } from "@weaver-conf/config-types";
+import {
+  objectConfigurationPropertySchemaSchema,
+  schemaRegistrationMetadataSchema,
+} from "@weaver-conf/config-types";
+import { z } from "zod";
 import type { WeaverError } from "../types/errors";
 import { createWeaverError } from "../types/errors";
-import type { WeaverConfigService, WriteContext } from "./config-service";
 import { writeInternalConfig } from "./config-service-internal";
+import type { WeaverConfigService, WriteContext } from "./config-service-types";
 import {
   parsePersistedRegistry,
   serializeRegistry,
@@ -19,6 +28,7 @@ import {
   createEmptyState,
   evaluateRegistration,
   listSchemas,
+  type SchemaEntry,
   schemaKey,
 } from "./schema-registry-state";
 
@@ -38,6 +48,23 @@ export interface SchemaRegistrationResult {
   error?: WeaverError;
 }
 
+export interface RegisteredSchemaAnchor {
+  readonly kind: "service" | "fragment";
+  readonly path: string;
+  readonly schema: ObjectConfigurationPropertySchema;
+  readonly environment: string;
+  readonly metadata: SchemaRegistrationMetadata;
+}
+
+export const registeredSchemaAnchorSchema: z.ZodType<RegisteredSchemaAnchor> =
+  z.strictObject({
+    kind: z.enum(["service", "fragment"]),
+    path: z.string(),
+    schema: objectConfigurationPropertySchemaSchema,
+    environment: z.string(),
+    metadata: schemaRegistrationMetadataSchema,
+  });
+
 export interface SchemaRegistryOptions {
   configService: WeaverConfigService;
 }
@@ -53,7 +80,14 @@ export interface SchemaRegistry {
     request: SchemaRegistrationRequest,
     context?: SchemaRegistrationContext,
   ): Promise<SchemaRegistrationResult>;
-  getSchema(serviceId: string, environment: string): Promise<unknown | null>;
+  getSchema(
+    serviceId: string,
+    environment: string,
+  ): Promise<ObjectConfigurationPropertySchema | null>;
+  resolveAnchor(
+    path: string,
+    environment: string,
+  ): Promise<RegisteredSchemaAnchor | null>;
   listAll(): Record<string, ConfigurationPropertySchema>;
 }
 
@@ -127,6 +161,10 @@ export function createSchemaRegistry(
       }
     },
 
+    async resolveAnchor(path, environment) {
+      return findRegisteredAnchor(state.schemas.values(), path, environment);
+    },
+
     listAll() {
       return listSchemas(state);
     },
@@ -172,8 +210,54 @@ export async function createPersistentSchemaRegistry(
       }
     },
 
+    async resolveAnchor(path, environment) {
+      return findRegisteredAnchor(state.schemas.values(), path, environment);
+    },
+
     listAll() {
       return listSchemas(state);
     },
   };
+}
+
+function findRegisteredAnchor(
+  entries: Iterable<SchemaEntry>,
+  path: string,
+  environment: string,
+): RegisteredSchemaAnchor | null {
+  const normalizedPath = normalizeAnchorLookupPath(path);
+  if (normalizedPath === null) return null;
+  let match: RegisteredSchemaAnchor | null = null;
+
+  for (const entry of entries) {
+    const anchor = registeredAnchorFromEntry(entry);
+    if (anchor.environment !== environment) continue;
+    if (!isAnchorPathMatch(anchor.path, normalizedPath)) continue;
+    if (match === null || anchor.path.length > match.path.length)
+      match = anchor;
+  }
+
+  return match;
+}
+
+function registeredAnchorFromEntry(entry: SchemaEntry): RegisteredSchemaAnchor {
+  return {
+    kind: entry.kind,
+    path: entry.path,
+    schema: entry.schema,
+    environment: entry.environment,
+    metadata: entry.metadata,
+  };
+}
+
+function isAnchorPathMatch(anchorPath: string, path: string): boolean {
+  return path === anchorPath || path.startsWith(`${anchorPath}/`);
+}
+
+function normalizeAnchorLookupPath(path: string): string | null {
+  try {
+    return assertPublicConfigPath(path);
+  } catch {
+    return null;
+  }
 }

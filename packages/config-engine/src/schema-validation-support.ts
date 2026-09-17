@@ -17,21 +17,21 @@ export type SchemaValidationErrorCode =
   | "invalid-schema";
 
 export interface SchemaValidationError {
-  code: SchemaValidationErrorCode;
-  path: string;
-  segments: readonly SchemaValidationPathSegment[];
-  message: string;
-  expected?: string | undefined;
-  actual?: string | undefined;
+  readonly code: SchemaValidationErrorCode;
+  readonly path: string;
+  readonly segments: readonly SchemaValidationPathSegment[];
+  readonly message: string;
+  readonly expected?: string | undefined;
+  readonly actual?: string | undefined;
 }
 
 export interface SchemaValidationResult {
-  valid: boolean;
-  errors: SchemaValidationError[];
+  readonly valid: boolean;
+  readonly errors: readonly SchemaValidationError[];
 }
 
 export interface SchemaValidationOptions {
-  path?: string | readonly SchemaValidationPathSegment[] | undefined;
+  readonly path?: string | readonly SchemaValidationPathSegment[] | undefined;
 }
 
 export type ValidationMode = "partial" | "effective";
