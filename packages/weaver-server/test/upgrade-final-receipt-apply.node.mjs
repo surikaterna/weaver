@@ -15,6 +15,7 @@ import {
   assertExactDurableDeltas,
   assertExactFailureCommits,
   assertNoRecoveryCommits,
+  upgradePrivateFragments,
 } from "./upgrade-final-effect-proof.mjs";
 
 const mutations = [
@@ -48,8 +49,8 @@ for (const [name, mutate] of mutations)
       const assertCorrupted = corruptIntentJournal(t, runtime, mutate);
       const failure = await captureExpectedFailure(
         runtime.applyUpgrade({ version: 1, request }),
-        "REVISION_CONFLICT",
-        "Upgrade plan is no longer current",
+        "COMMIT_OUTCOME_UNKNOWN",
+        "Upgrade outcome is uncertain; operator action is required",
       );
       assertCorrupted();
       const rejected = await authoritySnapshot(runtime);
@@ -61,18 +62,21 @@ for (const [name, mutate] of mutations)
       assert.notDeepEqual(await durableFileSnapshot(fixture), rawInitial);
       assert.notEqual(runtime.state, "ready");
       effects.assertNone();
-      await assertSanitizedSurfaces(runtime, failure);
+      await assertSanitizedSurfaces(runtime, failure,
+        upgradePrivateFragments(fixture, journal, [
+          "wrong-layer", "999", "0".repeat(64),
+        ]));
       effects.close();
-      await assertFreshRecovery(context, name);
+      await assertFreshRecovery(context);
     });
   });
 
-async function assertFreshRecovery(context, name) {
+async function assertFreshRecovery(context) {
   const { fixture, reopen, providerEffects } = context;
   const raw = await durableFileSnapshot(fixture);
   const checkpoint = providerEffects.checkpoint();
   for (let attempt = 0; attempt < 3; attempt++) {
-    await captureStartupFailure(reopen, name);
+    await captureStartupFailure(reopen);
     assert.deepEqual(await durableFileSnapshot(fixture), raw);
   }
   assertNoRecoveryCommits(providerEffects.delta(checkpoint));
@@ -80,19 +84,15 @@ async function assertFreshRecovery(context, name) {
   providerEffects.assertDisposed();
 }
 
-async function captureStartupFailure(reopen, name) {
+async function captureStartupFailure(reopen) {
   try {
     await reopen();
     assert.fail("fresh runtime unexpectedly opened");
   } catch (error) {
     assert.equal(error.code, "VALIDATION_ERROR");
-    const messages = {
-      "receipt mutation": "WeaverError: Recovery receipt does not bind the recorded mutation/request",
-      "receipt cursor": "WeaverError: Recovery cursor does not match recorded source/receipt lineage",
-    };
     assert.equal(
       error.message,
-      messages[name] ?? "WeaverError: Invalid built-in value at /_weaver",
+      "WeaverError: Pinned recovery evidence is malformed, unsupported, or divergent",
     );
   }
 }

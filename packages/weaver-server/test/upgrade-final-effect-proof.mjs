@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { createBuiltinProviderFactories } from "../src/bootstrap/provider-resources.ts";
 import { publicUpgradeCliError, publicUpgradeOutput } from "../src/cli-upgrade.ts";
 import { buildUpgradeRoutes } from "../src/transport/rest-upgrade-routes.ts";
@@ -74,12 +76,21 @@ export async function durableFileSnapshot(fixture) {
 
 export async function assertSanitizedSurfaces(runtime, error, forbidden = []) {
   const values = [{ code: error.code, message: error.message }, publicUpgradeCliError()];
+  if (error.code === "COMMIT_OUTCOME_UNKNOWN")
+    assert.deepEqual(error.details, {
+      maintenanceCode: "unknown-commit",
+      category: "uncertainty",
+    });
   let status;
+  let statusError;
   try {
     status = runtime.maintenanceStatus();
-    values.push(status, publicUpgradeOutput(status));
+    const cliOutput = publicUpgradeOutput(status);
+    assert.deepEqual(JSON.parse(cliOutput), status);
+    values.push(status, cliOutput);
   } catch (surfaceError) {
     assert.equal(surfaceError.code, "COMMIT_OUTCOME_UNKNOWN");
+    statusError = surfaceError;
   }
   const route = buildUpgradeRoutes(runtime).find((item) =>
     item.path === "/v1/admin/upgrades/status");
@@ -90,14 +101,93 @@ export async function assertSanitizedSurfaces(runtime, error, forbidden = []) {
   } catch (surfaceError) {
     assert.equal(surfaceError.code, "COMMIT_OUTCOME_UNKNOWN");
   }
-  if (response) {
-    assert.equal(response.status, status ? 200 : 503);
-    assert.equal(response.headers?.etag, undefined);
-    assert.equal(response.headers?.ETag, undefined);
-    assert.equal(response.body.meta, undefined);
-    values.push(response.body);
-  }
+  assert.deepEqual(response, expectedStatusResponse(status, statusError));
+  assert.deepEqual(response.headers, { "Content-Type": "application/json" });
+  values.push(response.headers, response.body, response);
   for (const value of values) assertSurfaceValue(value, forbidden);
+}
+
+export function upgradePrivateFragments(fixture, journal, extra = []) {
+  const generation = fixture.request.generation;
+  const revisions = [journal.control?.revision, ...journal.sourceRevisions,
+    ...journal.steps.flatMap((step) => [step.preRevision, step.receipt?.revision])];
+  return [...new Set([
+    fixture.directory,
+    fixture.seed.store.locator.filePath,
+    ...generation.providers.map((provider) => provider.options.filePath),
+    fixture.seed.environment,
+    fixture.request.generationId,
+    ...generation.providers.map((provider) => provider.id),
+    ...generation.layout.layers.map((layer) => layer.name),
+    journal.planId,
+    journal.nonce,
+    journal.aggregateDigest,
+    ...journal.steps.flatMap((step) => [step.operationId, step.receipt?.operationId,
+      step.receipt?.mutationDigest]),
+    ...journal.steps.map((step) => JSON.stringify(step.receipt)),
+    ...revisions.filter(Boolean).map((revision) => JSON.stringify(revision)),
+    JSON.stringify(journal.activation.finalContexts),
+    JSON.stringify(journal),
+    ...extra,
+  ].filter((value) => typeof value === "string" && value.length > 1))];
+}
+
+export async function assertProductionCliSanitized(fixture, forbidden, credentials) {
+  const seedPath = join(fixture.directory, "cli-seed.json");
+  await writeFile(seedPath, JSON.stringify(fixture.seed), { mode: 0o600 });
+  const result = await runBuiltCli(["upgrade-status", seedPath], {
+    ...process.env,
+    WEAVER_CREDENTIAL_administrator: credentials.administrator,
+    WEAVER_CREDENTIAL_jwt: credentials.jwt,
+    WEAVER_ADMIN_CREDENTIAL: credentials.administrator,
+  });
+  assert.deepEqual({ code: result.code, signal: result.signal }, { code: 1, signal: null });
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, `${JSON.stringify(publicUpgradeCliError())}\n`);
+  const parsed = JSON.parse(result.stderr);
+  assert.deepEqual(parsed, publicUpgradeCliError());
+  for (const value of [result.stdout, result.stderr, parsed])
+    assertSurfaceValue(value, forbidden);
+}
+
+function expectedStatusResponse(status, error) {
+  if (status) return {
+    status: 200,
+    body: { data: status },
+    headers: { "Content-Type": "application/json" },
+  };
+  assert.equal(error.code, "COMMIT_OUTCOME_UNKNOWN");
+  return {
+    status: 503,
+    body: { data: null, error: {
+      code: "COMMIT_OUTCOME_UNKNOWN",
+      message: "Upgrade outcome is uncertain; operator action is required",
+    } },
+    headers: { "Content-Type": "application/json" },
+  };
+}
+
+async function runBuiltCli(args, environment) {
+  const cli = new URL("../dist/cli.js", import.meta.url).pathname;
+  const child = spawn(process.execPath, [cli, ...args], {
+    env: environment, stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => stdout += chunk);
+  child.stderr.on("data", (chunk) => stderr += chunk);
+  const result = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => child.kill("SIGKILL"), 30_000);
+    child.once("error", (error) => { clearTimeout(timer); reject(error); });
+    child.once("close", (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal, stdout, stderr });
+    });
+  });
+  assert.notEqual(result.signal, "SIGKILL", "production CLI exceeded its deadline");
+  return result;
 }
 
 function observeProvider(provider, providerId, state) {
@@ -206,8 +296,17 @@ function revisionDelta(before, after) {
 }
 
 function assertSurfaceValue(value, extra) {
-  const serialized = JSON.stringify(value);
+  const serialized = typeof value === "string" ? value : JSON.stringify(value);
+  const strings = [serialized, ...nestedStrings(value)];
   for (const forbidden of ["finalContexts", "aggregateDigest", "storeId", "sequence",
-    "journal", "receipt", "revision", "mongodb://", "/tmp/", ...extra])
-    assert.equal(serialized.includes(forbidden), false, forbidden);
+    "journal", "receipt", "revision", "authority", "meta", "cache", "etag", "ETag",
+    "mongodb://", "/tmp/", ...extra])
+    assert.equal(strings.some((text) => text.includes(forbidden)), false, forbidden);
+}
+
+function nestedStrings(value) {
+  if (typeof value === "string") return [value];
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([key, nested]) =>
+    [key, ...nestedStrings(nested)]);
 }

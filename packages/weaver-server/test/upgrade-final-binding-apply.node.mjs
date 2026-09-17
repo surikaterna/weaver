@@ -14,6 +14,7 @@ import {
   assertExactDurableDeltas,
   assertExactFailureCommits,
   assertNoRecoveryCommits,
+  upgradePrivateFragments,
 } from "./upgrade-final-effect-proof.mjs";
 
 const mutations = [
@@ -38,8 +39,8 @@ for (const [name, mutate] of mutations)
       const assertCorrupted = corruptActivationIntent(t, runtime, mutate);
       const failure = await captureExpectedFailure(
         runtime.applyUpgrade({ version: 1, request }),
-        "REVISION_CONFLICT",
-        "Upgrade plan is no longer current",
+        "COMMIT_OUTCOME_UNKNOWN",
+        "Upgrade outcome is uncertain; operator action is required",
       );
       assertCorrupted();
       const rejected = await authoritySnapshot(runtime);
@@ -49,7 +50,10 @@ for (const [name, mutate] of mutations)
       assert.notDeepEqual(await durableFileSnapshot(fixture), rawInitial);
       assert.notEqual(runtime.state, "ready");
       effects.assertNone();
-      await assertSanitizedSurfaces(runtime, failure);
+      await assertSanitizedSurfaces(runtime, failure,
+        upgradePrivateFragments(fixture, journal, [
+          "22222222-2222-4222-8222-222222222222", "forged", "0".repeat(64),
+        ]));
       effects.close();
       await assertFreshRecovery(context);
     });

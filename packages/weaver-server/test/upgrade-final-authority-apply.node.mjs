@@ -16,10 +16,13 @@ import {
   withFinalMatrixRuntime,
 } from "./upgrade-final-matrix-fixture.mjs";
 import {
+  assertProductionCliSanitized,
   assertExactDurableDeltas,
   assertExactFailureCommits,
   assertNoRecoveryCommits,
+  upgradePrivateFragments,
 } from "./upgrade-final-effect-proof.mjs";
+import { testAdmin, testJwt } from "./standalone-fixture.ts";
 
 const authorityRows = [
   ["unrecorded later revision", "VALIDATION_ERROR", "Upgrade validation failed", async (path) => {
@@ -83,7 +86,17 @@ for (const [name, code, message, corrupt] of authorityRows)
       );
       assert.notEqual(runtime.state, "ready");
       effects.assertNone();
-      await assertSanitizedSurfaces(runtime, failure, ["divergent-private-value"]);
+      const forbidden = upgradePrivateFragments(fixture, journal, [
+        "divergent-private-value", "private backend unavailable", "wrong-layer",
+        "forged", "999", JSON.stringify({ malformed: true }),
+        "22222222-2222-4222-8222-222222222222",
+        testAdmin, testJwt,
+      ]);
+      await assertSanitizedSurfaces(runtime, failure, forbidden);
+      if (name === "malformed authority envelope")
+        await assertProductionCliSanitized(fixture, forbidden, {
+          administrator: testAdmin, jwt: testJwt,
+        });
       effects.close();
       await assertRecoveryIsEffectFree(t, name, journal, context);
       assert.equal(await rawAuthorityProof(path, name), after);
@@ -144,7 +157,8 @@ async function assertRecoveryIsEffectFree(t, name, journal, context) {
           "Upgrade ownership could not be established",
         );
         effects.assertNone();
-        await assertSanitizedSurfaces(fresh, failure, ["divergent-private-value"]);
+        await assertSanitizedSurfaces(fresh, failure,
+          upgradePrivateFragments(fixture, journal, ["divergent-private-value"]));
         assert.notEqual(fresh.state, "ready");
       } finally {
         effects.close();
