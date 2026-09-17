@@ -60,6 +60,24 @@ export type {
   UnregisterSchemaResult,
 } from "./schema-registry";
 export { createSchemaRegistry } from "./schema-registry";
+export type {
+  SchemaValidationError,
+  SchemaValidationErrorCode,
+  SchemaValidationOptions,
+  SchemaValidationPathSegment,
+  SchemaValidationResult,
+} from "./schema-validation";
+export {
+  validateConfigurationPatch,
+  validateEffectiveConfiguration,
+  validatePartialConfiguration,
+} from "./schema-validation";
+export {
+  schemaValidationErrorCodeSchema,
+  schemaValidationErrorSchema,
+  schemaValidationPathSegmentSchema,
+  schemaValidationResultSchema,
+} from "./schema-validation-schemas";
 // scope.ts — Scope chain builder
 export type { BuildScopeChainResult, ScopeChainEntry } from "./scope";
 // utils — shared utilities (formerly @weaver-conf/storage-provider-core)
