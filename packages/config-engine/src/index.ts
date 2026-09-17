@@ -31,6 +31,7 @@ export {
   assertPublicConfigPath,
   canonicalConfigPathFromSegments,
   canonicalConfigPathFromStorageKey,
+  canonicalConfigPathSchema,
   deriveCanonicalSlotPath,
   deriveFragmentPath,
   deriveServicePath,

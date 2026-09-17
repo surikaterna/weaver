@@ -2,6 +2,7 @@ import {
   assertPublicConfigPath,
   canonicalConfigPathFromSegments,
   canonicalConfigPathFromStorageKey,
+  canonicalConfigPathSchema,
   deriveCanonicalSlotPath,
   deriveFragmentPath,
   deriveServicePath,
@@ -25,11 +26,29 @@ describe("schema registration paths", () => {
       parsed,
     );
     expect(canonicalConfigPathFromSegments(parsed.segments)).toEqual(parsed);
+    expect(canonicalConfigPathSchema.parse(parsed)).toEqual(parsed);
     expect(canonicalConfigPathFromStorageKey("")).toEqual({
       path: "/",
       segments: [],
       storageKey: "",
     });
+  });
+
+  it("rejects malformed canonical path objects at the runtime boundary", () => {
+    const valid = parseCanonicalConfigPath("/lynx/plugins");
+    for (const malformed of [
+      { ...valid, path: "/lynx/wrong" },
+      { ...valid, storageKey: "lynx.wrong" },
+      {
+        path: "/lynx/constructor",
+        segments: ["lynx", "constructor"],
+        storageKey: "lynx.constructor",
+      },
+    ]) {
+      expect(canonicalConfigPathSchema.safeParse(malformed).success).toBe(
+        false,
+      );
+    }
   });
 
   it("normalizes trailing slash and rejects non-canonical slash segments", () => {

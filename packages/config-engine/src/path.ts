@@ -14,6 +14,14 @@ export function assertSafePathSegment(segment: string): void {
   }
 }
 
+interface PathParserState {
+  readonly path: string;
+  readonly segments: string[];
+  current: string;
+  index: number;
+  inBracket: boolean;
+}
+
 /**
  * Parses a dot-delimited path with bracket notation into segments.
  * Brackets protect dots from being treated as separators.
@@ -23,112 +31,126 @@ export function parsePath(path: string): readonly string[] {
     throw createWeaverError("VALIDATION_ERROR", "Path must not be empty");
   }
 
-  const segments: string[] = [];
-  let current = "";
-  let inBracket = false;
-  let i = 0;
-
-  while (i < path.length) {
-    const ch = path[i];
-
-    if (inBracket) {
-      if (ch === "[") {
-        throw createWeaverError(
-          "VALIDATION_ERROR",
-          `Nested brackets at position ${String(i)} in "${path}"`,
-        );
-      }
-      if (ch === "]") {
-        if (current.length === 0) {
-          throw createWeaverError(
-            "VALIDATION_ERROR",
-            `Empty brackets in "${path}"`,
-          );
-        }
-        segments.push(current);
-        current = "";
-        inBracket = false;
-        i++;
-        // After ']': expect '.', '[', or end
-        if (i < path.length) {
-          if (path[i] === ".") {
-            i++;
-            if (i >= path.length) {
-              throw createWeaverError(
-                "VALIDATION_ERROR",
-                `Trailing dot in "${path}"`,
-              );
-            }
-          } else if (path[i] !== "[") {
-            throw createWeaverError(
-              "VALIDATION_ERROR",
-              `Expected '.' or '[' after ']' at position ${String(i)} in "${path}"`,
-            );
-          }
-        }
-        continue;
-      }
-      current += ch;
-      i++;
-    } else {
-      if (ch === "]") {
-        throw createWeaverError(
-          "VALIDATION_ERROR",
-          `Unmatched ']' at position ${String(i)} in "${path}"`,
-        );
-      }
-      if (ch === "[") {
-        if (current.length > 0) {
-          segments.push(current);
-          current = "";
-        }
-        inBracket = true;
-        i++;
-        if (i < path.length && path[i] === "[") {
-          throw createWeaverError(
-            "VALIDATION_ERROR",
-            `Nested brackets at position ${String(i)} in "${path}"`,
-          );
-        }
-        continue;
-      }
-      if (ch === ".") {
-        if (current.length === 0) {
-          throw createWeaverError(
-            "VALIDATION_ERROR",
-            `Empty segment (leading or double dot) in "${path}"`,
-          );
-        }
-        segments.push(current);
-        current = "";
-        i++;
-        if (i >= path.length) {
-          throw createWeaverError(
-            "VALIDATION_ERROR",
-            `Trailing dot in "${path}"`,
-          );
-        }
-        continue;
-      }
-      current += ch;
-      i++;
-    }
-  }
-
-  if (inBracket) {
-    throw createWeaverError("VALIDATION_ERROR", `Unmatched '[' in "${path}"`);
-  }
-
-  if (current.length > 0) {
-    segments.push(current);
-  }
-
-  if (segments.length === 0) {
-    throw createWeaverError("VALIDATION_ERROR", `Path must not be empty`);
-  }
-
+  const state = createParserState(path);
+  while (state.index < path.length) parseNextCharacter(state);
+  const segments = finishPath(state);
   for (const segment of segments) assertSafePathSegment(segment);
   return segments;
+}
+
+function createParserState(path: string): PathParserState {
+  return { path, segments: [], current: "", index: 0, inBracket: false };
+}
+
+function parseNextCharacter(state: PathParserState): void {
+  if (state.inBracket) parseBracketCharacter(state);
+  else parsePlainCharacter(state);
+}
+
+function parseBracketCharacter(state: PathParserState): void {
+  const character = state.path[state.index];
+  if (character === "[") {
+    invalidAt(state, "Nested brackets");
+  }
+  if (character === "]") {
+    closeBracket(state);
+    return;
+  }
+  state.current += character;
+  state.index++;
+}
+
+function closeBracket(state: PathParserState): void {
+  if (state.current.length === 0) {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      `Empty brackets in "${state.path}"`,
+    );
+  }
+  pushCurrentSegment(state);
+  state.inBracket = false;
+  state.index++;
+  consumePostBracketSeparator(state);
+}
+
+function consumePostBracketSeparator(state: PathParserState): void {
+  if (state.index >= state.path.length) return;
+  const character = state.path[state.index];
+  if (character === "[") return;
+  if (character !== ".") {
+    invalidAt(state, "Expected '.' or '[' after ']'");
+  }
+  state.index++;
+  assertNotTrailingDot(state);
+}
+
+function parsePlainCharacter(state: PathParserState): void {
+  const character = state.path[state.index];
+  if (character === "]") invalidAt(state, "Unmatched ']'");
+  if (character === "[") {
+    openBracket(state);
+    return;
+  }
+  if (character === ".") {
+    closePlainSegment(state);
+    return;
+  }
+  state.current += character;
+  state.index++;
+}
+
+function openBracket(state: PathParserState): void {
+  if (state.current.length > 0) pushCurrentSegment(state);
+  state.inBracket = true;
+  state.index++;
+  if (state.path[state.index] === "[") invalidAt(state, "Nested brackets");
+}
+
+function closePlainSegment(state: PathParserState): void {
+  if (state.current.length === 0) {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      `Empty segment (leading or double dot) in "${state.path}"`,
+    );
+  }
+  pushCurrentSegment(state);
+  state.index++;
+  assertNotTrailingDot(state);
+}
+
+function pushCurrentSegment(state: PathParserState): void {
+  state.segments.push(state.current);
+  state.current = "";
+}
+
+function assertNotTrailingDot(state: PathParserState): void {
+  if (state.index >= state.path.length) {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      `Trailing dot in "${state.path}"`,
+    );
+  }
+}
+
+function finishPath(state: PathParserState): readonly string[] {
+  if (state.inBracket) {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      `Unmatched '[' in "${state.path}"`,
+    );
+  }
+  if (state.current.length > 0) pushCurrentSegment(state);
+  if (state.segments.length === 0) {
+    throw createWeaverError("VALIDATION_ERROR", "Path must not be empty");
+  }
+  return state.segments;
+}
+
+function invalidAt(state: PathParserState, reason: string): never {
+  throw createWeaverError(
+    "VALIDATION_ERROR",
+    `${reason} at position ${String(state.index)} in "${state.path}"`,
+  );
 }
 
 /**

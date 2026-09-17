@@ -4,6 +4,7 @@ import {
   serviceIdSchema,
   slotPathSchema,
 } from "@weaver-conf/config-types";
+import { z } from "zod";
 import { assertSafePathSegment, buildPath, parsePath } from "./path";
 
 export const WEAVER_INTERNAL_ROOT = "/_weaver";
@@ -25,6 +26,14 @@ export interface CanonicalConfigPath {
   readonly storageKey: string;
 }
 
+export const canonicalConfigPathSchema: z.ZodType<CanonicalConfigPath> = z
+  .strictObject({
+    path: z.string(),
+    segments: z.array(z.string()).readonly(),
+    storageKey: z.string(),
+  })
+  .superRefine(validateCanonicalConfigPath);
+
 export function parseCanonicalConfigPath(path: string): CanonicalConfigPath {
   if (!path.startsWith("/")) invalidPath(path, "must start with /");
   if (path.length > 1 && path.includes("//")) {
@@ -40,7 +49,11 @@ export function canonicalConfigPathFromSegments(
 ): CanonicalConfigPath {
   for (const segment of segments) validateCanonicalSegment(segment);
   const path = segments.length === 0 ? "/" : `/${segments.join("/")}`;
-  return { path, segments: [...segments], storageKey: buildPath(segments) };
+  return canonicalConfigPathSchema.parse({
+    path,
+    segments: [...segments],
+    storageKey: buildPath(segments),
+  });
 }
 
 export function canonicalConfigPathFromStorageKey(
@@ -155,4 +168,27 @@ function validateCanonicalSegment(segment: string): void {
 
 function invalidPath(path: string, reason: string): never {
   throw createWeaverError("VALIDATION_ERROR", `Path "${path}" ${reason}`);
+}
+
+function validateCanonicalConfigPath(
+  value: CanonicalConfigPath,
+  context: z.RefinementCtx,
+): void {
+  try {
+    for (const segment of value.segments) validateCanonicalSegment(segment);
+    const expectedPath =
+      value.segments.length === 0 ? "/" : `/${value.segments.join("/")}`;
+    if (value.path !== expectedPath) {
+      context.addIssue({ code: "custom", message: "Canonical path mismatch" });
+    }
+    if (value.storageKey !== buildPath(value.segments)) {
+      context.addIssue({ code: "custom", message: "Storage key mismatch" });
+    }
+  } catch (error: unknown) {
+    context.addIssue({
+      code: "custom",
+      message:
+        error instanceof Error ? error.message : "Invalid canonical path",
+    });
+  }
 }
