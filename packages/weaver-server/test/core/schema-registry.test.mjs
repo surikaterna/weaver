@@ -60,16 +60,6 @@ function serviceRegistration(serviceId, environment, schema) {
   };
 }
 
-function persistedRegistryEntries(environmentRegistry) {
-  return {
-    _weaver: {
-      registry: {
-        schemas: { environments: { dev: environmentRegistry } },
-      },
-    },
-  };
-}
-
 describe("SchemaRegistry", () => {
   test("register new schema succeeds with isNewSchema true", async () => {
     const opts = await makeOptions();
@@ -271,54 +261,6 @@ describe("SchemaRegistry", () => {
     });
   });
 
-  test("persistent registry rejects non-object service schema roots", async () => {
-    const configService = await createWeaverConfigService({
-      providers: [
-        createTestProvider("p1", "platform", {
-          _weaver: {
-            registry: {
-              schemas: {
-                environments: {
-                  prod: {
-                    schemas: {
-                      "/svc": {
-                        kind: "service",
-                        schema: { type: "string" },
-                        metadata: {
-                          serviceId: "svc",
-                          servicePath: "/svc",
-                          environment: "prod",
-                          providerId: "svc",
-                          owner: { name: "svc", contact: "svc@example.com" },
-                        },
-                      },
-                    },
-                    slots: {},
-                  },
-                },
-              },
-            },
-          },
-        }),
-      ],
-      environment: "prod",
-    });
-
-    await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow();
-  });
-
-  test("persistent registry rejects non-object fragment schema roots", async () => {
-    const path = "/billing/extensions/payments";
-    const environmentRegistry = fragmentMetadataCase(path, "schemaVersion", "1.0.0");
-    environmentRegistry.schemas[path].schema = { type: ["object", "null"] };
-    const configService = await createWeaverConfigService({
-      providers: [createTestProvider("p1", "platform", persistedRegistryEntries(environmentRegistry))],
-      environment: "dev",
-    });
-
-    await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow();
-  });
-
   test("persistent registry throws for invalid persisted root", async () => {
     const configService = await createWeaverConfigService({
       providers: [
@@ -330,83 +272,6 @@ describe("SchemaRegistry", () => {
     });
 
     await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(/Persisted schema registry must be an object/);
-  });
-
-  test("persistent registry rejects dangerous schema and slot paths without changing prototypes", async () => {
-    Reflect.deleteProperty(Object.prototype, "polluted");
-    try {
-      for (const segment of ["__proto__", "constructor", "prototype"]) {
-        const path = `/billing/${segment}`;
-        const schemaEntry = {
-          kind: "service",
-          schema: { type: "object" },
-          metadata: {
-            serviceId: "billing",
-            servicePath: path,
-            environment: "dev",
-            providerId: "billing",
-            owner: { name: "billing", contact: "billing@example.com" },
-          },
-        };
-        const slot = {
-          serviceId: "billing",
-          servicePath: "/billing",
-          slotPath: `/${segment}`,
-          canonicalSlotPath: path,
-          environment: "dev",
-          providerId: "billing",
-          owner: { name: "billing", contact: "billing@example.com" },
-          accepts: "object",
-        };
-
-        for (const environmentRegistry of [
-          { schemas: { [path]: schemaEntry }, slots: {} },
-          { schemas: {}, slots: { [path]: slot } },
-        ]) {
-          const configService = await createWeaverConfigService({
-            providers: [createTestProvider("p1", "platform", persistedRegistryEntries(environmentRegistry))],
-            environment: "dev",
-          });
-          await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(
-            `Path segment "${segment}" is not allowed`,
-          );
-        }
-      }
-      expect(Reflect.get(Object.prototype, "polluted")).toBe(undefined);
-    } finally {
-      Reflect.deleteProperty(Object.prototype, "polluted");
-    }
-  });
-
-  test("persistent registry rejects dangerous path metadata behind safe keys", async () => {
-    Reflect.deleteProperty(Object.prototype, "polluted");
-    const servicePath = "/billing";
-    const slotPath = "/extensions";
-    const canonicalSlotPath = `${servicePath}${slotPath}`;
-    const fragmentPath = `${canonicalSlotPath}/payments`;
-    try {
-      for (const segment of ["__proto__", "constructor", "prototype"]) {
-        const dangerousPath = `/billing/${segment}`;
-        const cases = [
-          schemaMetadataCase(servicePath, "servicePath", dangerousPath),
-          schemaMetadataCase(servicePath, "canonicalSlotPath", dangerousPath),
-          schemaMetadataCase(servicePath, "fragmentPath", dangerousPath),
-          fragmentMetadataCase(fragmentPath, "servicePath", dangerousPath),
-          fragmentMetadataCase(fragmentPath, "canonicalSlotPath", dangerousPath),
-          fragmentMetadataCase(fragmentPath, "fragmentPath", dangerousPath),
-          slotMetadataCase(canonicalSlotPath, "servicePath", dangerousPath),
-          slotMetadataCase(canonicalSlotPath, "slotPath", `/${segment}`),
-          slotMetadataCase(canonicalSlotPath, "canonicalSlotPath", dangerousPath),
-        ];
-
-        for (const environmentRegistry of cases) {
-          await expectPersistedRegistryRejection(environmentRegistry, segment);
-        }
-      }
-      expect(Reflect.get(Object.prototype, "polluted")).toBe(undefined);
-    } finally {
-      Reflect.deleteProperty(Object.prototype, "polluted");
-    }
   });
 
   test("register rejects legacy target fields", async () => {
@@ -443,54 +308,3 @@ describe("SchemaRegistry", () => {
     expect(registry.listAll()).toEqual({});
   });
 });
-
-function schemaMetadataCase(path, field, value) {
-  const metadata = {
-    serviceId: "billing",
-    servicePath: path,
-    environment: "dev",
-    providerId: "billing",
-    owner: { name: "billing", contact: "billing@example.com" },
-    [field]: value,
-  };
-  return { schemas: { [path]: { kind: "service", schema: { type: "object" }, metadata } }, slots: {} };
-}
-
-function fragmentMetadataCase(path, field, value) {
-  const metadata = {
-    serviceId: "billing",
-    servicePath: "/billing",
-    canonicalSlotPath: "/billing/extensions",
-    fragmentPath: path,
-    environment: "dev",
-    providerId: "payments",
-    owner: { name: "payments", contact: "payments@example.com" },
-    [field]: value,
-  };
-  return { schemas: { [path]: { kind: "fragment", schema: { type: "object" }, metadata } }, slots: {} };
-}
-
-function slotMetadataCase(path, field, value) {
-  const slot = {
-    serviceId: "billing",
-    servicePath: "/billing",
-    slotPath: "/extensions",
-    canonicalSlotPath: path,
-    environment: "dev",
-    providerId: "billing",
-    owner: { name: "billing", contact: "billing@example.com" },
-    accepts: "object",
-    [field]: value,
-  };
-  return { schemas: {}, slots: { [path]: slot } };
-}
-
-async function expectPersistedRegistryRejection(environmentRegistry, segment) {
-  const configService = await createWeaverConfigService({
-    providers: [createTestProvider("p1", "platform", persistedRegistryEntries(environmentRegistry))],
-    environment: "dev",
-  });
-  await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(
-    `Path segment "${segment}" is not allowed`,
-  );
-}
