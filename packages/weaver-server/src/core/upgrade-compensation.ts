@@ -24,6 +24,7 @@ import {
   stepKey,
 } from "./upgrade-execution-support";
 import type { UpgradeRuntimeHost } from "./upgrade-runtime-host";
+import { assertUpgradeWrite } from "./upgrade-write-result";
 
 type Control = Awaited<ReturnType<typeof createControlService>>;
 
@@ -190,7 +191,8 @@ async function compensateStep(
     undo.action === "remove",
     operationId,
   );
-  if (!outcome.result.success || !outcome.snapshot?.lastCommit)
+  assertUpgradeWrite(outcome.result, "Compensation write failed");
+  if (!outcome.snapshot?.lastCommit)
     throw createWeaverError(
       "COMMIT_OUTCOME_UNKNOWN",
       "Compensation was not durably acknowledged",
@@ -245,11 +247,7 @@ async function persist(
   journal: InternalRecoveryEnvelope,
 ): Promise<void> {
   const value = await control.replaceJournal(journal, control.revision);
-  if (!value.success)
-    throw createWeaverError(
-      "REVISION_CONFLICT",
-      value.error?.message ?? "Compensation journal write failed",
-    );
+  assertUpgradeWrite(value, "Compensation journal write failed");
 }
 
 function parseJournal(value: unknown): InternalRecoveryEnvelope {

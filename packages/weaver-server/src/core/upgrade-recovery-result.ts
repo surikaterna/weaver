@@ -1,5 +1,4 @@
 import {
-  createWeaverError,
   type InternalRecoveryEnvelope,
   internalRecoveryEnvelopeSchema,
 } from "@weaver-conf/config-types";
@@ -8,6 +7,7 @@ import {
   type InternalUpgradeExecutionResult,
   internalUpgradeResult,
 } from "./public-upgrade-status";
+import { assertUpgradeWrite } from "./upgrade-write-result";
 
 type Control = Awaited<ReturnType<typeof createControlService>>;
 
@@ -36,11 +36,7 @@ export async function persistRecoveryJournal(
   journal: InternalRecoveryEnvelope,
 ): Promise<void> {
   const value = await control.replaceJournal(journal, control.revision);
-  if (!value.success)
-    throw createWeaverError(
-      "REVISION_CONFLICT",
-      value.error?.message ?? "Recovery journal write failed",
-    );
+  assertUpgradeWrite(value, "Recovery journal write failed");
 }
 
 export function recoveryResult(

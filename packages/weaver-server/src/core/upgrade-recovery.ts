@@ -48,6 +48,7 @@ import {
   recoverUpgradeStepIntent,
   validateRecoveredStepPoststate,
 } from "./upgrade-step-recovery";
+import { assertUpgradeWrite } from "./upgrade-write-result";
 
 type Control = Awaited<ReturnType<typeof createControlService>>;
 export async function recoverRuntimeUpgrade(
@@ -318,11 +319,7 @@ async function recoverActivationEvidence(
         plan,
         control.revision,
       );
-      if (!activation.result.success)
-        throw createWeaverError(
-          "REVISION_CONFLICT",
-          activation.result.error?.message ?? "Activation write failed",
-        );
+      assertUpgradeWrite(activation.result, "Activation write failed");
     } catch {
       evidence = await inspectActivationEvidence(runtime, plan, journal);
       if (evidence.status !== "poststate")

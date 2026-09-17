@@ -21,7 +21,7 @@ const targetSchema = objectSchema({
   port: { type: "integer", default: 41 },
 });
 
-export async function createTwoProviderFixture() {
+export async function createTwoProviderFixture(options = {}) {
   const fixture = await createStandaloneFixture({ schemas: { alpha: sourceSchema, beta: sourceSchema } });
   const request = structuredClone(fixture.request);
   request.generation.layout.layers.push({
@@ -30,18 +30,25 @@ export async function createTwoProviderFixture() {
     providerId: "secondary",
     config: { mergeId: "deep" },
   });
-  request.generation.providers.push({
+  request.generation.providers.push(options.secondaryProvider ?? {
     id: "secondary",
     factory: "fs",
     options: { filePath: `${fixture.directory}/secondary/entries.json` },
   });
+  const credentials = options.resolveCredential
+    ? {
+        resolveCredential: (reference) =>
+          options.resolveCredential(reference, fixture.credentials),
+      }
+    : options.credentials ?? fixture.credentials;
   await initializeWeaver(fixture.seed, request, fixture.administrator, {
-    credentials: fixture.credentials,
+    credentials,
   });
   return {
     ...fixture,
     request,
-    open: () => openWeaverRuntime(fixture.seed, { credentials: fixture.credentials }),
+    credentials,
+    open: () => openWeaverRuntime(fixture.seed, { credentials }),
   };
 }
 

@@ -22,6 +22,7 @@ import {
   replaceCursor,
 } from "./upgrade-execution-support";
 import type { UpgradeRuntimeHost } from "./upgrade-runtime-host";
+import { assertUpgradeWrite } from "./upgrade-write-result";
 
 type Control = Awaited<ReturnType<typeof createControlService>>;
 
@@ -65,11 +66,7 @@ async function executeRecordedIntent(
   id: string,
 ) {
   const write = await control.repairStep(journal.runId, id, control.revision);
-  if (!write.success)
-    throw createWeaverError(
-      "REVISION_CONFLICT",
-      write.error?.message ?? "Recovery step write failed",
-    );
+  assertUpgradeWrite(write, "Recovery step write failed");
   return committedReceipt(
     {
       ...step,
@@ -246,9 +243,5 @@ async function persist(
   journal: InternalRecoveryEnvelope,
 ): Promise<void> {
   const value = await control.replaceJournal(journal, control.revision);
-  if (!value.success)
-    throw createWeaverError(
-      "REVISION_CONFLICT",
-      value.error?.message ?? "Recovery journal write failed",
-    );
+  assertUpgradeWrite(value, "Recovery journal write failed");
 }

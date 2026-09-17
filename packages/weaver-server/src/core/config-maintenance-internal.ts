@@ -15,6 +15,7 @@ import {
 } from "./config-service-internal";
 import type { WeaverConfigService } from "./config-service-types";
 import { prepareSchemaTransition } from "./schema-transition";
+import { assertUpgradeWrite } from "./upgrade-write-result";
 
 export function repairControlStep(
   service: WeaverConfigService,
@@ -162,11 +163,7 @@ export async function recordActivationCompletion(
         next,
         context,
       );
-      if (!result.success)
-        throw createWeaverError(
-          "REVISION_CONFLICT",
-          result.error?.message ?? "Activation completion write failed",
-        );
+      assertUpgradeWrite(result, "Activation completion write failed");
     } finally {
       clearInternalPermission(context);
     }

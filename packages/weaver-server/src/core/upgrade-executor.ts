@@ -9,7 +9,6 @@ import {
   type LayerEnvelope,
   type UpgradeApplyRequest,
   upgradeApplyRequestSchema,
-  type WriteResult,
 } from "@weaver-conf/config-types";
 import {
   inspectActivationEvidence,
@@ -42,6 +41,7 @@ import {
 } from "./upgrade-final-validation";
 import type { InstalledUpgradeSelection } from "./upgrade-plan-selection";
 import type { UpgradeRuntimeHost } from "./upgrade-runtime-host";
+import { assertUpgradeWrite } from "./upgrade-write-result";
 
 export async function applyRuntimeUpgrade(
   runtime: UpgradeRuntimeHost,
@@ -71,7 +71,10 @@ async function executeNew(
 ) {
   const runId = requestedRunId ?? randomUUID();
   if (installed === undefined)
-    assertWrite(await control.storePlan(plan, control.revision));
+    assertUpgradeWrite(
+      await control.storePlan(plan, control.revision),
+      "Upgrade plan write failed",
+    );
   let journal: InternalRecoveryEnvelope = {
     version: 1,
     runId,
@@ -96,7 +99,10 @@ async function executeNew(
       status: "pending" as const,
     })),
   };
-  assertWrite(await control.recordJournal(journal, control.revision));
+  assertUpgradeWrite(
+    await control.recordJournal(journal, control.revision),
+    "Upgrade journal write failed",
+  );
   journal = parseJournal({
     ...journal,
     phase: "applying",
@@ -179,7 +185,7 @@ export async function applyUpgradeStep(
   if (beforeMutation) journal = await control.readRecovery(journal.runId);
   await beforeMutation?.(journal);
   const result = await control.repairStep(journal.runId, id, control.revision);
-  assertWrite(result);
+  assertUpgradeWrite(result, "Upgrade step write failed");
   const receipt = await readStepReceipt(runtime, step, intent.operationId);
   const complete = { ...intent, status: "complete" as const, receipt };
   journal = parseJournal({
@@ -281,7 +287,7 @@ export async function activateUpgradePlan(
     plan,
     control.revision,
   );
-  assertWrite(activationWrite.result);
+  assertUpgradeWrite(activationWrite.result, "Upgrade activation write failed");
   const evidence = await inspectActivationEvidence(runtime, plan, journal);
   if (evidence.status !== "poststate")
     throw createWeaverError(
@@ -344,7 +350,10 @@ async function persistActivationIntent(
     binding,
   );
   const parsed = parseJournal(intent);
-  assertWrite(await control.replacePreparedJournal(parsed, control.revision));
+  assertUpgradeWrite(
+    await control.replacePreparedJournal(parsed, control.revision),
+    "Upgrade prepared journal write failed",
+  );
   return control.readRecovery(journal.runId);
 }
 
@@ -353,17 +362,10 @@ async function persist(
   journal: InternalRecoveryEnvelope,
   operationId?: string,
 ): Promise<void> {
-  assertWrite(
+  assertUpgradeWrite(
     await control.replaceJournal(journal, control.revision, operationId),
+    "Upgrade journal write failed",
   );
-}
-
-function assertWrite(value: WriteResult): void {
-  if (!value.success)
-    throw createWeaverError(
-      "REVISION_CONFLICT",
-      value.error?.message ?? "Upgrade write failed",
-    );
 }
 
 function parseJournal(value: unknown): InternalRecoveryEnvelope {
