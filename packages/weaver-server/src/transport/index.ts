@@ -12,7 +12,9 @@ export { createRestAdapter } from "./rest-adapter";
 export {
   configBatchBodySchema,
   configWriteBodySchema,
+  fragmentSchemaRegistrationBodySchema,
   scopeProvisionBodySchema,
+  serviceSchemaRegistrationBodySchema,
 } from "./rest-schemas";
 export type { WeaverConfigContract } from "./scomp-contract";
 export { WEAVER_CONFIG_V1, WeaverConfig } from "./scomp-contract";
