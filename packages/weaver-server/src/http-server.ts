@@ -30,7 +30,10 @@ function sendClientError(error: unknown, res: Response): boolean {
   const status = httpStatusForError(error.code);
   if (status < 400) return false;
   res.status(status).json({
-    error: { code: error.code, message: error.message },
+    error: {
+      code: error.code,
+      message: status >= 500 ? "internal server error" : error.message,
+    },
   });
   return true;
 }
