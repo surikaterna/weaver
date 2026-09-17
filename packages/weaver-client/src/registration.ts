@@ -14,6 +14,18 @@ export interface SchemaRegistrationResult {
   errors: Array<{ namespace: string; error: string }>;
 }
 
+interface ZodTraversalContext {
+  readonly activeSchemas: Set<unknown>;
+  depth: number;
+}
+
+interface InferredZodType {
+  readonly jsonType: ConfigurationPropertySchema;
+  readonly isOptional: boolean;
+}
+
+const MAX_ZOD_TRAVERSAL_DEPTH = 100;
+
 /**
  * Convert a Zod schema shape to a simplified JSON Schema representation.
  * Handles common types via duck-typing on Zod 4 internals.
@@ -21,17 +33,18 @@ export interface SchemaRegistrationResult {
 export function zodShapeToJsonSchema(
   shape: ZodRawShape,
 ): ConfigurationPropertySchema {
-  return shapeToJsonSchema(shape);
+  return shapeToJsonSchema(shape, { activeSchemas: new Set(), depth: 0 });
 }
 
 function shapeToJsonSchema(
   shape: Readonly<Record<string, unknown>>,
+  context: ZodTraversalContext,
 ): ConfigurationPropertySchema {
   const properties: Record<string, ConfigurationPropertySchema> = {};
   const required: string[] = [];
 
   for (const [key, fieldSchema] of Object.entries(shape)) {
-    const { jsonType, isOptional } = inferZodType(fieldSchema);
+    const { jsonType, isOptional } = inferZodType(fieldSchema, context);
     properties[key] = jsonType;
     if (!isOptional) {
       required.push(key);
@@ -45,20 +58,22 @@ function shapeToJsonSchema(
   };
 }
 
-function inferZodType(schema: unknown): {
-  jsonType: ConfigurationPropertySchema;
-  isOptional: boolean;
-} {
-  const { def, isNullable, isOptional } = unwrapZodSchema(schema);
-  const jsonType = inferJsonType(def);
-  return {
-    jsonType: isNullable ? makeNullable(jsonType) : jsonType,
-    isOptional,
-  };
+function inferZodType(
+  schema: unknown,
+  context: ZodTraversalContext,
+): InferredZodType {
+  return visitZodSchema(schema, context, (def) => {
+    const typeName = getDefinitionType(def);
+    if (typeName === "optional" || typeName === "nullable") {
+      return inferWrappedType(def, typeName, context);
+    }
+    return { jsonType: inferJsonType(def, context), isOptional: false };
+  });
 }
 
 function inferJsonType(
   def: Record<string, unknown>,
+  context: ZodTraversalContext,
 ): ConfigurationPropertySchema {
   const typeName = getDefinitionType(def);
   if (typeName === "string") return { type: "string" };
@@ -66,47 +81,54 @@ function inferJsonType(
   if (typeName === "int") return { type: "integer" };
   if (typeName === "boolean") return { type: "boolean" };
   if (typeName === "array") return { type: "array" };
-  if (typeName === "object") return inferObjectType(def);
+  if (typeName === "object") return inferObjectType(def, context);
   if (typeName === "enum") return inferEnumType(def);
   if (typeName === "literal") return inferLiteralType(def);
 
   throw new Error(`Unsupported Zod schema type "${typeName}"`);
 }
 
-function unwrapZodSchema(schema: unknown): {
-  def: Record<string, unknown>;
-  isOptional: boolean;
-  isNullable: boolean;
-} {
-  let current = schema;
-  let isOptional = false;
-  let isNullable = false;
-  const seen = new Set<unknown>();
-
-  for (let depth = 0; depth < 100; depth++) {
-    if (seen.has(current)) throw new Error("Cyclic Zod schema wrappers");
-    seen.add(current);
-    const def = getZodDef(current);
-    const typeName = getDefinitionType(def);
-    if (typeName !== "optional" && typeName !== "nullable") {
-      return { def, isOptional, isNullable };
-    }
-    if (!("innerType" in def)) {
-      throw new Error(`Malformed Zod ${typeName} wrapper`);
-    }
-    isOptional ||= typeName === "optional";
-    isNullable ||= typeName === "nullable";
-    current = def.innerType;
+function visitZodSchema<T>(
+  schema: unknown,
+  context: ZodTraversalContext,
+  visit: (def: Record<string, unknown>) => T,
+): T {
+  if (context.depth >= MAX_ZOD_TRAVERSAL_DEPTH) {
+    throw new Error("Zod schema traversal depth exceeds 100");
   }
-  throw new Error("Zod schema wrapper depth exceeds 100");
+  if (context.activeSchemas.has(schema)) {
+    throw new Error("Cyclic Zod schema traversal");
+  }
+  context.activeSchemas.add(schema);
+  context.depth++;
+  try {
+    return visit(getZodDef(schema));
+  } finally {
+    context.depth--;
+    context.activeSchemas.delete(schema);
+  }
+}
+
+function inferWrappedType(
+  def: Record<string, unknown>,
+  typeName: "optional" | "nullable",
+  context: ZodTraversalContext,
+): InferredZodType {
+  if (!("innerType" in def)) {
+    throw new Error(`Malformed Zod ${typeName} wrapper`);
+  }
+  const inner = inferZodType(def.innerType, context);
+  if (typeName === "optional") return { ...inner, isOptional: true };
+  return { ...inner, jsonType: makeNullable(inner.jsonType) };
 }
 
 function inferObjectType(
   def: Record<string, unknown>,
+  context: ZodTraversalContext,
 ): ConfigurationPropertySchema {
   const shape = def.shape;
   if (!isRecord(shape)) throw new Error("Malformed Zod object shape");
-  return shapeToJsonSchema(shape);
+  return shapeToJsonSchema(shape, context);
 }
 
 function inferEnumType(
@@ -170,12 +192,13 @@ function makeNullable(
 function getZodDef(schema: unknown): Record<string, unknown> {
   if (!isRecord(schema)) throw new Error("Malformed Zod schema object");
   const zodInternals = schema._zod;
-  if (isRecord(zodInternals)) {
-    if (isRecord(zodInternals.def)) return zodInternals.def;
+  if (!isRecord(zodInternals)) {
+    throw new Error("Unsupported Zod 4 schema internals");
+  }
+  if (!isRecord(zodInternals.def)) {
     throw new Error("Malformed Zod 4 schema definition");
   }
-  if (isRecord(schema._def)) return schema._def;
-  throw new Error("Unsupported Zod schema internals");
+  return zodInternals.def;
 }
 
 function getDefinitionType(def: Record<string, unknown>): string {

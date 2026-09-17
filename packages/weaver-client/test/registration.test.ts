@@ -106,6 +106,38 @@ describe("zodShapeToJsonSchema", () => {
       "Malformed Zod optional wrapper",
     );
   });
+
+  it("rejects excessively deep nested objects before stack exhaustion", () => {
+    let nested: z.ZodType = z.string();
+    for (let depth = 0; depth < 5_000; depth++) {
+      nested = z.object({ next: nested });
+    }
+
+    expect(() => zodShapeToJsonSchema({ nested })).toThrow(
+      "Zod schema traversal depth exceeds 100",
+    );
+  });
+
+  it("rejects cyclic object shapes explicitly", () => {
+    const cyclicShape: Record<string, z.ZodType> = {};
+    const cyclic = z.object(cyclicShape);
+    cyclicShape.self = cyclic;
+
+    expect(() => zodShapeToJsonSchema({ cyclic })).toThrow(
+      "Cyclic Zod schema traversal",
+    );
+  });
+
+  it("rejects obsolete _def-only schema internals", () => {
+    const invokeWithLegacyInternals = () =>
+      Reflect.apply(zodShapeToJsonSchema, undefined, [
+        { legacyOnly: { _def: { type: "string" } } },
+      ]);
+
+    expect(invokeWithLegacyInternals).toThrow(
+      "Unsupported Zod 4 schema internals",
+    );
+  });
 });
 
 describe("registerNamespaces", () => {
