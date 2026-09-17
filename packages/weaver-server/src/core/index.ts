@@ -4,6 +4,8 @@ export type {
 } from "./change-detector";
 export { createChangeDetector } from "./change-detector";
 export type {
+  EffectiveValidationContext,
+  SchemaWriteContext,
   WeaverConfigService,
   WeaverConfigServiceOptions,
   WriteContext,
@@ -25,6 +27,7 @@ export type {
 export { createRollbackService } from "./rollback-service";
 export type {
   PersistentSchemaRegistryOptions,
+  RegisteredSchemaAnchor,
   SchemaRegistrationRequest,
   SchemaRegistrationResult,
   SchemaRegistry,
@@ -33,6 +36,7 @@ export type {
 export {
   createPersistentSchemaRegistry,
   createSchemaRegistry,
+  registeredSchemaAnchorSchema,
 } from "./schema-registry";
 export type {
   DeprovisionScopeRequest,

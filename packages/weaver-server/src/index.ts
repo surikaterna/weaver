@@ -52,6 +52,7 @@ export type {
   ChangeDetector,
   ChangeDetectorOptions,
   DeprovisionScopeRequest,
+  EffectiveValidationContext,
   OverrideSessionInfo,
   OverrideSessionRequest,
   PersistentSchemaRegistryOptions,
@@ -60,6 +61,7 @@ export type {
   PromotionRequest,
   PromotionResult,
   ProvisionScopeRequest,
+  RegisteredSchemaAnchor,
   RollbackRequest,
   RollbackResult,
   RollbackService,
@@ -68,6 +70,7 @@ export type {
   SchemaRegistrationResult,
   SchemaRegistry,
   SchemaRegistryOptions,
+  SchemaWriteContext,
   ScopeManager,
   ScopeManagerOptions,
   ScopeProvisionResult,
@@ -94,6 +97,7 @@ export {
   isScopedLayer,
   parseScopeLayer,
   parseScopeQuery,
+  registeredSchemaAnchorSchema,
 } from "./core/index";
 export type { HealthEndpoints, HealthStatus } from "./health";
 // health & shutdown
