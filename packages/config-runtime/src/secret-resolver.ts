@@ -1,3 +1,4 @@
+import { buildPath, parsePath } from "@weaver-conf/config-engine";
 import type { SecretReference } from "@weaver-conf/config-types";
 import { isSecretReference } from "@weaver-conf/config-types";
 
@@ -28,19 +29,26 @@ function scanSecrets(
   entries: Readonly<Record<string, unknown>>,
 ): Map<string, SecretReference> {
   const refs = new Map<string, SecretReference>();
+  const active = new WeakSet<object>();
 
-  function scan(obj: Readonly<Record<string, unknown>>, prefix: string) {
-    for (const [k, v] of Object.entries(obj)) {
-      const fullKey = prefix ? `${prefix}.${k}` : k;
-      if (isSecretReference(v)) {
-        refs.set(fullKey, v);
-      } else if (v !== null && typeof v === "object" && !Array.isArray(v)) {
-        scan(v as Readonly<Record<string, unknown>>, fullKey);
+  function scan(value: unknown, path: readonly string[]): void {
+    if (isSecretReference(value)) {
+      refs.set(buildPath(path), value);
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    if (active.has(value)) return;
+    active.add(value);
+    try {
+      for (const [key, item] of Object.entries(value)) {
+        scan(item, [...path, key]);
       }
+    } finally {
+      active.delete(value);
     }
   }
 
-  scan(entries, "");
+  scan(entries, []);
   return refs;
 }
 
@@ -86,11 +94,11 @@ export async function createSecretResolver(
 
   return {
     getResolved(key: string): string | undefined {
-      return cache.get(key);
+      return cache.get(buildPath(parsePath(key)));
     },
 
     hasSecret(key: string): boolean {
-      return refs.has(key);
+      return refs.has(buildPath(parsePath(key)));
     },
 
     async refresh(entries: Readonly<Record<string, unknown>>): Promise<void> {

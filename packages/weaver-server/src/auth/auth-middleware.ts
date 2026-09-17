@@ -3,7 +3,7 @@ import type { JwtIdentity, JwtValidator } from "./jwt-validator";
 
 export interface AuthMiddlewareOptions {
   jwtValidator: JwtValidator;
-  /** Admin role names (from _weaver.server.adminRoles) */
+  /** Admin role names from the active generation's server.auth.adminRoles. */
   adminRoles?: string[];
 }
 

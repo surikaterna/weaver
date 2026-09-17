@@ -1,33 +1,14 @@
-import { deepMerge } from "@weaver-conf/config-engine";
-import type {
-  LayerType,
-  ScopeInstance,
-  WeaverConfig,
-} from "@weaver-conf/config-types";
-import { defineWeaver } from "@weaver-conf/config-types";
+import type { ScopeInstance, WeaverConfig } from "@weaver-conf/config-types";
+import { defineWeaver, Layers } from "@weaver-conf/config-types";
 import { createScopeCache, createScopeResolver } from "../src/scope-resolver";
-
-// Minimal layer type stubs for testing
-const staticType: LayerType = {
-  id: "static",
-  persistent: true,
-  defaultMerge: deepMerge,
-  createResolver: () => ({ resolve: () => [] }),
-};
-
-const dynamicType: LayerType = {
-  id: "dynamic",
-  persistent: true,
-  defaultMerge: deepMerge,
-  createResolver: () => ({ resolve: () => [] }),
-};
 
 function makeWeaverConfig(): WeaverConfig {
   return defineWeaver([
-    { name: "defaults", type: staticType, config: {} },
-    { name: "env", type: staticType, config: {} },
-    { name: "scoped", type: dynamicType, config: {} },
-  ] as const);
+    Layers.Static("defaults"),
+    Layers.Static("env"),
+    Layers.Dynamic("region"),
+    Layers.Dynamic("tenant"),
+  ]);
 }
 
 describe("createScopeResolver", () => {
@@ -152,10 +133,11 @@ describe("createScopeResolver", () => {
     const scopePath: ScopeInstance[] = [{ scopeId: "region", value: "us" }];
     const stack = resolver.buildScopedStack(scopePath);
 
-    expect(stack.layers.length).toBe(3);
+    expect(stack.layers.length).toBe(4);
     expect(stack.layers[0]?.layer).toBe("defaults");
     expect(stack.layers[1]?.layer).toBe("env");
-    expect(stack.layers[2]?.layer).toBe("region:us");
+    expect(stack.layers[2]?.layer).toBe("region");
+    expect(stack.layers[3]?.layer).toBe("region:us");
   });
 });
 

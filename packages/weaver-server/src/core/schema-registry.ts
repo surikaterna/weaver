@@ -1,270 +1,276 @@
 import {
-  detectBreakingChanges,
-  schemasEqual,
+  assertPublicConfigPath,
+  deriveServicePath,
 } from "@weaver-conf/config-engine";
-import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { configurationPropertySchemaSchema } from "@weaver-conf/config-types";
-import type { WeaverError } from "../types/errors";
+import type {
+  ConfigurationPropertySchema,
+  ObjectConfigurationPropertySchema,
+  SchemaRegistrationRequest as PathSchemaRegistrationRequest,
+  SchemaRegistrationAuditMetadata,
+  SchemaRegistrationContext,
+  SchemaRegistrationMetadata,
+  SchemaRegistrationResponse,
+} from "@weaver-conf/config-types";
+import {
+  environmentNameSchema,
+  registeredConfigurationSchemaSchema,
+  schemaRegistrationContextSchema,
+  schemaRegistrationMetadataSchema,
+  WeaverErrorInstance,
+} from "@weaver-conf/config-types";
+import { z } from "zod";
 import { createWeaverError } from "../types/errors";
-import type { WeaverConfigService } from "./config-service";
+import { prepareCanonicalRegistration } from "./canonical-registration";
+import type { ApplicationControlTransaction } from "./config-application-transaction";
+import { snapshotMutationInput } from "./config-mutation-input";
+import {
+  applicationAdmission,
+  applicationControlTransaction,
+  applicationProjection,
+  controlProjection,
+  controlTransaction,
+  schemaRegistryTransactionMode,
+} from "./config-service-internal";
+import type { WeaverConfigService } from "./config-service-types";
+import { writeResultError } from "./config-write-errors";
+import { notifySchemaRegistration } from "./schema-read-boundary";
+import { composeRegistryEntries } from "./schema-registry-composition";
+import {
+  listSchemas,
+  type SchemaEntry,
+  schemaKey,
+} from "./schema-registry-state";
 
-export interface SchemaRegistrationRequest {
-  serviceId: string;
-  declaration: unknown;
-  environment: string;
+export type SchemaRegistrationRequest = PathSchemaRegistrationRequest;
+
+export type { SchemaRegistrationContext } from "@weaver-conf/config-types";
+export type SchemaRegistrationResult = SchemaRegistrationResponse;
+
+export interface RegisteredSchemaAnchor {
+  readonly kind: "service" | "fragment";
+  readonly path: string;
+  readonly schema: ObjectConfigurationPropertySchema;
+  readonly environment: string;
+  readonly metadata: SchemaRegistrationMetadata;
 }
 
-export interface SchemaRegistrationResult {
-  success: boolean;
-  isNewSchema: boolean;
-  hasBreakingChanges: boolean;
-  breakingChanges?: string[];
-  error?: WeaverError;
-}
+export const registeredSchemaAnchorSchema = z.strictObject({
+  kind: z.enum(["service", "fragment"]),
+  path: z.string(),
+  schema: registeredConfigurationSchemaSchema,
+  environment: environmentNameSchema,
+  metadata: schemaRegistrationMetadataSchema,
+});
 
 export interface SchemaRegistryOptions {
   configService: WeaverConfigService;
 }
 
-export interface PersistentSchemaRegistryOptions extends SchemaRegistryOptions {
-  layer?: string;
-  key?: string;
-  environment?: string;
-}
-
 export interface SchemaRegistry {
   register(
     request: SchemaRegistrationRequest,
+    context?: SchemaRegistrationContext,
   ): Promise<SchemaRegistrationResult>;
-  getSchema(serviceId: string, environment: string): Promise<unknown | null>;
+  getSchema(
+    serviceId: string,
+    environment: string,
+  ): Promise<ConfigurationPropertySchema | null>;
+  resolveAnchor(
+    path: string,
+    environment: string,
+  ): Promise<RegisteredSchemaAnchor | null>;
   listAll(): Record<string, ConfigurationPropertySchema>;
 }
 
-interface SchemaEntry {
-  declaration: ConfigurationPropertySchema;
-  environment: string;
-}
-
-type PersistedSchemaRegistry = Record<
-  string,
-  Record<string, ConfigurationPropertySchema>
->;
-
-interface RegistrationEvaluation {
-  result: SchemaRegistrationResult;
-  entry?: SchemaEntry;
-}
-
-const defaultPersistenceLayer = "platform";
-const defaultPersistenceKey = "_weaver.schemas";
-
-function schemaKey(serviceId: string, environment: string): string {
-  return `${serviceId}:${environment}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function evaluateRegistration(
-  schemas: ReadonlyMap<string, SchemaEntry>,
-  request: SchemaRegistrationRequest,
-): RegistrationEvaluation {
-  const parseResult = configurationPropertySchemaSchema.safeParse(
-    request.declaration,
-  );
-  if (!parseResult.success) {
-    return {
-      result: {
-        success: false,
-        isNewSchema: false,
-        hasBreakingChanges: false,
-        error: createWeaverError(
-          "VALIDATION_ERROR",
-          `Invalid schema declaration: ${parseResult.error.message}`,
-        ),
-      },
-    };
-  }
-
-  const declaration = parseResult.data;
-  const key = schemaKey(request.serviceId, request.environment);
-  const existing = schemas.get(key);
-  return existing
-    ? evaluateExistingRegistration(existing, declaration)
-    : {
-        result: { success: true, isNewSchema: true, hasBreakingChanges: false },
-        entry: { declaration, environment: request.environment },
-      };
-}
-
-function evaluateExistingRegistration(
-  existing: SchemaEntry,
-  declaration: ConfigurationPropertySchema,
-): RegistrationEvaluation {
-  if (schemasEqual(existing.declaration, declaration)) {
-    return {
-      result: { success: true, isNewSchema: false, hasBreakingChanges: false },
-    };
-  }
-
-  const breakingChanges = detectBreakingChanges(
-    existing.declaration,
-    declaration,
-  );
-  const result: SchemaRegistrationResult = {
-    success: true,
-    isNewSchema: false,
-    hasBreakingChanges: breakingChanges.length > 0,
-  };
-  if (breakingChanges.length > 0) {
-    result.breakingChanges = breakingChanges.map((c) => c.message);
-  }
-  return { result, entry: { declaration, environment: existing.environment } };
-}
-
-function serializeSchemas(
-  schemas: ReadonlyMap<string, SchemaEntry>,
-): PersistedSchemaRegistry {
-  const persisted: PersistedSchemaRegistry = {};
-  for (const [key, entry] of schemas) {
-    const serviceId = key.slice(0, key.length - entry.environment.length - 1);
-    persisted[serviceId] = persisted[serviceId] ?? {};
-    persisted[serviceId][entry.environment] = entry.declaration;
-  }
-  return persisted;
-}
-
-function parsePersistedSchemas(raw: unknown): Map<string, SchemaEntry> {
-  const schemas = new Map<string, SchemaEntry>();
-  if (raw === undefined || raw === null) return schemas;
-  if (!isRecord(raw))
-    throw new Error("Persisted schema registry must be an object");
-
-  for (const [serviceId, environments] of Object.entries(raw)) {
-    if (!isRecord(environments)) {
-      throw new Error(`Persisted schemas for "${serviceId}" must be an object`);
-    }
-    parsePersistedServiceSchemas(schemas, serviceId, environments);
-  }
-  return schemas;
-}
-
-function parsePersistedServiceSchemas(
-  schemas: Map<string, SchemaEntry>,
-  serviceId: string,
-  environments: Record<string, unknown>,
-): void {
-  for (const [environment, declaration] of Object.entries(environments)) {
-    const parsed = configurationPropertySchemaSchema.parse(declaration);
-    schemas.set(schemaKey(serviceId, environment), {
-      declaration: parsed,
-      environment,
-    });
-  }
-}
-
-function listSchemas(
-  schemas: ReadonlyMap<string, SchemaEntry>,
-): Record<string, ConfigurationPropertySchema> {
-  const result: Record<string, ConfigurationPropertySchema> = {};
-  for (const [key, entry] of schemas) {
-    result[key] = entry.declaration;
-  }
-  return result;
-}
-
-function createSchemaPersistenceWriter(
-  options: PersistentSchemaRegistryOptions,
-  layer: string,
-  key: string,
-): (
-  updatedSchemas: ReadonlyMap<string, SchemaEntry>,
-  environment: string,
-) => Promise<SchemaRegistrationResult | null> {
-  return async (updatedSchemas, environment) => {
-    const writeResult = await options.configService.set(
-      layer,
-      key,
-      serializeSchemas(updatedSchemas),
-      { environment },
-    );
-    if (writeResult.success) return null;
-    return {
-      success: false,
-      isNewSchema: false,
-      hasBreakingChanges: false,
-      error: createWeaverError(
-        "INTERNAL_ERROR",
-        writeResult.error?.message ?? "Failed to persist schema registry",
-      ),
-    };
-  };
-}
+export type { SchemaRegistrationAuditMetadata };
 
 export function createSchemaRegistry(
-  _options: SchemaRegistryOptions,
+  options: SchemaRegistryOptions,
 ): SchemaRegistry {
-  const schemas = new Map<string, SchemaEntry>();
-
+  if (Object.keys(options).some((key) => key !== "configService"))
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Registry options cannot select alternate storage or environment",
+    );
+  const service = options.configService;
+  controlProjection(service).prepared();
   return {
-    async register(
-      request: SchemaRegistrationRequest,
-    ): Promise<SchemaRegistrationResult> {
-      const { serviceId, environment } = request;
-      const key = schemaKey(serviceId, environment);
-      const evaluation = evaluateRegistration(schemas, request);
-      if (evaluation.entry) schemas.set(key, evaluation.entry);
-      return evaluation.result;
+    register: (request, context) =>
+      registerCanonical(service, request, context),
+    async getSchema(serviceId, environment) {
+      const state = registryProjection(service).registrations().state;
+      try {
+        const { servicePath } = deriveServicePath(serviceId);
+        return structuredClone(
+          state.schemas.get(schemaKey(servicePath, environment))?.schema ??
+            null,
+        );
+      } catch {
+        return null;
+      }
     },
-
-    async getSchema(
-      serviceId: string,
-      environment: string,
-    ): Promise<unknown | null> {
-      const entry = schemas.get(schemaKey(serviceId, environment));
-      return entry?.declaration ?? null;
+    async resolveAnchor(path, environment) {
+      const state = registryProjection(service).registrations().state;
+      return structuredClone(
+        findRegisteredAnchor(composeRegistryEntries(state), path, environment),
+      );
     },
-
-    listAll(): Record<string, ConfigurationPropertySchema> {
-      return listSchemas(schemas);
+    listAll() {
+      return structuredClone(
+        listSchemas(registryProjection(service).registrations().state),
+      );
     },
   };
 }
 
-export async function createPersistentSchemaRegistry(
-  options: PersistentSchemaRegistryOptions,
-): Promise<SchemaRegistry> {
-  const layer = options.layer ?? defaultPersistenceLayer;
-  const key = options.key ?? defaultPersistenceKey;
-  const defaultEnvironment = options.environment;
-  const schemas = parsePersistedSchemas(await options.configService.get(key));
-  const persist = createSchemaPersistenceWriter(options, layer, key);
+async function registerCanonical(
+  service: WeaverConfigService,
+  request: SchemaRegistrationRequest,
+  context?: SchemaRegistrationContext,
+): Promise<SchemaRegistrationResult> {
+  return registerCanonicalWithMode(service, request, context);
+}
 
+export function registerControlSchema(
+  service: WeaverConfigService,
+  request: SchemaRegistrationRequest,
+  context?: SchemaRegistrationContext,
+): Promise<SchemaRegistrationResult> {
+  return registerCanonicalWithMode(service, request, context);
+}
+
+async function registerCanonicalWithMode(
+  service: WeaverConfigService,
+  request: SchemaRegistrationRequest,
+  context: SchemaRegistrationContext | undefined,
+): Promise<SchemaRegistrationResult> {
+  try {
+    const mode = schemaRegistryTransactionMode(service);
+    const ownedRequest = snapshotMutationInput(request);
+    const validatedContext = schemaRegistrationContextSchema.parse(
+      context ?? {},
+    );
+    return await registerTransaction(
+      service,
+      mode,
+      async ({ read, write, revision }) => {
+        const { record, id, existing, changed, evaluation, compatibility } =
+          prepareCanonicalRegistration(read(), ownedRequest, validatedContext);
+        if (!evaluation.result.success) return evaluation.result;
+        assertRegistrationRevision(revision, !!changed, validatedContext);
+        if (existing && !changed)
+          return {
+            ...evaluation.result,
+            ...compatibility,
+            revision,
+          };
+        const result = await write(
+          `_weaver.catalog.registrations.${id}`,
+          record,
+          { expectedRevision: revision },
+        );
+        if (!result.success) throw writeResultError(result);
+        if (evaluation.entry && applicationAdmission(service))
+          await notifySchemaRegistration(service, evaluation.entry.path);
+        return {
+          ...evaluation.result,
+          isNewSchema: !existing,
+          ...compatibility,
+          revision: result.revision ?? revision,
+        };
+      },
+    );
+  } catch (error) {
+    return failedRegistration(error);
+  }
+}
+
+function registerTransaction(
+  service: WeaverConfigService,
+  mode: "application" | "draft-control",
+  operation: (
+    transaction: ApplicationControlTransaction,
+  ) => Promise<SchemaRegistrationResult>,
+): Promise<SchemaRegistrationResult> {
+  const run =
+    mode === "draft-control"
+      ? controlTransaction
+      : applicationControlTransaction;
+  return run(service, "catalog", operation);
+}
+
+function registryProjection(service: WeaverConfigService) {
+  return schemaRegistryTransactionMode(service) === "draft-control"
+    ? controlProjection(service)
+    : applicationProjection(service);
+}
+
+function assertRegistrationRevision(
+  revision: string,
+  changed: boolean,
+  context?: SchemaRegistrationContext,
+): void {
+  if (
+    (changed && context?.expectedRevision === undefined) ||
+    (context?.expectedRevision !== undefined &&
+      context.expectedRevision !== revision)
+  )
+    throw createWeaverError(
+      "REVISION_CONFLICT",
+      "Schema activation requires the current authoritative revision",
+    );
+}
+
+function failedRegistration(error: unknown): SchemaRegistrationResult {
   return {
-    async register(request) {
-      const environment = request.environment || defaultEnvironment || "";
-      const normalizedRequest = { ...request, environment };
-      const key = schemaKey(request.serviceId, environment);
-      const evaluation = evaluateRegistration(schemas, normalizedRequest);
-      if (!evaluation.result.success || !evaluation.entry)
-        return evaluation.result;
-
-      const updatedSchemas = new Map(schemas);
-      updatedSchemas.set(key, evaluation.entry);
-      const persistenceFailure = await persist(updatedSchemas, environment);
-      if (persistenceFailure) return persistenceFailure;
-      schemas.set(key, evaluation.entry);
-      return evaluation.result;
-    },
-
-    async getSchema(serviceId, environment) {
-      const entry = schemas.get(schemaKey(serviceId, environment));
-      return entry?.declaration ?? null;
-    },
-
-    listAll() {
-      return listSchemas(schemas);
-    },
+    success: false,
+    isNewSchema: false,
+    hasBreakingChanges: false,
+    error:
+      error instanceof WeaverErrorInstance
+        ? error
+        : createWeaverError("VALIDATION_ERROR", String(error)),
   };
+}
+
+function findRegisteredAnchor(
+  entries: Iterable<SchemaEntry>,
+  path: string,
+  environment: string,
+): RegisteredSchemaAnchor | null {
+  const normalizedPath = normalizeAnchorLookupPath(path);
+  if (normalizedPath === null) return null;
+  let match: RegisteredSchemaAnchor | null = null;
+
+  for (const entry of entries) {
+    const anchor = registeredAnchorFromEntry(entry);
+    if (anchor.environment !== environment) continue;
+    if (!isAnchorPathMatch(anchor.path, normalizedPath)) continue;
+    if (match === null || anchor.path.length > match.path.length)
+      match = anchor;
+  }
+
+  return match;
+}
+
+function registeredAnchorFromEntry(entry: SchemaEntry): RegisteredSchemaAnchor {
+  return {
+    kind: entry.kind,
+    path: entry.path,
+    schema: entry.schema,
+    environment: entry.environment,
+    metadata: entry.metadata,
+  };
+}
+
+function isAnchorPathMatch(anchorPath: string, path: string): boolean {
+  return path === anchorPath || path.startsWith(`${anchorPath}/`);
+}
+
+function normalizeAnchorLookupPath(path: string): string | null {
+  try {
+    return assertPublicConfigPath(path);
+  } catch {
+    return null;
+  }
 }

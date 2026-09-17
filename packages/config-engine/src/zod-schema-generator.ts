@@ -1,8 +1,8 @@
-// Zod schema generator — produces TypeScript source strings from ComposedSchemaEntry
+// Zod schema generator — produces TypeScript source strings from schema entries
 
-import type { ComposedSchemaEntry } from "./schema-registry";
+import type { ConfigurationSchemaEntry } from "./schema-generator-types";
 
-type PropertySchema = ComposedSchemaEntry["schema"];
+type PropertySchema = ConfigurationSchemaEntry["schema"];
 
 function isPropertySchema(
   value: PropertySchema | ReadonlyArray<PropertySchema>,
@@ -23,7 +23,7 @@ export function sanitizeKeyToIdentifier(key: string): string {
  */
 export function generateZodForProperty(
   _key: string,
-  entry: ComposedSchemaEntry,
+  entry: ConfigurationSchemaEntry,
 ): string {
   return generateZodExpression(entry.schema);
 }
@@ -121,7 +121,7 @@ function generateZodExpression(schema: PropertySchema): string {
  * Generate a complete TypeScript source file with Zod schema definitions.
  */
 export function generateZodSchemaSource(
-  schemas: Map<string, ComposedSchemaEntry>,
+  schemas: ReadonlyMap<string, ConfigurationSchemaEntry>,
 ): string {
   const lines: string[] = [];
 

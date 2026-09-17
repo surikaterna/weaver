@@ -1,5 +1,14 @@
 // REST adapter helper utilities — extracted to keep rest-adapter.ts under 400 lines
+
+import { configServiceTransportRevision } from "../core/config-service-lifecycle";
+import type { WeaverConfigService } from "../core/config-service-types";
 import type { WeaverError } from "../types/index";
+import {
+  createWeaverError,
+  httpStatusForError,
+  type WeaverErrorCode,
+} from "../types/index";
+import type { RestRequest, RestResponse } from "./rest-adapter";
 
 export interface ApiResponse<T> {
   data: T;
@@ -98,4 +107,51 @@ export function v1Headers(
     "Cache-Control": "no-cache",
     ...extra,
   };
+}
+
+export function param(params: Record<string, string>, name: string): string {
+  const value = params[name];
+  if (!value)
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      `Missing required route parameter: ${name}`,
+    );
+  return value;
+}
+
+export function queryOpt(
+  query: Record<string, string>,
+  name: string,
+): string | undefined {
+  return query[name];
+}
+
+export function v1Response<T>(
+  service: WeaverConfigService,
+  status: number,
+  data: T,
+): RestResponse {
+  const revision = configServiceTransportRevision(service);
+  return {
+    status,
+    body: envelope(data, revision),
+    headers: v1Headers(revision),
+  };
+}
+
+export function v1Error(
+  service: WeaverConfigService,
+  code: WeaverErrorCode,
+  message: string,
+): RestResponse {
+  const revision = configServiceTransportRevision(service);
+  return {
+    status: httpStatusForError(code),
+    body: errorEnvelope(createWeaverError(code, message), revision),
+    headers: v1Headers(revision),
+  };
+}
+
+export function extractExpectedRevision(req: RestRequest): string | undefined {
+  return req.headers["if-match"]?.replace(/^"|"$/g, "");
 }

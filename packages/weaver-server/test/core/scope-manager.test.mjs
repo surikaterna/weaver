@@ -1,143 +1,80 @@
+import { vi } from "vitest";
 import { createScopeManager } from "../../src/core/scope-manager.ts";
-import { createSchemaRegistry } from "../../src/core/schema-registry.ts";
-import { createWeaverConfigService } from "../../src/core/config-service.ts";
+import { scopeContextId } from "../../src/core/scope-inventory.ts";
+import { initialized, record } from "../validated-fixtures.mjs";
 
-function createTestProvider(id, layer, entries, writable = true) {
-  let data = { ...entries };
-  return {
-    id,
-    layer,
-    writable,
-    async load() { return { entries: { ...data } }; },
-    async write(key, value) { data[key] = value; return { success: true }; },
-    async remove(key) { delete data[key]; return { success: true }; },
-  };
+const path = (value, scopeId = "tenant") => [{ scopeId, value }];
+async function fixture(values, active = false) {
+  const f = await initialized({
+    records: [record("app", { type: "object", properties: { n: { type: "number" } }, additionalProperties: false })],
+    scopes: [{ id: "tenant", label: "Tenant" }],
+    contexts: values.map((value) => ({ scopePath: path(value), state: active ? "active" : "retired" })),
+    scoped: Object.fromEntries(values.map((value) => [`tenant:${value}`, { app: { n: 1 } }])),
+  });
+  return { ...f, manager: createScopeManager({ configService: f.service }) };
 }
 
 describe("ScopeManager", () => {
-  test("provision creates new scope", async () => {
-    const platformProvider = createTestProvider("p1", "platform", {});
-    const configService = await createWeaverConfigService({
-      providers: [platformProvider],
-      environment: "dev",
-    });
-    const schemaRegistry = createSchemaRegistry({ configService });
-    const sm = createScopeManager({ configService, schemaRegistry });
-
-    const result = await sm.provision({ scopeId: "tenant", value: "acme", actor: "admin" });
-    expect(result.scopeId).toBe("tenant");
-    expect(result.value).toBe("acme");
-    expect(sm.listScopeValues("tenant").includes("acme")).toBeTruthy();
+  test("provision activates an explicitly prepared context", async () => {
+    const f = await fixture(["acme"]);
+    try {
+      const result = await f.manager.provision({ scopeId: "tenant", value: "acme", actor: "admin" });
+      expect(result.success).toBe(true);
+      expect(result.scopePath).toEqual(path("acme"));
+      expect(f.manager.listScopeValues("tenant")).toEqual(["acme"]);
+    } finally { await f.service.close(); }
   });
 
-  test("deprovision removes scope", async () => {
-    const tenantProvider = createTestProvider("t-old", "tenant:old-co", { "_weaver.scope.tenant": "old-co" });
-    const configService = await createWeaverConfigService({
-      providers: [createTestProvider("p1", "platform", {}), tenantProvider],
-      environment: "dev",
-    });
-    const schemaRegistry = createSchemaRegistry({ configService });
-    const sm = createScopeManager({ configService, schemaRegistry });
-
-    const result = await sm.deprovision({ scopeId: "tenant", value: "old-co", actor: "admin" });
-    expect(result.success).toBe(true);
-    expect(!sm.listScopeValues("tenant").includes("old-co")).toBeTruthy();
+  test("deprovision retires without deleting scope data", async () => {
+    const f = await fixture(["old-co"], true);
+    const tenant = f.providers.find((provider) => provider.layer === "tenant");
+    try {
+      const before = await tenant.loadLayer("tenant:old-co");
+      expect((await f.manager.deprovision({ scopePath: path("old-co"), actor: "admin" })).success).toBe(true);
+      expect(f.manager.listScopeValues("tenant")).toEqual([]);
+      expect(await tenant.loadLayer("tenant:old-co")).toEqual(before);
+    } finally { await f.service.close(); }
   });
 
-  test("listScopeValues returns active scope values", async () => {
-    const t1 = createTestProvider("t1", "tenant:alpha", {});
-    const t2 = createTestProvider("t2", "tenant:beta", {});
-    const configService = await createWeaverConfigService({
-      providers: [createTestProvider("p1", "platform", {}), t1, t2],
-      environment: "dev",
-    });
-    const schemaRegistry = createSchemaRegistry({ configService });
-    const sm = createScopeManager({ configService, schemaRegistry });
-
-    const values = sm.listScopeValues("tenant");
-    expect(values.includes("alpha")).toBeTruthy();
-    expect(values.includes("beta")).toBeTruthy();
+  test("listScopeValues returns only active values", async () => {
+    const f = await fixture(["alpha", "beta"], true);
+    try { expect(f.manager.listScopeValues("tenant").sort()).toEqual(["alpha", "beta"]); }
+    finally { await f.service.close(); }
   });
 
-  test("listScopes returns distinct scope definitions", async () => {
-    const t1 = createTestProvider("t1", "tenant:alpha", {});
-    const s1 = createTestProvider("s1", "site:oslo", {});
-    const configService = await createWeaverConfigService({
-      providers: [createTestProvider("p1", "platform", {}), t1, s1],
-      environment: "dev",
-    });
-    const schemaRegistry = createSchemaRegistry({ configService });
-    const sm = createScopeManager({ configService, schemaRegistry });
-
-    const scopes = sm.listScopes();
-    expect(scopes.some(s => s.id === "tenant")).toBeTruthy();
-    expect(scopes.some(s => s.id === "site")).toBeTruthy();
+  test("listScopes derives definitions from the compiled layout", async () => {
+    const f = await initialized({ scopes: [{ id: "tenant", label: "Tenant" }, { id: "site", label: "Site" }] });
+    try {
+      const manager = createScopeManager({ configService: f.service });
+      expect(manager.listScopes()).toEqual([{ id: "tenant", label: "Tenant" }, { id: "site", label: "Site" }]);
+    } finally { await f.service.close(); }
   });
 
-  test("duplicate provision returns error", async () => {
-    const tenantProvider = createTestProvider("t-dup", "tenant:dup", {});
-    const configService = await createWeaverConfigService({
-      providers: [createTestProvider("p1", "platform", {}), tenantProvider],
-      environment: "dev",
-    });
-    const schemaRegistry = createSchemaRegistry({ configService });
-    const sm = createScopeManager({ configService, schemaRegistry });
-
-    const result = await sm.provision({ scopeId: "tenant", value: "dup", actor: "admin" });
-    expect(result.success).toBe(false);
-    expect(result.error?.code).toBe("VALIDATION_ERROR");
+  test("idempotent provision does not advance inventory or provider revisions", async () => {
+    const f = await fixture(["dup"], true);
+    try {
+      const revision = f.service.revision;
+      const before = await f.platform.load();
+      const result = await f.manager.provision({ scopePath: path("dup"), actor: "admin" });
+      expect(result.success).toBe(true);
+      expect(result.revision).toBe(revision);
+      expect(await f.platform.load()).toEqual(before);
+    } finally { await f.service.close(); }
   });
 
-  test("provision persists marker via base scoped provider", async () => {
-    const writes = [];
-    const scopedEntries = new Map();
-    const tenantBaseProvider = {
-      id: "tenant-base",
-      layer: "tenant",
-      writable: true,
-      async load() {
-        return { entries: {} };
-      },
-      async loadLayer(layer) {
-        return { entries: { ...(scopedEntries.get(layer) ?? {}) } };
-      },
-      async write(_key, _value) {
-        return { success: true };
-      },
-      async writeLayer(layer, key, value) {
-        writes.push([layer, key, value]);
-        const entries = { ...(scopedEntries.get(layer) ?? {}) };
-        entries[key] = value;
-        scopedEntries.set(layer, entries);
-        return { success: true };
-      },
-      async remove(_key) {
-        return { success: true };
-      },
-      async removeLayer(layer, key) {
-        const entries = { ...(scopedEntries.get(layer) ?? {}) };
-        delete entries[key];
-        scopedEntries.set(layer, entries);
-        return { success: true };
-      },
-    };
-
-    const configService = await createWeaverConfigService({
-      providers: [createTestProvider("p1", "platform", {}), tenantBaseProvider],
-      environment: "dev",
-    });
-    const schemaRegistry = createSchemaRegistry({ configService });
-    const sm = createScopeManager({ configService, schemaRegistry });
-
-    const result = await sm.provision({
-      scopeId: "tenant",
-      value: "acme",
-      actor: "admin",
-    });
-
-    expect(result.success).toBe(true);
-    expect(writes).toEqual([
-      ["tenant:acme", "_weaver.scope.tenant", "acme"],
-    ]);
+  test("provision commits canonical inventory, never a tenant marker or public delta", async () => {
+    const f = await fixture(["acme"]);
+    const tenant = f.providers.find((provider) => provider.layer === "tenant");
+    const writes = vi.spyOn(tenant, "writeLayer");
+    const events = [];
+    f.service.onDelta((event) => events.push(event));
+    try {
+      expect((await f.manager.provision({ scopePath: path("acme"), actor: "admin" })).success).toBe(true);
+      const state = (await f.platform.load()).entries._weaver.scopeInventory;
+      expect(state.revision).toBe("1");
+      expect(state.contexts[scopeContextId(path("acme"))].state).toBe("active");
+      expect(writes).not.toHaveBeenCalled();
+      expect(events).toEqual([]);
+    } finally { writes.mockRestore(); await f.service.close(); }
   });
 });

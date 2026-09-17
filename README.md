@@ -10,10 +10,14 @@
 - **Schema governance** — ceiling enforcement, change policies, one-way ratchets
 - **Offline-first sync** — conflict resolution with LWW fallback and queue management
 - **Multiple transports** — HTTP/SSE or SCOMP (multiplexed RPC)
-- **Layered storage backends** — file system, Git, MongoDB, in-memory, env-overlay
+- **Layered storage backends** — current-format local filesystem/Git and Mongo replica sets; explicit volatile memory for embedded use
 - **Secret management** — provider abstraction with caching (e.g. Azure Key Vault)
 
 ## Quick Start
+
+Initialize a standalone server explicitly using the [seed bootstrap guide](./docs/guides/bootstrap-config-repo.md). Server settings, provider definitions, schema catalog and scope inventory live in validated `/_weaver` configuration. Ordinary startup never creates a store or falls back to empty memory.
+
+The client example assumes a matching `ui` service schema has been registered on that server. `defineNamespace` supplies local typing; it does not register server coverage.
 
 ```ts
 import { createWeaverClient, createHttpTransport, defineNamespace } from "@weaver-conf/weaver-client";
@@ -28,7 +32,7 @@ const uiConfig = defineNamespace("ui", {
 
 // Create client with HTTP transport
 const client = await createWeaverClient({
-  transport: createHttpTransport({ baseUrl: "http://localhost:3000/config" }),
+  transport: createHttpTransport({ baseUrl: "http://localhost:3399" }),
 });
 
 // Get a typed namespace client
@@ -65,7 +69,7 @@ Configuration is stored as **nested JSON objects** (not flat dot-paths). The res
 | [`@weaver-conf/config-secrets`](./packages/config-secrets) | SecretProvider, SecretCache, SecretResolutionService |
 | [`@weaver-conf/config-policy`](./packages/config-policy) | Change policy evaluation, validation, one-way ratchet rules |
 | [`@weaver-conf/config-sessions`](./packages/config-sessions) | Override session provider for time-limited emergency overrides |
-| [`@weaver-conf/storage-providers`](./packages/storage-providers) | Storage provider abstractions + implementations (FS, Git, MongoDB, memory, env-overlay) |
+| [`@weaver-conf/storage-providers`](./packages/storage-providers) | Current-format authority adapters (FS, local Git, MongoDB replica set, volatile memory) |
 | [`@weaver-conf/weaver-client`](./packages/weaver-client) | Unified client SDK: `defineNamespace`, schema validation, offline boot |
 | [`@weaver-conf/weaver-server`](./packages/weaver-server) | Server: REST adapter, SSE streaming, SCOMP transport, schema registry |
 
@@ -75,14 +79,14 @@ Configuration is stored as **nested JSON objects** (not flat dot-paths). The res
 
 | Type | Purpose | Example |
 | --- | --- | --- |
-| **Static** | Immutable defaults loaded at startup | Platform defaults, app defaults |
+| **Static** | Non-scoped snapshots in declared order | Platform defaults, app defaults |
 | **Dynamic** | Mutable overrides scoped to a context | Tenant/org configuration |
-| **Personal** | User-specific preferences | Theme, locale, layout |
-| **Ephemeral** | Temporary overrides with automatic expiry | Emergency sessions, feature flags |
+| **Personal** | Reserved concept, not an installed standalone resolver | Future user-specific preferences |
+| **Ephemeral** | Explicit embedded volatile state, not standalone durability | Sessions and tests |
 
 ### Resolution & Deep Merge
 
-The engine walks the layer stack top-to-bottom and deep-merges values. Objects recurse into nested keys, arrays replace wholesale, and `null` clears a key (removing the override so lower layers show through).
+The engine walks the declared layer array from lower to higher rank, expanding dynamic scopes in place. Objects recurse, arrays replace, and `null` blocks lower values rather than revealing them. Standalone layouts currently support static/dynamic layers with the installed `deep` merge only; unsupported semantics refuse before initialization.
 
 ### Schema Governance
 
@@ -100,7 +104,8 @@ Each configuration property can declare schema metadata:
 ## Guides
 
 - [Server Quickstart](./docs/guides/server-quickstart.md)
-- [Bootstrap Config Repository](./docs/guides/bootstrap-config-repo.md)
+- [Seed Bootstrap, Lifecycle and Recovery](./docs/guides/bootstrap-config-repo.md)
+- [Removed Pre-release Surfaces](./docs/bootstrap-removal-inventory.md)
 
 ## Development
 

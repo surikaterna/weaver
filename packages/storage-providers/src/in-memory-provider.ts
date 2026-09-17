@@ -1,89 +1,60 @@
-// In-memory configuration storage provider — SESSION layer and test double
-
-import { deepRemove, deepSet } from "@weaver-conf/config-engine";
 import type {
   ConfigurationLayer,
   ConfigurationLayerData,
   ConfigurationStorageProvider,
   WriteResult,
 } from "@weaver-conf/config-types";
+import { revisionOf } from "./authority-envelope";
+import { directAuthorityWrite } from "./layer-authority";
+import { createMemoryAuthority } from "./memory-authority";
 
-/** Options for creating an in-memory storage provider (useful for tests and session layers). */
 export interface InMemoryProviderOptions {
   id: string;
   layer: ConfigurationLayer | string;
   initialEntries?: Record<string, unknown> | undefined;
+  environment?: string;
 }
 
-/** @see {@link createInMemoryStorageProvider} — prefer the factory function for consistency */
 class InMemoryStorageProvider implements ConfigurationStorageProvider {
   readonly id: string;
   readonly layer: ConfigurationLayer | string;
-  readonly writable = true as const;
-
-  private entries: Record<string, unknown>;
-  private scopedEntries = new Map<string, Record<string, unknown>>();
-
+  readonly writable = true;
+  readonly authority;
+  readonly capabilities;
   constructor(options: InMemoryProviderOptions) {
     this.id = options.id;
     this.layer = options.layer;
-    this.entries =
-      options.initialEntries !== undefined ? { ...options.initialEntries } : {};
+    this.authority = createMemoryAuthority(
+      options.environment ?? "default",
+      this.layer,
+      options.initialEntries ?? {},
+    );
+    this.capabilities = this.authority.capabilities;
   }
-
-  async load(): Promise<ConfigurationLayerData> {
-    return { entries: { ...this.entries } };
+  load(): Promise<ConfigurationLayerData> {
+    return this.loadLayer(this.layer);
   }
-
   async loadLayer(layer: string): Promise<ConfigurationLayerData> {
-    if (layer === this.layer) {
-      return { entries: { ...this.entries } };
-    }
-
-    const entries = this.scopedEntries.get(layer);
-    return { entries: entries ? { ...entries } : {} };
+    const snapshot = await this.authority.readLayer(layer);
+    return {
+      entries: snapshot.entries,
+      revision: JSON.stringify(revisionOf(snapshot)),
+    };
   }
-
-  async write(key: string, value: unknown): Promise<WriteResult> {
-    deepSet(this.entries, key, value);
-    return { success: true };
+  write(key: string, value: unknown): Promise<WriteResult> {
+    return this.writeLayer(this.layer, key, value);
   }
-
-  async writeLayer(
-    layer: string,
-    key: string,
-    value: unknown,
-  ): Promise<WriteResult> {
-    if (layer === this.layer) {
-      deepSet(this.entries, key, value);
-      return { success: true };
-    }
-
-    const current = this.scopedEntries.get(layer) ?? {};
-    deepSet(current, key, value);
-    this.scopedEntries.set(layer, current);
-    return { success: true };
+  writeLayer(layer: string, key: string, value: unknown): Promise<WriteResult> {
+    return directAuthorityWrite(this.authority, layer, key, value);
   }
-
-  async remove(key: string): Promise<WriteResult> {
-    deepRemove(this.entries, key);
-    return { success: true };
+  remove(key: string): Promise<WriteResult> {
+    return this.removeLayer(this.layer, key);
   }
-
-  async removeLayer(layer: string, key: string): Promise<WriteResult> {
-    if (layer === this.layer) {
-      deepRemove(this.entries, key);
-      return { success: true };
-    }
-
-    const current = this.scopedEntries.get(layer) ?? {};
-    deepRemove(current, key);
-    this.scopedEntries.set(layer, current);
-    return { success: true };
+  removeLayer(layer: string, key: string): Promise<WriteResult> {
+    return directAuthorityWrite(this.authority, layer, key, undefined, true);
   }
 }
 
-/** Creates an in-memory storage provider instance. */
 export function createInMemoryStorageProvider(
   options: InMemoryProviderOptions,
 ): ConfigurationStorageProvider {

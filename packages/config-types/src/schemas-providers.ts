@@ -4,7 +4,13 @@ import { z } from "zod";
 
 export const writeResultSchema = z.strictObject({
   success: z.boolean(),
-  error: z.string().optional(),
+  error: z
+    .strictObject({
+      code: z.string(),
+      message: z.string(),
+      details: z.record(z.string(), z.unknown()).optional(),
+    })
+    .optional(),
   revision: z.string().optional(),
 });
 

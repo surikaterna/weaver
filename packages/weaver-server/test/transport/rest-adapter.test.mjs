@@ -1,4 +1,4 @@
-import { createWeaverConfigService } from "../../src/core/config-service.ts";
+import { createTestService } from "../setup-service.ts";
 import { createRestAdapter } from "../../src/transport/rest-adapter.ts";
 import { deepSet, deepRemove } from "@weaver-conf/config-engine";
 
@@ -22,7 +22,11 @@ function createTestProvider(id, layer, entries, writable = true) {
 
 async function setup(opts = {}) {
   const provider = createTestProvider("p1", "platform", { app: { name: "test" }, db: { host: "localhost" } });
-  const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+  const svc = await createTestService({ providers: [provider], environment: "dev" }, {
+    app: { type: "object", additionalProperties: true },
+    db: { type: "object", additionalProperties: true },
+    new: { type: "object", additionalProperties: true },
+  });
   const adapter = createRestAdapter({ configService: svc, ...opts });
   return { svc, adapter };
 }
@@ -63,10 +67,10 @@ describe("RestAdapter v1", () => {
     expect(res.body.data.entries.app.name).toBe("test");
   });
 
-  test("GET /v1/config with ?scope= passes scope", async () => {
+  test("GET /v1/config with unprovisioned ?scope= rejects instead of inheriting base", async () => {
     const { adapter } = await setup();
     const res = await adapter.handleRequest("GET", "/v1/config", req({ query: { scope: "tenant:acme" } }));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
     assertEnvelope(res.body);
   });
 

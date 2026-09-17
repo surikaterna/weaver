@@ -1,3 +1,4 @@
+import { deepRemove, deepSet } from "@weaver-conf/config-engine";
 import type { ScopeInstance } from "@weaver-conf/config-types";
 import { formatScopePath } from "@weaver-conf/config-types";
 import type { WeaverTransport } from "./transport";
@@ -72,9 +73,9 @@ export function createScopeLoader(options: ScopeLoaderOptions): ScopeLoader {
       const state = scopeStates.get(key);
       if (!state) return;
       if (delta.action === "set") {
-        state[delta.key] = delta.value;
+        deepSet(state, delta.key, delta.value);
       } else {
-        delete state[delta.key];
+        deepRemove(state, delta.key);
       }
     },
 

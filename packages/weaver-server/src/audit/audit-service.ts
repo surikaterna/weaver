@@ -1,7 +1,7 @@
 // Audit service with pluggable sinks and sensitive value masking
 import type { WeaverLogger } from "@weaver-conf/config-engine";
 import { consoleLogger } from "@weaver-conf/config-engine";
-import type { ConfigAuditSink, SinkDomainAuditEntry } from "./types";
+import type { ConfigAuditEntry, ConfigAuditSink } from "./types";
 
 export interface AuditServiceOptions {
   sinks: ConfigAuditSink[];
@@ -10,15 +10,15 @@ export interface AuditServiceOptions {
 }
 
 export interface AuditService {
-  record(entry: SinkDomainAuditEntry): Promise<void>;
+  record(entry: ConfigAuditEntry): Promise<void>;
 }
 
 export function createAuditService(options: AuditServiceOptions): AuditService {
   const { sinks, sensitiveKeys } = options;
   const logger = options.logger ?? consoleLogger;
 
-  function maskEntry(entry: SinkDomainAuditEntry): SinkDomainAuditEntry {
-    if (!sensitiveKeys?.has(entry.key)) {
+  function maskEntry(entry: ConfigAuditEntry): ConfigAuditEntry {
+    if (!hasAuditedValues(entry) || !sensitiveKeys?.has(entry.key)) {
       return entry;
     }
     return {
@@ -29,7 +29,7 @@ export function createAuditService(options: AuditServiceOptions): AuditService {
   }
 
   return {
-    async record(entry: SinkDomainAuditEntry): Promise<void> {
+    async record(entry: ConfigAuditEntry): Promise<void> {
       const masked = maskEntry(entry);
       const results = await Promise.allSettled(
         sinks.map((sink) => sink.record(masked)),
@@ -41,4 +41,13 @@ export function createAuditService(options: AuditServiceOptions): AuditService {
       }
     },
   };
+}
+
+function hasAuditedValues(
+  entry: ConfigAuditEntry,
+): entry is Extract<ConfigAuditEntry, { readonly domain: "config" | "sink" }> {
+  // Accept legacy sink entries that predate the domain discriminator.
+  return (
+    !("domain" in entry) || entry.domain === "config" || entry.domain === "sink"
+  );
 }

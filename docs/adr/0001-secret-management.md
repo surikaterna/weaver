@@ -1,5 +1,7 @@
 # ADR-0001: Weaver Marker Architecture, Secret Management, and Service Configuration
 
+> **Historical API examples:** the environment-overlay/provenance wrapper exports and bootstrap snippets below describe earlier proposals, not supported current APIs. Marker/secret-management concepts remain relevant; current schema-governed startup and provenance use the [seed bootstrap guide](../guides/bootstrap-config-repo.md) and canonical pipeline.
+
 > **Status**: Accepted. Note: packages `config-providers` and `config-server` referenced in this ADR were consolidated into `weaver-server` in Phase 1 (May 2026).
 
 - **Status**: Accepted

@@ -1,0 +1,385 @@
+import type { WeaverLogger } from "@weaver-conf/config-engine";
+import type { SecretBackend } from "@weaver-conf/config-runtime";
+import {
+  formatScopePath,
+  isConfigMount,
+  isSecretReference,
+  type ScopeInstance,
+} from "@weaver-conf/config-types";
+import type { ConfigDelta } from "../types/index";
+import type { WeaverConfigService } from "./config-service-types";
+import { filterProtectedConfigEntries } from "./protected-config-paths";
+import { createResolutionPipeline } from "./resolution-pipeline";
+import { RuntimePublicationGate } from "./runtime-publication-gate";
+import {
+  projectRuntimeMutation,
+  projectRuntimeRegistration,
+  type ResolvedRuntimeProjectionContext,
+} from "./schema-read-boundary";
+import { parseScopeLayer } from "./scope-utils";
+
+const EFFECTIVE_BASE_LAYER = "weaver-effective";
+
+interface ContextState {
+  rawEntries: Record<string, unknown>;
+}
+
+interface ContextRecord {
+  readonly state: ContextState;
+  readonly pipeline: ReturnType<typeof createResolutionPipeline>;
+}
+
+interface CapturedContext {
+  readonly layer: string;
+  readonly scopePath?: ScopeInstance[];
+  readonly rawEntries: Record<string, unknown>;
+}
+
+interface ValidatedRuntimeContext {
+  readonly scopePath: ScopeInstance[];
+  readonly entries: Record<string, unknown>;
+}
+
+interface RuntimeResolutionOptions {
+  readonly isActiveScope?: (path: ScopeInstance[]) => boolean;
+  readonly getMergedState: (
+    scopePath?: ScopeInstance[],
+  ) => Record<string, unknown>;
+  readonly secretBackend?: SecretBackend;
+  readonly logger: WeaverLogger;
+}
+
+export interface RuntimeResolutionContexts {
+  resolveCandidate(
+    entries: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>;
+  materialize(scopePath: ScopeInstance[]): void;
+  installValidated(contexts: readonly ValidatedRuntimeContext[]): void;
+  resolve(scopePath?: ScopeInstance[]): Promise<Record<string, unknown>>;
+  resolveSnapshot(scopePaths: ReadonlyArray<ScopeInstance[]>): Promise<{
+    readonly base: ResolvedRuntimeProjectionContext;
+    readonly scopes: ReadonlyArray<ResolvedRuntimeProjectionContext>;
+  }>;
+  publishMutation(
+    service: WeaverConfigService,
+    delta: ConfigDelta,
+    validated?: readonly ValidatedRuntimeContext[],
+  ): Promise<void>;
+  publishRegistration(
+    service: WeaverConfigService,
+    path: string,
+    validated?: readonly ValidatedRuntimeContext[],
+  ): Promise<void>;
+  onDelta(handler: (delta: ConfigDelta) => void): () => void;
+  closePublication(): void;
+  openPublication(): void;
+  dispose(): Promise<void>;
+}
+
+const runtimeContexts = new WeakMap<
+  WeaverConfigService,
+  RuntimeResolutionContexts
+>();
+
+export function bindRuntimeResolutionContexts(
+  service: WeaverConfigService,
+  contexts: RuntimeResolutionContexts,
+): void {
+  runtimeContexts.set(service, contexts);
+}
+
+export async function disposeRuntimeResolutionContexts(
+  service: WeaverConfigService,
+): Promise<void> {
+  await runtimeContexts.get(service)?.dispose();
+  runtimeContexts.delete(service);
+}
+
+export function createRuntimeResolutionContexts(
+  options: RuntimeResolutionOptions,
+): RuntimeResolutionContexts {
+  return new RuntimeResolutionContextManager(options);
+}
+
+class RuntimeResolutionContextManager implements RuntimeResolutionContexts {
+  private readonly records = new Map<string, ContextRecord>();
+  private readonly materialized = new Map<string, ScopeInstance[]>();
+  private readonly publication: RuntimePublicationGate;
+  private validated = new Map<string, Record<string, unknown>>();
+  private queue = Promise.resolve();
+
+  constructor(private readonly options: RuntimeResolutionOptions) {
+    this.publication = new RuntimePublicationGate(options.logger);
+  }
+
+  async resolveCandidate(
+    entries: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const raw = filterProtectedConfigEntries(entries);
+    const pipeline = await createResolutionPipeline({
+      getMergedState: () => raw,
+      getBaseEntries: () => raw,
+      ...(this.options.secretBackend
+        ? { secretBackend: this.options.secretBackend }
+        : {}),
+    });
+    try {
+      await pipeline.refreshSecrets(raw);
+      return pipeline.resolveEntries(raw, "", raw);
+    } finally {
+      pipeline.dispose();
+    }
+  }
+
+  materialize(scopePath: ScopeInstance[]): void {
+    if (scopePath.length === 0) return;
+    this.materialized.set(formatScopePath(scopePath), [...scopePath]);
+  }
+
+  installValidated(contexts: readonly ValidatedRuntimeContext[]): void {
+    this.validated = new Map(
+      contexts.map((context) => [
+        contextId(context.scopePath),
+        structuredClone(context.entries),
+      ]),
+    );
+  }
+
+  resolve(scopePath?: ScopeInstance[]): Promise<Record<string, unknown>> {
+    const validated = this.validated.get(contextId(scopePath));
+    if (validated) return this.run(async () => structuredClone(validated));
+    const captured = this.capture(scopePath);
+    return this.run(async () => (await this.resolveCaptured(captured)).entries);
+  }
+
+  resolveSnapshot(scopePaths: ReadonlyArray<ScopeInstance[]>): Promise<{
+    readonly base: ResolvedRuntimeProjectionContext;
+    readonly scopes: ReadonlyArray<ResolvedRuntimeProjectionContext>;
+  }> {
+    const validated = [undefined, ...scopePaths].map((path) =>
+      this.validated.get(contextId(path)),
+    );
+    if (validated.every(Boolean))
+      return this.run(async () => ({
+        base: validatedProjection(undefined, validated[0] ?? {}),
+        scopes: scopePaths.map((path, index) =>
+          validatedProjection(path, validated[index + 1] ?? {}),
+        ),
+      }));
+    const base = this.capture();
+    const scopes = scopePaths.map((scopePath) => this.capture(scopePath));
+    return this.run(async () => ({
+      base: await this.resolveCaptured(base),
+      scopes: await Promise.all(
+        scopes.map((item) => this.resolveCaptured(item)),
+      ),
+    }));
+  }
+
+  publishMutation(
+    service: WeaverConfigService,
+    delta: ConfigDelta,
+    validated?: readonly ValidatedRuntimeContext[],
+  ): Promise<void> {
+    if (validated)
+      return this.publish(async () =>
+        projectRuntimeMutation(
+          service,
+          delta,
+          validatedContexts(validated, delta.layer),
+        ),
+      );
+    const captures = this.affectedContexts(delta.layer);
+    return this.publish(async () =>
+      projectRuntimeMutation(
+        service,
+        delta,
+        await Promise.all(captures.map((item) => this.resolveCaptured(item))),
+      ),
+    );
+  }
+
+  publishRegistration(
+    service: WeaverConfigService,
+    path: string,
+    validated?: readonly ValidatedRuntimeContext[],
+  ): Promise<void> {
+    if (validated)
+      return this.publish(async () =>
+        projectRuntimeRegistration(service, path, validatedContexts(validated)),
+      );
+    const captures = this.affectedContexts();
+    return this.publish(async () =>
+      projectRuntimeRegistration(
+        service,
+        path,
+        await Promise.all(captures.map((item) => this.resolveCaptured(item))),
+      ),
+    );
+  }
+
+  onDelta(handler: (delta: ConfigDelta) => void): () => void {
+    return this.publication.subscribe(handler);
+  }
+
+  closePublication(): void {
+    this.publication.close();
+  }
+
+  openPublication(): void {
+    this.publication.reopen();
+  }
+
+  async dispose(): Promise<void> {
+    await this.run(async () => {
+      for (const record of this.records.values()) {
+        (await record.pipeline).dispose();
+      }
+      this.records.clear();
+      this.materialized.clear();
+      this.validated.clear();
+      this.publication.close();
+    });
+  }
+
+  private run<T>(job: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(job);
+    this.queue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  private capture(scopePath?: ScopeInstance[]): CapturedContext {
+    return {
+      layer: contextId(scopePath),
+      ...(scopePath ? { scopePath } : {}),
+      rawEntries: filterProtectedConfigEntries(
+        this.options.getMergedState(scopePath),
+      ),
+    };
+  }
+
+  private affectedContexts(layer?: string): CapturedContext[] {
+    const scope = layer ? parseScopeLayer(layer) : null;
+    const captures: CapturedContext[] = [];
+    if (scope === null) captures.push(this.capture());
+    for (const scopePath of this.materialized.values()) {
+      if (this.options.isActiveScope && !this.options.isActiveScope(scopePath))
+        continue;
+      if (scope && !containsScope(scopePath, scope)) continue;
+      captures.push(this.capture(scopePath));
+    }
+    return captures;
+  }
+
+  private async resolveCaptured(
+    captured: CapturedContext,
+  ): Promise<ResolvedRuntimeProjectionContext> {
+    const record = this.contextRecord(captured);
+    record.state.rawEntries = captured.rawEntries;
+    const pipeline = await record.pipeline;
+    pipeline.rebuildMountMap();
+    await pipeline.refreshSecrets(captured.rawEntries);
+    const resolved = pipeline.resolveEntries(
+      captured.rawEntries,
+      "",
+      captured.rawEntries,
+    );
+    return {
+      layer: captured.layer,
+      ...(captured.scopePath ? { scopePath: captured.scopePath } : {}),
+      entries: removeUnresolvedMarkers(resolved),
+    };
+  }
+
+  private contextRecord(captured: CapturedContext): ContextRecord {
+    const current = this.records.get(captured.layer);
+    if (current) return current;
+    const state = { rawEntries: captured.rawEntries };
+    const record = {
+      state,
+      pipeline: createResolutionPipeline({
+        getMergedState: () => state.rawEntries,
+        getBaseEntries: () => state.rawEntries,
+        ...(this.options.secretBackend
+          ? { secretBackend: this.options.secretBackend }
+          : {}),
+      }),
+    };
+    this.records.set(captured.layer, record);
+    return record;
+  }
+
+  private async publish(
+    job: () => Promise<ReadonlyArray<ConfigDelta>>,
+  ): Promise<void> {
+    try {
+      await this.run(async () => {
+        if (!this.publication.acceptsPublication()) return;
+        const deltas = await job();
+        this.publication.dispatch(deltas);
+        this.validated.clear();
+      });
+    } catch (error: unknown) {
+      this.publication.logError("[config] runtime projection failed:", error);
+    }
+  }
+}
+
+function validatedProjection(
+  scopePath: ScopeInstance[] | undefined,
+  entries: Record<string, unknown>,
+): ResolvedRuntimeProjectionContext {
+  return {
+    layer: contextId(scopePath),
+    ...(scopePath ? { scopePath } : {}),
+    entries: structuredClone(entries),
+  };
+}
+
+function contextId(scopePath?: ScopeInstance[]): string {
+  return scopePath?.length ? formatScopePath(scopePath) : EFFECTIVE_BASE_LAYER;
+}
+
+function validatedContexts(
+  contexts: readonly ValidatedRuntimeContext[],
+  layer?: string,
+): ResolvedRuntimeProjectionContext[] {
+  const scope = layer ? parseScopeLayer(layer) : null;
+  return contexts
+    .filter((context) => !scope || containsScope(context.scopePath, scope))
+    .map(({ scopePath, entries }) => ({
+      scopePath,
+      entries: structuredClone(entries),
+      layer: contextId(scopePath),
+    }));
+}
+
+function containsScope(
+  scopePath: ReadonlyArray<ScopeInstance>,
+  scope: { readonly scopeId: string; readonly value: string },
+): boolean {
+  return scopePath.some(
+    (item) => item.scopeId === scope.scopeId && item.value === scope.value,
+  );
+}
+
+function removeUnresolvedMarkers(
+  entries: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(entries).flatMap(([key, value]) => {
+      const resolved = removeUnresolvedValue(value);
+      return resolved === undefined ? [] : [[key, resolved]];
+    }),
+  );
+}
+
+function removeUnresolvedValue(value: unknown): unknown {
+  if (isConfigMount(value) || isSecretReference(value)) return undefined;
+  if (Array.isArray(value)) return value.map(removeUnresolvedValue);
+  if (value === null || typeof value !== "object") return value;
+  return removeUnresolvedMarkers(Object.fromEntries(Object.entries(value)));
+}

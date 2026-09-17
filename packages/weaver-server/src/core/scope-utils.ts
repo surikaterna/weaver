@@ -1,5 +1,7 @@
 import type { ScopeInstance } from "@weaver-conf/config-types";
 import { formatScopePath } from "@weaver-conf/config-types";
+import { createWeaverError } from "../types/errors";
+import type { WeaverConfigService } from "./config-service-types";
 
 export interface ParsedScopeLayer {
   scopeId: string;
@@ -51,9 +53,27 @@ export function buildScopePathString(scopePath: ScopeInstance[]): string {
 export function parseScopeQuery(
   query: string | undefined,
 ): ScopeInstance[] | undefined {
-  if (!query) return undefined;
-  return query.split(",").map((part) => {
+  if (query === undefined) return undefined;
+  return query.split(/[/,]/).map((part) => {
+    if (!/^[^:/,\s]+:[^:/,\s]+$/.test(part)) {
+      throw createWeaverError("VALIDATION_ERROR", "Invalid scope query");
+    }
     const [scopeId = "", value = ""] = part.split(":");
     return { scopeId, value };
   });
+}
+
+export async function assertServiceScope(
+  service: WeaverConfigService,
+  scopePath: ScopeInstance[] | undefined,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (service.assertScopeMembership) {
+    return service.assertScopeMembership(scopePath, signal);
+  }
+  if (scopePath?.length)
+    throw createWeaverError(
+      "SERVER_DEGRADED",
+      "Scope admission authority is not bound",
+    );
 }

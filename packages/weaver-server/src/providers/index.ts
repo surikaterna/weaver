@@ -17,10 +17,3 @@ export {
   createInMemoryStorageProvider,
   createMongoDBStorageProvider,
 } from "@weaver-conf/storage-providers";
-
-// Server-specific orchestration
-export type { EnvironmentOverlayOptions } from "./environment-overlay";
-export {
-  mergeWithEnvironment,
-  withEnvironmentOverlay,
-} from "./environment-overlay";

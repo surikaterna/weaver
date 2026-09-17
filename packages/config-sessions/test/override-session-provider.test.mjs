@@ -147,14 +147,14 @@ test("provider implements ConfigurationStorageProvider (read/write/remove)", asy
 
   // Read
   const data = await provider.load();
-  expect(data.entries["ghost.app.theme"]).toBe("dark");
+  expect(data.entries.ghost.app.theme).toBe("dark");
 
   // Remove
   const removeResult = await provider.remove("ghost.app.theme");
   expect(removeResult.success).toBe(true);
 
   const dataAfter = await provider.load();
-  expect(dataAfter.entries["ghost.app.theme"]).toBe(undefined);
+  expect(dataAfter.entries.ghost.app).toEqual({});
 
   controller.dispose();
 });
@@ -329,13 +329,13 @@ test("provider load returns snapshot (not live reference)", async () => {
   });
 
   controller.activate({ reason: "test" });
-  await controller.provider.write("key", "value");
+  await controller.provider.write("nested.key", "value");
 
   const data1 = await controller.provider.load();
-  data1.entries.key = "mutated";
+  data1.entries.nested.key = "mutated";
 
   const data2 = await controller.provider.load();
-  expect(data2.entries.key).toBe("value");
+  expect(data2.entries.nested.key).toBe("value");
 
   controller.dispose();
 });

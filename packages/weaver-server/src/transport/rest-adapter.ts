@@ -1,11 +1,21 @@
 // REST transport adapter — maps HTTP routes to WeaverConfigService
 
-import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
+import {
+  type ConfigurationPropertySchema,
+  WeaverErrorInstance,
+} from "@weaver-conf/config-types";
 import { ZodError } from "zod";
+import type { AuditService } from "../audit/audit-service";
 import type { AuthContext } from "../auth/auth-middleware";
 import type { WeaverConfigService } from "../core/config-service";
+import {
+  assertConfigServiceTransportOpen,
+  configServiceTransportRevision,
+} from "../core/config-service-lifecycle";
+import type { SchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
-import { createWeaverError } from "../types/index";
+import type { WeaverRuntime } from "../server-runtime";
+import { createWeaverError, httpStatusForError } from "../types/index";
 import type { AuthGate } from "./auth-gate";
 import {
   corsHeaders,
@@ -21,6 +31,7 @@ export interface RestRoute {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   handler: (req: RestRequest) => Promise<RestResponse>;
+  maintenance?: boolean;
 }
 
 export interface RestRequest {
@@ -40,9 +51,12 @@ export interface RestResponse {
 
 export interface RestAdapterOptions {
   configService: WeaverConfigService;
+  schemaRegistry?: SchemaRegistry;
   scopeManager?: ScopeManager;
   corsOrigins?: string[];
   authGate?: AuthGate;
+  auditService?: AuditService;
+  runtime?: WeaverRuntime;
 }
 
 export interface RestAdapter {
@@ -60,12 +74,23 @@ interface RouteMatch {
 }
 
 export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
-  const { configService, scopeManager, corsOrigins, authGate } = options;
+  const {
+    configService,
+    schemaRegistry,
+    scopeManager,
+    corsOrigins,
+    authGate,
+    auditService,
+    runtime,
+  } = options;
 
   const routes: RestRoute[] = buildRoutes({
     configService,
+    schemaRegistry,
     scopeManager,
     authGate,
+    auditService,
+    runtime,
   });
 
   function findRoute(method: string, path: string): RouteMatch | null {
@@ -123,6 +148,8 @@ export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
     };
 
     try {
+      if (!match.route.maintenance)
+        assertConfigServiceTransportOpen(configService);
       const response = await match.route.handler(fullReq);
       if (corsOrigins?.length) {
         response.headers = {
@@ -133,7 +160,7 @@ export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
       return response;
     } catch (err: unknown) {
       if (err instanceof ZodError) {
-        const rev = configService.revision;
+        const rev = configServiceTransportRevision(configService);
         return {
           status: 400,
           body: errorEnvelope(
@@ -145,8 +172,18 @@ export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
           headers: v1Headers(rev),
         };
       }
+      if (err instanceof WeaverErrorInstance) {
+        const rev = configServiceTransportRevision(configService);
+        const effectiveInvalid =
+          err.details?.kind === "effective-configuration-invalid";
+        return {
+          status: effectiveInvalid ? 422 : httpStatusForError(err.code),
+          body: errorEnvelope(err, rev),
+          headers: v1Headers(rev),
+        };
+      }
       const message = err instanceof Error ? err.message : String(err);
-      const rev = configService.revision;
+      const rev = configServiceTransportRevision(configService);
       return {
         status: 500,
         body: errorEnvelope(createWeaverError("INTERNAL_ERROR", message), rev),

@@ -99,6 +99,54 @@ describe("WeaverClient", () => {
     expect(result.success).toBe(true);
   });
 
+  it("registered path-first methods delegate without namespace prefixes", async () => {
+    const transport = createLocalTransport({ snapshot: makeSnapshot() });
+    const calls: string[] = [];
+    transport.setRegisteredObject = async (anchorPath) => {
+      calls.push(anchorPath);
+      return { success: true };
+    };
+    transport.patchRegisteredPath = async (path) => {
+      calls.push(path);
+      return { success: true };
+    };
+    transport.validateRegisteredEffective = async (options) => {
+      calls.push(options.anchorPath);
+      return { valid: true, errors: [] };
+    };
+    const client = await createWeaverClient({ transport, namespace: "legacy" });
+    await client.setRegisteredObject("/checkout", {});
+    await client.patchRegisteredPath("/checkout/db/host", "db.internal");
+    await client.validateRegisteredEffective({ anchorPath: "/checkout" });
+    expect(calls).toEqual(["/checkout", "/checkout/db/host", "/checkout"]);
+  });
+
+  it("path-first registration returns canonical metadata", async () => {
+    const transport = createLocalTransport({ snapshot: makeSnapshot() });
+    transport.registerSchema = async (request) => ({
+      success: true,
+      isNewSchema: true,
+      hasBreakingChanges: false,
+      metadata: {
+        serviceId: request.serviceId,
+        servicePath: `/${request.serviceId}`,
+        environment: request.environment,
+        providerId:
+          "providerId" in request ? request.providerId : request.serviceId,
+        owner: request.owner,
+      },
+    });
+    const client = await createWeaverClient({ transport });
+    const response = await client.registerSchema({
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema: { type: "object" },
+      fragmentSlots: [],
+    });
+    expect(response.metadata?.servicePath).toBe("/checkout");
+  });
+
   it("listScopes() delegates to transport", async () => {
     const transport = createLocalTransport({
       snapshot: makeSnapshot({}, { "scope:acme": {} }),

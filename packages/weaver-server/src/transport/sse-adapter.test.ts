@@ -1,4 +1,7 @@
+import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
+import { createTestService } from "../../test/setup-service";
 import type { WeaverConfigService } from "../core/config-service";
+import { createSchemaRegistry } from "../core/schema-registry";
 import type { ConfigDelta } from "../types/index";
 import type { SSEAdapter } from "./sse-adapter";
 import { createSSEAdapter } from "./sse-adapter";
@@ -121,6 +124,70 @@ describe("SSEAdapter", () => {
     client.close();
   });
 
+  it("does not expose protected metadata in snapshots", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {
+        app: {
+          name: "public",
+          direct: { _weaver: "mount", source: "_weaver.catalog.registrations" },
+          bridge: { _weaver: "mount", source: "_weaver.catalog.registrations" },
+          chained: { _weaver: "mount", source: "app.bridge" },
+        },
+      },
+    });
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "test",
+      },
+      {
+        app: {
+          type: "object",
+          additionalProperties: true,
+          description: "LEAK",
+        },
+      },
+    );
+    const realAdapter = createSSEAdapter({ configService });
+
+    const client = await realAdapter.createClient({ prefix: "app" });
+    const messages = parseMessages(client);
+
+    expect(msg(messages, 0).data.entries).toEqual({ app: { name: "public" } });
+    expect(JSON.stringify(messages)).not.toContain("LEAK");
+    client.close();
+  });
+
+  it("sends complete inherited state for a scoped snapshot", async () => {
+    const base = createInMemoryStorageProvider({
+      id: "base",
+      layer: "platform",
+      initialEntries: { app: { mode: "base", limit: 1 } },
+    });
+    const tenant = createInMemoryStorageProvider({
+      id: "tenant",
+      layer: "tenant:acme",
+      initialEntries: { app: { limit: 2 } },
+    });
+    const configService = await createTestService(
+      {
+        providers: [base, tenant],
+        environment: "test",
+      },
+      { app: { type: "object", additionalProperties: true } },
+      [[{ scopeId: "tenant", value: "acme" }]],
+    );
+    const realAdapter = createSSEAdapter({ configService });
+
+    const client = await realAdapter.createClient({ scope: "tenant:acme" });
+    const snapshot = msg(parseMessages(client), 0).data;
+
+    expect(snapshot.entries).toEqual({ app: { mode: "base", limit: 2 } });
+    client.close();
+  });
+
   it("filters snapshot entries by prefix", async () => {
     const client = await adapter.createClient({ prefix: "app" });
     const msgs = parseMessages(client);
@@ -135,6 +202,7 @@ describe("SSEAdapter", () => {
     const client = await adapter.createClient();
     mock.setRevision("rev-2");
     mock.emitDelta(makeDelta({ key: "app.name", value: "newval" }));
+    await Promise.resolve();
     const msgs = parseMessages(client);
     expect(msgs.length).toBe(2); // snapshot + change
     expect(msg(msgs, 1).event).toBe("change");
@@ -148,11 +216,139 @@ describe("SSEAdapter", () => {
     const client = await adapter.createClient({ prefix: "db" });
     mock.emitDelta(makeDelta({ key: "app.name" }));
     mock.emitDelta(makeDelta({ key: "db.host", value: "newhost" }));
+    await Promise.resolve();
     const msgs = parseMessages(client);
     // snapshot + 1 matching change (app.name filtered out)
     expect(msgs.length).toBe(2);
     expect(msg(msgs, 1).event).toBe("change");
     expect(msg(msgs, 1).data.key).toBe("db.host");
+    client.close();
+  });
+
+  it("rejects incomplete mutations before invalid snapshots or deltas can exist", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: { checkout: { mode: "prod" } },
+    });
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "test",
+      },
+      {
+        checkout: {
+          type: "object",
+          required: ["mode"],
+          properties: {
+            mode: { type: "string", enum: ["prod", "test"] },
+            limit: { type: "number" },
+          },
+          additionalProperties: false,
+        },
+      },
+    );
+    const registry = createSchemaRegistry({ configService });
+    const realAdapter = createSSEAdapter({ configService });
+    const client = await realAdapter.createClient();
+
+    const partial = await configService.setRegisteredObject(
+      "platform",
+      "/checkout",
+      { limit: 10 },
+      { schemaRegistry: registry },
+    );
+    expect(partial.success).toBe(false);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(parseMessages(client)).toHaveLength(1);
+    const another = await realAdapter.createClient();
+    expect(parseMessages(another)[0]?.data.entries).toEqual({
+      checkout: { mode: "prod" },
+    });
+    another.close();
+    expect(realAdapter.clientCount).toBe(1);
+
+    const completed = await configService.set(
+      "platform",
+      "checkout.mode",
+      "test",
+    );
+    expect(completed.success).toBe(true);
+    const messages = parseMessages(client);
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.data).toMatchObject({
+      key: "checkout",
+      value: { mode: "test" },
+    });
+    client.close();
+  });
+
+  it("does not activate a registration invalidating an existing client", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: { checkout: { limit: 10 }, public: { ready: true } },
+    });
+    const configService = await createTestService(
+      {
+        providers: [provider],
+        environment: "test",
+      },
+      {
+        checkout: { type: "object", additionalProperties: true },
+        public: { type: "object", additionalProperties: true },
+      },
+    );
+    const realAdapter = createSSEAdapter({ configService });
+    const client = await realAdapter.createClient();
+    const registry = createSchemaRegistry({ configService });
+
+    const request: Parameters<typeof registry.register>[0] = {
+      serviceId: "checkout",
+      environment: "test",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema: {
+        type: "object",
+        required: ["mode"],
+        properties: {
+          mode: { type: "string" },
+          limit: { type: "number" },
+        },
+        additionalProperties: false,
+      },
+      fragmentSlots: [],
+    };
+    const revision = configService.revision;
+    expect(
+      (await registry.register(request, { expectedRevision: revision }))
+        .success,
+    ).toBe(false);
+    expect(configService.revision).toBe(revision);
+    expect(parseMessages(client)).toHaveLength(1);
+    await configService.set("platform", "public.ready", false);
+    await configService.set("platform", "checkout.mode", "prod");
+    expect(
+      (
+        await registry.register(request, {
+          expectedRevision: configService.revision,
+        })
+      ).success,
+    ).toBe(true);
+
+    const changes = parseMessages(client).filter(
+      (message) => message.event === "change",
+    );
+    expect(
+      changes.map((message) => [message.data.action, message.data.key]),
+    ).toEqual([
+      ["set", "checkout"],
+      ["set", "public"],
+      ["set", "checkout"],
+      ["set", "public"],
+      ["set", "checkout"],
+    ]);
+    expect(changes.at(-1)?.data.value).toEqual({ limit: 10, mode: "prod" });
     client.close();
   });
 
@@ -210,6 +406,7 @@ describe("SSEAdapter", () => {
 
     mock.emitDelta(makeDelta({ key: "app.name", value: "v2" }));
     mock.emitDelta(makeDelta({ key: "db.host", value: "newdb" }));
+    await Promise.resolve();
 
     const appMsgs = parseMessages(appClient);
     const dbMsgs = parseMessages(dbClient);
@@ -244,6 +441,7 @@ describe("SSEAdapter", () => {
     for (let i = 0; i < 6; i++) {
       mock.emitDelta(makeDelta({ key: "app.name", value: `v${i}` }));
     }
+    await Promise.resolve();
     // Buffer should be capped at 5
     expect(client.messages.length).toBe(5);
     // Oldest messages (snapshot + early changes) should be evicted

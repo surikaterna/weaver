@@ -1,4 +1,5 @@
-import { createWeaverConfigService } from "../../src/core/config-service.ts";
+import { createTestService } from "../setup-service.ts";
+import { deepSet, deepRemove } from "@weaver-conf/config-engine";
 import { createSSEAdapter } from "../../src/transport/sse-adapter.ts";
 
 function createTestProvider(id, layer, entries, writable = true) {
@@ -9,19 +10,22 @@ function createTestProvider(id, layer, entries, writable = true) {
     writable,
     async load() { return { entries: { ...data } }; },
     async write(key, value) {
-      data[key] = value;
+      deepSet(data, key, value);
       return { success: true };
     },
     async remove(key) {
-      delete data[key];
+      deepRemove(data, key);
       return { success: true };
     },
   };
 }
 
 async function setup() {
-  const provider = createTestProvider("p1", "platform", { "app.name": "test" });
-  const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+  const provider = createTestProvider("p1", "platform", { app: { name: "test" } });
+  const svc = await createTestService({ providers: [provider], environment: "dev" }, {
+    app: { type: "object", properties: { name: { type: "string" } }, additionalProperties: false },
+    db: { type: "object", properties: { host: { type: "string" } }, additionalProperties: false },
+  });
   const adapter = createSSEAdapter({ configService: svc });
   return { svc, adapter };
 }

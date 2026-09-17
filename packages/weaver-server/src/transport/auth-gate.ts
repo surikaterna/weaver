@@ -5,6 +5,7 @@ import type {
   ConfigurationPropertySchema,
 } from "@weaver-conf/config-types";
 import type { AuthContext } from "../auth/auth-middleware";
+import { filterProtectedConfigEntries } from "../core/protected-config-paths";
 import type { RestResponse } from "./rest-adapter";
 
 export interface AuthGate {
@@ -82,7 +83,10 @@ export function createAuthGate(options: AuthGateOptions): AuthGate {
     entries: Record<string, unknown>,
     schemaMap: Map<string, ConfigurationPropertySchema>,
   ): Record<string, unknown> {
-    return authFunctions.filterVisibleKeys(accessCtx, entries, schemaMap);
+    const publicEntries = filterProtectedConfigEntries(entries);
+    return filterProtectedConfigEntries(
+      authFunctions.filterVisibleKeys(accessCtx, publicEntries, schemaMap),
+    );
   }
 
   return { toAccessContext, gateRead, gateWrite, filterVisible };

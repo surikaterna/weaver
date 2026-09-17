@@ -1,3 +1,8 @@
+export {
+  mutationDigest as computeProviderMutationDigest,
+  parseEnvelope as validateProviderEnvelope,
+  revisionOf as getProviderRevision,
+} from "./authority-envelope";
 export type {
   FileSystemProviderOptions,
   FileSystemStorageProvider,

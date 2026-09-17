@@ -15,7 +15,7 @@ export type {
 } from "./policy-engine";
 export { evaluateChangePolicy } from "./policy-engine";
 // Policy validation
-export type { PolicyViolation } from "./policy-validation";
+export type { PolicySchemaMap, PolicyViolation } from "./policy-validation";
 export { validateChangePolicies } from "./policy-validation";
 // Ratchet validator
 export type {

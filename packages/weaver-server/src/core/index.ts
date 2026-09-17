@@ -4,11 +4,14 @@ export type {
 } from "./change-detector";
 export { createChangeDetector } from "./change-detector";
 export type {
+  EffectiveValidationContext,
+  SchemaWriteContext,
   WeaverConfigService,
   WeaverConfigServiceOptions,
   WriteContext,
 } from "./config-service";
 export { createWeaverConfigService } from "./config-service";
+export { createControlService } from "./control-service";
 export type {
   PromotionEngine,
   PromotionEngineOptions,
@@ -24,15 +27,15 @@ export type {
 } from "./rollback-service";
 export { createRollbackService } from "./rollback-service";
 export type {
-  PersistentSchemaRegistryOptions,
+  RegisteredSchemaAnchor,
   SchemaRegistrationRequest,
   SchemaRegistrationResult,
   SchemaRegistry,
   SchemaRegistryOptions,
 } from "./schema-registry";
 export {
-  createPersistentSchemaRegistry,
   createSchemaRegistry,
+  registeredSchemaAnchorSchema,
 } from "./schema-registry";
 export type {
   DeprovisionScopeRequest,

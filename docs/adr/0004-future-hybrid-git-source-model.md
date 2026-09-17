@@ -2,11 +2,11 @@
 
 ## Status
 
-Proposed
+Historical proposal, not a supported bootstrap/storage API. The [current seed bootstrap guide](../guides/bootstrap-config-repo.md) supersedes the server.json examples below; future multi-source ideas are not an installed capability.
 
 ## Context
 
-Weaver's current Git bootstrap path is intentionally small: one repository contains
+At the time of this proposal, Weaver's now-retired Git bootstrap path used one repository containing
 `bootstrap/server.json`, and each Git-backed layer points at one JSON file. This is
 enough for early platform configuration, but it does not fit plugin-heavy
 deployments where an installation can have 100+ plugins, tenant-specific

@@ -1,4 +1,11 @@
 // Sub-path barrel: @weaver-conf/config-types/schemas
+
+export {
+  bootstrapSeedSchema,
+  initializeWeaverRequestSchema,
+  weaverRuntimeStatusSchema,
+} from "../bootstrap-seed";
+export { environmentNamePattern, environmentNameSchema } from "../environment";
 export {
   configurationAccessContextSchema,
   configurationSchemaFragmentSchema,
@@ -7,12 +14,6 @@ export {
   serviceAccessPolicySchema,
   serviceConfigurationDeclarationSchema,
 } from "../schemas-access";
-export {
-  bootstrapConfigSchema,
-  bootstrapLayerSchema,
-  builtinProviders,
-  layerProviderSchema,
-} from "../schemas-bootstrap";
 export { expressionValidationResultSchema } from "../schemas-expression";
 export {
   configurationContextSchema,
@@ -45,11 +46,17 @@ export {
   emergencyOverrideRecordSchema,
   promotionRequestSchema,
   promotionStatusSchema,
+  schemaAuditActionSchema,
+  schemaDomainAuditEntrySchema,
+  schemaOperationAuditMetadataSchema,
   secretDomainAuditEntrySchema,
   sessionDomainAuditEntrySchema,
   sinkDomainAuditEntrySchema,
 } from "../schemas-promotion";
-export { configurationPropertySchemaSchema } from "../schemas-property";
+export {
+  configurationPropertySchemaSchema,
+  objectConfigurationPropertySchemaSchema,
+} from "../schemas-property";
 export {
   configurationChangeSchema,
   configurationConflictSchema,
@@ -64,6 +71,34 @@ export {
   syncStatusSyncingSchema,
   writeResultSchema,
 } from "../schemas-providers";
+export {
+  registeredEffectiveValidationRequestSchema,
+  registeredEffectiveValidationResponseSchema,
+  registeredObjectWriteRequestSchema,
+  registeredObjectWriteResponseSchema,
+  registeredPathPatchRequestSchema,
+  registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
+} from "../schemas-registered-operations";
+export {
+  fragmentSchemaRegistrationRequestSchema,
+  fragmentSlotDeclarationSchema,
+  fragmentSlotRegistrationMetadataSchema,
+  registrationOwnerSchema,
+  schemaRegistrationAuditMetadataSchema,
+  schemaRegistrationContextSchema,
+  schemaRegistrationMetadataSchema,
+  schemaRegistrationOperationSchema,
+  schemaRegistrationOptionsSchema,
+  schemaRegistrationResponseSchema,
+  serviceSchemaRegistrationRequestSchema,
+} from "../schemas-schema-registration";
+export {
+  schemaValidationErrorCodeSchema,
+  schemaValidationErrorSchema,
+  schemaValidationPathSegmentSchema,
+  schemaValidationResultSchema,
+} from "../schemas-schema-validation";
 export {
   godModeSessionSchema,
   overrideSessionSchema,

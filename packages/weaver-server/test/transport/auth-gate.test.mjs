@@ -83,3 +83,22 @@ test("filterVisible removes non-visible keys", () => {
   expect(result["public.key"]).toBe("val1");
   expect(result["secret.key"]).toBe(undefined);
 });
+
+test("filterVisible cannot reintroduce protected metadata", () => {
+  const authFunctions = {
+    ...mockAuthFunctions,
+    filterVisibleKeys(_accessCtx, entries) {
+      return { ...entries, _weaver: { registry: "private" } };
+    },
+  };
+  const gate = createAuthGate({ authFunctions, mapContext });
+  const accessCtx = { userId: "u1", roles: ["admin"], sessionMode: undefined };
+
+  expect(
+    gate.filterVisible(
+      accessCtx,
+      { public: true, _weaver: { registry: "private" } },
+      new Map(),
+    ),
+  ).toEqual({ public: true });
+});

@@ -1,41 +1,34 @@
 #!/usr/bin/env node
-import { startWeaverServer } from "./server";
-
-type ShutdownSignal = "SIGINT" | "SIGTERM";
+import { WeaverErrorInstance } from "@weaver-conf/config-types";
+import { runWeaverCommand } from "./cli-command";
+import { publicUpgradeCliError } from "./cli-upgrade";
 
 async function main(): Promise<void> {
-  const server = await startWeaverServer();
-
-  console.log(`Weaver server listening on port ${server.port}`);
-  registerShutdownHandlers(async (signal) => {
-    console.log(`Received ${signal}; shutting down Weaver server`);
-    await server.close();
-  });
-}
-
-function registerShutdownHandlers(
-  shutdown: (signal: ShutdownSignal) => Promise<void>,
-): void {
-  let isShuttingDown = false;
-
-  const handleSignal = (signal: ShutdownSignal) => {
-    if (isShuttingDown) return;
-    isShuttingDown = true;
-
-    void shutdown(signal).then(
-      () => process.exit(0),
-      (err: unknown) => {
-        console.error("Failed to shut down Weaver server", err);
-        process.exit(1);
-      },
-    );
+  const server = await runWeaverCommand(process.argv.slice(2), process.env);
+  if (!server) return;
+  let closing = false;
+  const stop = () => {
+    if (closing) return;
+    closing = true;
+    void server.close().catch(reportFailure);
   };
-
-  process.on("SIGINT", handleSignal);
-  process.on("SIGTERM", handleSignal);
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+}
+function reportFailure(error: unknown): void {
+  const upgradeCommand = process.argv[2]?.startsWith("upgrade-") ?? false;
+  console.error(JSON.stringify(publicCliError(error, upgradeCommand)));
+  process.exitCode = 1;
 }
 
-main().catch((err: unknown) => {
-  console.error("Failed to start Weaver server", err);
-  process.exitCode = 1;
-});
+export function publicCliError(error: unknown, upgradeCommand: boolean) {
+  if (upgradeCommand) return publicUpgradeCliError();
+  return {
+    error: {
+      code:
+        error instanceof WeaverErrorInstance ? error.code : "INTERNAL_ERROR",
+      message: error instanceof Error ? error.message : "Command failed",
+    },
+  };
+}
+void main().catch(reportFailure);

@@ -1,6 +1,12 @@
 // OverrideSession provider — session lifecycle management with expiration and audit
 
 import {
+  cloneValue,
+  deepRemove,
+  deepSet,
+  normalizeStorageWritePath,
+} from "@weaver-conf/config-engine";
+import {
   type ConfigurationLayerData,
   type ConfigurationStorageProvider,
   createWeaverError,
@@ -133,7 +139,7 @@ export function createOverrideSessionProvider(
     if (session === null) {
       throw createWeaverError("SESSION_REQUIRED", "No active session");
     }
-    return { ...session, overrides: { ...entries } };
+    return { ...session, overrides: cloneValue(entries) };
   }
 
   const layerName = options?.layer ?? "session";
@@ -146,21 +152,25 @@ export function createOverrideSessionProvider(
     writable: true,
 
     async load(): Promise<ConfigurationLayerData> {
-      return { entries: { ...entries } };
+      return { entries: cloneValue(entries) };
     },
 
     async write(key: string, value: unknown): Promise<WriteResult> {
-      entries[key] = value;
+      const path = normalizeStorageWritePath(key);
+      if (!path.ok) return { success: false, error: path.error };
+      deepSet(entries, path.value, value);
       if (session !== null) {
-        session = { ...session, overrides: { ...entries } };
+        session = { ...session, overrides: cloneValue(entries) };
       }
       return { success: true };
     },
 
     async remove(key: string): Promise<WriteResult> {
-      delete entries[key];
+      const path = normalizeStorageWritePath(key);
+      if (!path.ok) return { success: false, error: path.error };
+      deepRemove(entries, path.value);
       if (session !== null) {
-        session = { ...session, overrides: { ...entries } };
+        session = { ...session, overrides: cloneValue(entries) };
       }
       return { success: true };
     },

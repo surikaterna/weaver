@@ -1,10 +1,14 @@
+import type {
+  ProviderAuthority,
+  ProviderCapabilities,
+} from "./provider-authority";
 import type { ConfigurationLayer, ConfigurationLayerData } from "./types";
 
 /** Structured error details returned from a failed write operation. */
 export interface WriteError {
   code: string;
   message: string;
-  details?: Record<string, unknown>;
+  details?: Record<string, unknown> | undefined;
 }
 
 /** Outcome of a write or remove operation against a storage provider. */
@@ -26,6 +30,9 @@ export interface ConfigurationStorageProvider {
   readonly id: string;
   readonly layer: ConfigurationLayer | string;
   readonly writable: boolean;
+  /** Absent authority is explicitly unsupported, never inferred from write()/flush(). */
+  readonly authority?: ProviderAuthority;
+  readonly capabilities?: ProviderCapabilities;
   load(): Promise<ConfigurationLayerData>;
   loadLayer?(layer: string): Promise<ConfigurationLayerData>;
   write(key: string, value: unknown): Promise<WriteResult>;

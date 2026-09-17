@@ -3,6 +3,10 @@ export { createWeaverClient } from "./client";
 export { flattenObject } from "./flatten";
 export type { FileSystemPersistenceOptions } from "./fs-persistence";
 export { createFileSystemPersistence } from "./fs-persistence";
+export {
+  HttpResponseContractError,
+  HttpServerResponseError,
+} from "./http-request";
 export { fetchWithRetry, type RetryOptions } from "./http-retry";
 export type { HttpTransportOptions, TransportError } from "./http-transport";
 export { createHttpTransport } from "./http-transport";
@@ -26,8 +30,6 @@ export type {
 } from "./namespace";
 export { defineNamespace } from "./namespace";
 export type { WeaverClientPersistence } from "./persistence";
-export type { SchemaRegistrationResult } from "./registration";
-export { registerNamespaces, zodShapeToJsonSchema } from "./registration";
 export type { ClientSchemaRegistry, ValidationResult } from "./schema-registry";
 export { createClientSchemaRegistry } from "./schema-registry";
 export type {

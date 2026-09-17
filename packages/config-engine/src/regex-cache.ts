@@ -3,6 +3,10 @@
  * Also provides a safety check for user-supplied patterns to prevent ReDoS.
  */
 
+import { createWeaverError, isSafePattern } from "@weaver-conf/config-types";
+
+export { isSafePattern } from "@weaver-conf/config-types";
+
 const regexCache = new Map<string, RegExp>();
 
 /** Returns a cached RegExp instance for the given pattern and flags. */
@@ -16,15 +20,22 @@ export function getCachedRegex(pattern: string, flags?: string): RegExp {
   return cached;
 }
 
-/**
- * Checks whether a user-supplied regex pattern is safe from ReDoS.
- * Rejects patterns with nested quantifiers and excessive length.
- */
-export function isSafePattern(pattern: string): boolean {
-  if (pattern.length > 200) return false;
-  // Reject nested quantifiers: a common ReDoS trigger like (a+)+ or (a*)*
-  if (/([+*}])\s*\)?\s*[+*{]/.test(pattern)) return false;
-  return true;
+/** Schema matching must enforce the shared policy before executing a pattern. */
+export function getSafeSchemaRegex(pattern: string): RegExp {
+  if (!isSafePattern(pattern)) {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      `Unsafe regex pattern ${JSON.stringify(pattern)}`,
+    );
+  }
+  try {
+    return getCachedRegex(pattern);
+  } catch {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      `Invalid regex pattern ${JSON.stringify(pattern)}`,
+    );
+  }
 }
 
 /** Clears the regex cache (useful for testing). */

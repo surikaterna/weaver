@@ -1,6 +1,6 @@
 // Resolution pipeline — resolves ConfigMount and SecretReference markers in config values
 
-import { deepGet } from "@weaver-conf/config-engine";
+import { buildPath, deepGet, parsePath } from "@weaver-conf/config-engine";
 import type {
   SecretBackend,
   SecretResolver,
@@ -19,11 +19,14 @@ export interface ResolutionPipeline {
   resolveEntries(
     entries: Record<string, unknown>,
     prefix?: string,
+    lookupEntries?: Record<string, unknown>,
   ): Record<string, unknown>;
   /** Rebuild internal mount map after state changes. */
   rebuildMountMap(): void;
-  /** Refresh secret cache (fire-and-forget safe). */
+  /** Refresh the secret cache before resolving this context. */
   refreshSecrets(entries: Readonly<Record<string, unknown>>): Promise<void>;
+  /** Release context-local resolver resources. */
+  dispose(): void;
   /** Whether a secret resolver is active. */
   readonly hasSecretResolver: boolean;
 }
@@ -31,7 +34,7 @@ export interface ResolutionPipeline {
 export interface ResolutionPipelineOptions {
   /** Returns the merged state for value lookups during mount resolution. */
   getMergedState: () => Record<string, unknown>;
-  /** Returns base (non-scoped) entries for mount map + secret scanning. */
+  /** Returns the entries owned by this pipeline context for marker scanning. */
   getBaseEntries: () => Record<string, unknown>;
   /** Optional secret backend for resolving SecretReference markers. */
   secretBackend?: SecretBackend | undefined;
@@ -56,59 +59,106 @@ export async function createResolutionPipeline(
   }
 
   function resolveValue(key: string, rawValue: unknown): unknown {
-    let resolvedKey = key;
-
-    if (isConfigMount(rawValue)) {
-      const result = resolveMountedValue(key, mountMap, (k) =>
-        deepGet(getMergedState(), k),
-      );
-      if (!result.ok) return undefined;
-      rawValue = result.resolution.value;
-      resolvedKey =
-        result.resolution.chain[result.resolution.chain.length - 1] ?? key;
-    }
-
-    if (isSecretReference(rawValue)) {
-      return secretResolver?.getResolved(resolvedKey) ?? rawValue;
-    }
-
-    return rawValue;
+    return resolveNode(rawValue, parsePath(key), getMergedState(), {
+      activeContainers: new Set(),
+      activeMounts: new Set(),
+    });
   }
 
   function resolveEntries(
     entries: Record<string, unknown>,
     prefix = "",
+    lookupEntries = getMergedState(),
+  ): Record<string, unknown> {
+    return resolveRecord(
+      entries,
+      prefix ? parsePath(prefix) : [],
+      lookupEntries,
+      {
+        activeContainers: new Set(),
+        activeMounts: new Set(),
+      },
+    );
+  }
+
+  interface ResolutionState {
+    readonly activeContainers: Set<object>;
+    readonly activeMounts: Set<string>;
+  }
+
+  function resolveRecord(
+    entries: Record<string, unknown>,
+    path: readonly string[],
+    lookupEntries: Record<string, unknown>,
+    state: ResolutionState,
   ): Record<string, unknown> {
     const result: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(entries)) {
-      const fullKey = prefix ? `${prefix}.${k}` : k;
-      if (isConfigMount(v)) {
-        const mountResult = resolveMountedValue(fullKey, mountMap, (mk) =>
-          deepGet(getMergedState(), mk),
-        );
-        if (!mountResult.ok) {
-          result[k] = undefined;
-          continue;
-        }
-        const targetKey =
-          mountResult.resolution.chain[
-            mountResult.resolution.chain.length - 1
-          ] ?? fullKey;
-        const resolved = mountResult.resolution.value;
-        if (isSecretReference(resolved)) {
-          result[k] = secretResolver?.getResolved(targetKey) ?? resolved;
-        } else {
-          result[k] = resolved;
-        }
-      } else if (isSecretReference(v)) {
-        result[k] = secretResolver?.getResolved(fullKey) ?? v;
-      } else if (v !== null && typeof v === "object" && !Array.isArray(v)) {
-        result[k] = resolveEntries(v as Record<string, unknown>, fullKey);
-      } else {
-        result[k] = v;
+    if (state.activeContainers.has(entries)) return result;
+    state.activeContainers.add(entries);
+    try {
+      for (const [key, value] of Object.entries(entries)) {
+        result[key] = resolveNode(value, [...path, key], lookupEntries, state);
       }
+    } finally {
+      state.activeContainers.delete(entries);
     }
     return result;
+  }
+
+  function resolveNode(
+    value: unknown,
+    path: readonly string[],
+    lookupEntries: Record<string, unknown>,
+    state: ResolutionState,
+  ): unknown {
+    if (hasMountDiscriminant(value)) {
+      const key = buildPath(path);
+      return isConfigMount(value) && mountMap.has(key)
+        ? resolveMount(path, lookupEntries, state)
+        : undefined;
+    }
+    if (isSecretReference(value)) {
+      return secretResolver?.getResolved(buildPath(path)) ?? value;
+    }
+    if (Array.isArray(value)) {
+      if (state.activeContainers.has(value)) return undefined;
+      state.activeContainers.add(value);
+      try {
+        return value.map((item, index) =>
+          resolveNode(item, [...path, String(index)], lookupEntries, state),
+        );
+      } finally {
+        state.activeContainers.delete(value);
+      }
+    }
+    if (!isRecord(value)) return value;
+    return resolveRecord(value, path, lookupEntries, state);
+  }
+
+  function resolveMount(
+    path: readonly string[],
+    lookupEntries: Record<string, unknown>,
+    state: ResolutionState,
+  ): unknown {
+    const key = buildPath(path);
+    const resolved = resolveMountedValue(key, mountMap, (source) =>
+      deepGet(lookupEntries, source),
+    );
+    if (!resolved.ok) return undefined;
+    const chain = resolved.resolution.chain;
+    if (chain.some((item) => state.activeMounts.has(item))) return undefined;
+    for (const item of chain) state.activeMounts.add(item);
+    try {
+      const terminal = chain.at(-1) ?? key;
+      return resolveNode(
+        resolved.resolution.value,
+        parsePath(terminal),
+        lookupEntries,
+        state,
+      );
+    } finally {
+      for (const item of chain) state.activeMounts.delete(item);
+    }
   }
 
   async function refreshSecrets(
@@ -124,8 +174,19 @@ export async function createResolutionPipeline(
     resolveEntries,
     rebuildMountMap,
     refreshSecrets,
+    dispose() {
+      secretResolver?.dispose();
+    },
     get hasSecretResolver() {
       return secretResolver !== null;
     },
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasMountDiscriminant(value: unknown): boolean {
+  return isRecord(value) && value._weaver === "mount";
 }

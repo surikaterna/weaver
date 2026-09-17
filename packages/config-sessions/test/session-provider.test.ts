@@ -62,7 +62,28 @@ describe("OverrideSessionProvider", () => {
     expect(typeof provider.write).toBe("function");
     await provider.write("feature.x", true);
     const data = await provider.load();
-    expect(data.entries["feature.x"]).toBe(true);
+    expect(data.entries.feature).toEqual({ x: true });
+    expect(controller.getSession()?.overrides.feature).toEqual({ x: true });
+  });
+
+  it("provider preserves registered object anchors", async () => {
+    const { controller } = createTestProvider();
+    controller.activate({ activatedBy: "admin", reason: "test" });
+    const provider = controller.provider;
+    const billing = { plan: "pro", limits: { seats: 10 } };
+
+    await provider.write("billing", billing);
+    await provider.write("_weaver.scopeInventory", {
+      version: 1,
+      revision: "0",
+      contexts: {},
+    });
+
+    const data = await provider.load();
+    expect(data.entries.billing).toEqual(billing);
+    expect(data.entries._weaver).toEqual({
+      scopeInventory: { version: 1, revision: "0", contexts: {} },
+    });
   });
 
   it("provider remove clears override", async () => {
@@ -70,10 +91,10 @@ describe("OverrideSessionProvider", () => {
     controller.activate({ activatedBy: "admin", reason: "test" });
     expect(typeof controller.provider.write).toBe("function");
     expect(typeof controller.provider.remove).toBe("function");
-    await controller.provider.write("k", "v");
-    await controller.provider.remove("k");
+    await controller.provider.write("feature.x", true);
+    await controller.provider.remove("feature.x");
     const data = await controller.provider.load();
-    expect(data.entries.k).toBe(undefined);
+    expect(data.entries.feature).toEqual({});
   });
 
   it("deactivate reports correct overridesCleared count", async () => {

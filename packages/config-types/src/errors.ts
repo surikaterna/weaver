@@ -18,6 +18,14 @@ export const weaverErrorCodes = [
   "SESSION_BLOCKED",
   "REVISION_CONFLICT",
   "INTERNAL_ERROR",
+  "PROVIDER_CORRUPT",
+  "PROVIDER_LOAD_FAILED",
+  "UNSUPPORTED_AUTHORITY",
+  "WRITER_CONFLICT",
+  "COMMIT_OUTCOME_UNKNOWN",
+  "WRITE_ERROR",
+  "CONFIG_NOT_READY",
+  "MAINTENANCE",
 ] as const;
 
 export const weaverErrorCodeSchema = z.enum(weaverErrorCodes);

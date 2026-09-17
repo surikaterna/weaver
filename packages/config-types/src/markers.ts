@@ -32,5 +32,9 @@ export function isSecretReference(value: unknown): value is SecretReference {
 
 /** Type guard — checks if a value is a ConfigMount marker. */
 export function isConfigMount(value: unknown): value is ConfigMount {
-  return isWeaverMarker(value) && value._weaver === "mount";
+  return (
+    isWeaverMarker(value) &&
+    value._weaver === "mount" &&
+    typeof value.source === "string"
+  );
 }

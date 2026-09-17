@@ -1,130 +1,54 @@
 import { deepGet } from "@weaver-conf/config-engine";
 import type { ScopeInstance } from "@weaver-conf/config-types";
 import type { ZodRawShape } from "zod";
-
-import { bootClient } from "./client-boot";
 import { applyNamespace } from "./client-helpers";
-import { setupDeltaSubscription } from "./client-subscriptions";
+import { type ClientState, createClientState } from "./client-state";
 import type { WeaverClient, WeaverClientOptions } from "./client-types";
+import {
+  unsupportedRegistration,
+  unsupportedValidation,
+  unsupportedWrite,
+} from "./client-unsupported";
 import { createInstanceClient } from "./instance-client";
 import type {
   NamespaceDefinition,
   TypedNamespaceClient,
   UntypedNamespaceClient,
 } from "./namespace";
-import { registerNamespaces } from "./registration";
 import type { ValidationResult } from "./schema-registry";
-import {
-  type ClientSchemaRegistry,
-  createClientSchemaRegistry,
-} from "./schema-registry";
-import { createScopeLoader } from "./scope-manager";
-import { createStalenessMonitor } from "./staleness";
 import type { WriteOptions, WriteResult } from "./transport";
 import { createTypedNamespaceClient } from "./typed-namespace-client";
-import type { ConfigDelta, SchemaOptions, Unsubscribe } from "./types";
+import type { ConfigDelta, Unsubscribe } from "./types";
 import { createUntypedNamespaceClient } from "./untyped-namespace-client";
-import {
-  type ValidationOptions,
-  validateOnRead,
-  validateOnWrite,
-} from "./validation";
+import { validateOnRead, validateOnWrite } from "./validation";
 
 export type { WeaverClient, WeaverClientOptions } from "./client-types";
 
-/**
- * Creates a Weaver client with the specified transport and options.
- *
- * @param options - Client configuration including transport, persistence, and schema settings
- * @returns A connected WeaverClient instance ready for reads, writes, and subscriptions
- *
- * @example
- * ```ts
- * const client = await createWeaverClient({
- *   transport: createHttpTransport({ baseUrl: "http://localhost:3399" }),
- * });
- * const value = client.get("theme.mode");
- * ```
- */
 export async function createWeaverClient(
   options: WeaverClientOptions,
 ): Promise<WeaverClient> {
-  const { namespace, transport, scopeLoading = "lazy", persistence } = options;
-  const offlineBoot = options.offlineBoot ?? !!persistence;
-
-  // Schema validation setup
-  const schemaOpts: SchemaOptions | undefined =
-    options.schemas === true ? {} : options.schemas || undefined;
-  const registry: ClientSchemaRegistry | undefined = schemaOpts
-    ? createClientSchemaRegistry()
-    : undefined;
-  const validationOptions: ValidationOptions = {
-    warnOnMismatch: schemaOpts?.warnOnMismatch ?? true,
+  const state = await createClientState(options);
+  const client: WeaverClient = {
+    ...readMethods(state, () => client),
+    ...namespaceReadMethods(state),
+    ...writeMethods(state),
+    ...batchMethods(state),
+    ...registeredMethods(state),
+    ...listenerMethods(state),
+    ...statusMethods(state),
+    ...validationMethods(state),
+    namespace: namespaceFactory(state, () => client),
+    instance: (basePath, instanceId) =>
+      instanceClient(state, client, basePath, instanceId),
   };
+  return Object.defineProperties(
+    client,
+    Object.getOwnPropertyDescriptors(statusMethods(state)),
+  );
+}
 
-  let pendingRestart = false;
-  let staleSince: Date | null = null;
-  let closedAt: Date | null = null;
-  const stalenessMonitor = createStalenessMonitor(options.staleness);
-
-  // Boot: load cache + fetch snapshot + load schemas
-  const boot = await bootClient({
-    namespace,
-    transport,
-    persistence,
-    offlineBoot,
-    registry,
-    stalenessMonitor,
-  });
-
-  const baseState = boot.baseState;
-  const revision = boot.revision;
-  let connected = boot.connected;
-  let lastSyncedAt = boot.lastSyncedAt;
-
-  const scopeLoader = createScopeLoader({
-    mode: scopeLoading,
-    transport,
-    initialSnapshot: boot.freshSnapshot ?? {
-      entries: baseState,
-      scopes: {},
-      revision,
-      timestamp: new Date().toISOString(),
-    },
-  });
-
-  const changeListeners = new Map<
-    string,
-    Set<(changes: ConfigDelta[]) => void>
-  >();
-  const restartListeners = new Set<() => void>();
-
-  // Subscribe to deltas
-  let unsubTransport: Unsubscribe = () => {};
-  try {
-    unsubTransport = setupDeltaSubscription({
-      baseState,
-      transport,
-      registry,
-      changeListeners,
-      restartListeners,
-      stalenessMonitor,
-      onSync: (date) => {
-        lastSyncedAt = date;
-        connected = true;
-      },
-      onRestartRequired: () => {
-        pendingRestart = true;
-      },
-    });
-
-    if (boot.freshSnapshot) {
-      connected = true;
-    }
-  } catch {
-    connected = false;
-    if (!staleSince) staleSince = new Date();
-  }
+function namespaceFactory(state: ClientState, getClient: () => WeaverClient) {
+  const { namespace, transport, scopeLoader, baseState } = state;
 
   function namespaceClient<TShape extends ZodRawShape>(
     definition: NamespaceDefinition<string, TShape>,
@@ -141,7 +65,7 @@ export async function createWeaverClient(
         set: (key, value, opts) => transport.set(key, value, opts),
         setMany: (entries, opts) => transport.setMany(entries, opts),
         remove: (key, opts) => transport.remove(key, opts),
-        onChange: (pattern, handler) => client.onChange(pattern, handler),
+        onChange: (pattern, handler) => getClient().onChange(pattern, handler),
       });
     }
 
@@ -150,11 +74,20 @@ export async function createWeaverClient(
         sp ? (scopeLoader.getScopeState(sp) ?? {}) : baseState,
       set: (key, value, opts) => transport.set(key, value, opts),
       remove: (key, opts) => transport.remove(key, opts),
-      onChange: (pattern, handler) => client.onChange(pattern, handler),
+      onChange: (pattern, handler) => getClient().onChange(pattern, handler),
     });
   }
 
-  const client: WeaverClient = {
+  return namespaceClient;
+}
+
+function readMethods(
+  state: ClientState,
+  getClient: () => WeaverClient,
+): Pick<WeaverClient, "get" | "getWithDefault" | "getForScope"> {
+  const { namespace, scopeLoader, baseState, registry, validationOptions } =
+    state;
+  return {
     get<T>(key: string, scopePath?: ScopeInstance[]): T | undefined {
       const resolvedKey = applyNamespace(namespace, key);
       let value: T | undefined;
@@ -179,15 +112,24 @@ export async function createWeaverClient(
       scopePath?: ScopeInstance[],
     ): T {
       const value = scopePath
-        ? client.get<T>(key, scopePath)
-        : client.get<T>(key);
+        ? getClient().get<T>(key, scopePath)
+        : getClient().get<T>(key);
       return value !== undefined ? value : defaultValue;
     },
 
     getForScope<T>(key: string, scopePath: ScopeInstance[]): T | undefined {
-      return client.get<T>(key, scopePath);
+      return getClient().get<T>(key, scopePath);
     },
+  };
+}
 
+function namespaceReadMethods({
+  namespace,
+  scopeLoader,
+  baseState,
+  transport,
+}: ClientState): Pick<WeaverClient, "getNamespace" | "inspect"> {
+  return {
     getNamespace(
       prefix: string,
       scopePath?: ScopeInstance[],
@@ -215,7 +157,15 @@ export async function createWeaverClient(
       // SAFETY: transport.inspect returns the inspection structure matching ConfigurationInspection<T>
       return raw as import("./types.js").ConfigurationInspection<T>;
     },
+  };
+}
 
+function writeMethods({
+  namespace,
+  registry,
+  transport,
+}: ClientState): Pick<WeaverClient, "set" | "remove"> {
+  return {
     async set(
       key: string,
       value: unknown,
@@ -243,7 +193,52 @@ export async function createWeaverClient(
       const resolvedKey = applyNamespace(namespace, key);
       return transport.remove(resolvedKey, opts);
     },
+  };
+}
 
+function registeredMethods({
+  transport,
+}: ClientState): Pick<
+  WeaverClient,
+  | "setRegisteredObject"
+  | "patchRegisteredPath"
+  | "validateRegisteredEffective"
+  | "registerSchema"
+> {
+  return {
+    async setRegisteredObject(anchorPath, value, opts) {
+      if (!transport.setRegisteredObject)
+        return unsupportedWrite("setRegisteredObject");
+      return transport.setRegisteredObject(anchorPath, value, opts);
+    },
+
+    async patchRegisteredPath(path, value, opts) {
+      if (!transport.patchRegisteredPath)
+        return unsupportedWrite("patchRegisteredPath");
+      return transport.patchRegisteredPath(path, value, opts);
+    },
+
+    async validateRegisteredEffective(options) {
+      if (!transport.validateRegisteredEffective)
+        return unsupportedValidation("validateRegisteredEffective");
+      return transport.validateRegisteredEffective(options);
+    },
+    async registerSchema(request, options) {
+      if (!transport.registerSchema)
+        return unsupportedRegistration("registerSchema");
+      return transport.registerSchema(request, options);
+    },
+  };
+}
+
+function batchMethods({
+  namespace,
+  transport,
+}: ClientState): Pick<
+  WeaverClient,
+  "setMany" | "setNamespace" | "listScopes" | "listScopeValues"
+> {
+  return {
     async setMany(
       entries: Record<string, unknown>,
       opts?: WriteOptions,
@@ -271,7 +266,14 @@ export async function createWeaverClient(
     async listScopeValues(scopeId: string, parentScope?: ScopeInstance[]) {
       return transport.listScopeValues(scopeId, parentScope);
     },
+  };
+}
 
+function listenerMethods({
+  changeListeners,
+  restartListeners,
+}: ClientState): Pick<WeaverClient, "onChange" | "onRestartRequired"> {
+  return {
     onChange(
       pattern: string,
       handler: (changes: ConfigDelta[]) => void,
@@ -295,37 +297,56 @@ export async function createWeaverClient(
         restartListeners.delete(handler);
       };
     },
+  };
+}
 
-    async preloadScope(scopePath: ScopeInstance[]): Promise<void> {
-      await scopeLoader.preloadScope(scopePath);
-    },
-
+function statusMethods(
+  state: ClientState,
+): Pick<
+  WeaverClient,
+  | "pendingRestart"
+  | "mode"
+  | "revision"
+  | "connected"
+  | "lastSyncedAt"
+  | "staleSince"
+> {
+  return {
     get pendingRestart(): boolean {
-      return pendingRestart;
+      return state.pendingRestart;
     },
 
     get mode() {
-      if (connected) return "live" as const;
-      if (revision) return "cached" as const;
+      if (state.connected) return "live" as const;
+      if (state.revision) return "cached" as const;
       return "degraded" as const;
     },
 
     get revision(): string {
-      return revision;
+      return state.revision;
     },
 
     get connected(): boolean {
-      return connected;
+      return state.connected;
     },
 
     get lastSyncedAt(): Date | null {
-      return lastSyncedAt;
+      return state.lastSyncedAt;
     },
 
     get staleSince(): Date | null {
-      return closedAt ?? staleSince ?? stalenessMonitor.staleSince;
+      return (
+        state.closedAt ?? state.staleSince ?? state.stalenessMonitor.staleSince
+      );
     },
+  };
+}
 
+function validationMethods(
+  state: ClientState,
+): Pick<WeaverClient, "validate" | "isSensitive" | "preloadScope" | "close"> {
+  const { namespace, registry, scopeLoader, transport } = state;
+  return {
     validate(key: string, value: unknown): ValidationResult {
       const resolvedKey = applyNamespace(namespace, key);
       if (!registry) return { valid: true };
@@ -339,29 +360,30 @@ export async function createWeaverClient(
     },
 
     async close(): Promise<void> {
-      unsubTransport();
-      connected = false;
-      closedAt = new Date();
-      stalenessMonitor.dispose();
+      state.unsubTransport();
+      state.connected = false;
+      state.closedAt = new Date();
+      state.stalenessMonitor.dispose();
       await transport.close();
     },
 
-    instance(basePath: string, instanceId: string) {
-      const resolvedBase = applyNamespace(namespace, basePath);
-      return createInstanceClient(resolvedBase, instanceId, {
-        getState: () => baseState,
-        set: (key, value, opts) => transport.set(key, value, opts),
-        remove: (key, opts) => transport.remove(key, opts),
-        onChange: (pattern, handler) => client.onChange(pattern, handler),
-      });
-    },
-
-    namespace: namespaceClient,
-
-    async registerNamespaces(definitions: ReadonlyArray<NamespaceDefinition>) {
-      return registerNamespaces(definitions, transport);
+    async preloadScope(scopePath: ScopeInstance[]): Promise<void> {
+      await scopeLoader.preloadScope(scopePath);
     },
   };
+}
 
-  return client;
+function instanceClient(
+  { namespace, baseState, transport }: ClientState,
+  client: WeaverClient,
+  basePath: string,
+  instanceId: string,
+) {
+  const resolvedBase = applyNamespace(namespace, basePath);
+  return createInstanceClient(resolvedBase, instanceId, {
+    getState: () => baseState,
+    set: (key, value, opts) => transport.set(key, value, opts),
+    remove: (key, opts) => transport.remove(key, opts),
+    onChange: (pattern, handler) => client.onChange(pattern, handler),
+  });
 }

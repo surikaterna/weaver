@@ -1,8 +1,8 @@
-// JSON Schema generator — converts ComposedSchemaEntry map to JSON Schema draft-07
+// JSON Schema generator — converts configuration schema entries to JSON Schema draft-07
 
-import type { ComposedSchemaEntry } from "./schema-registry";
+import type { ConfigurationSchemaEntry } from "./schema-generator-types";
 
-type PropertySchema = ComposedSchemaEntry["schema"];
+type PropertySchema = ConfigurationSchemaEntry["schema"];
 
 function isPropertySchema(
   value: PropertySchema | ReadonlyArray<PropertySchema>,
@@ -172,17 +172,16 @@ function generateNestedPropertySchema(
 }
 
 /**
- * Generate a single JSON Schema property from a ComposedSchemaEntry.
+ * Generate a single JSON Schema property from a configuration schema entry.
  */
 export function generateSinglePropertySchema(
   _key: string,
-  entry: ComposedSchemaEntry,
+  entry: ConfigurationSchemaEntry,
 ): JsonSchemaProperty {
-  const { schema, ownerId } = entry;
+  const { schema } = entry;
   const prop = generateNestedPropertySchema(schema);
 
-  // x-weaver extension object
-  const xWeaver: Record<string, unknown> = { namespace: ownerId };
+  const xWeaver: Record<string, unknown> = {};
 
   if (schema["x-weaver"]?.changePolicy !== undefined) {
     xWeaver.changePolicy = schema["x-weaver"].changePolicy;
@@ -218,7 +217,7 @@ export function generateSinglePropertySchema(
  * Generate a complete JSON Schema document from composed schemas.
  */
 export function generateJsonSchema(
-  schemas: Map<string, ComposedSchemaEntry>,
+  schemas: ReadonlyMap<string, ConfigurationSchemaEntry>,
   options?: { title?: string | undefined },
 ): JsonSchemaDocument {
   const properties: Record<string, JsonSchemaProperty> = {};

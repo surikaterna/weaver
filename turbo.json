@@ -14,6 +14,137 @@
     "test": {
       "dependsOn": ["build", "^build"]
     },
+    "@weaver-conf/weaver-server#test": {
+      "dependsOn": [
+        "test:activation-recovery",
+        "test:compensation",
+        "test:conflicts",
+        "test:core-catalog",
+        "test:core-lifecycle",
+        "test:core-pipeline",
+        "test:final-b",
+        "test:node-bootstrap",
+        "test:node-cli",
+        "test:node-schema",
+        "test:node-upgrade-crash",
+        "test:node-upgrade-terminal",
+        "test:node-u9-fs",
+        "test:node-u9-mongo-apply",
+        "test:node-u9-process",
+        "test:stale-activation",
+        "test:stale-journal",
+        "test:stale-plan",
+        "test:terminal",
+        "test:upgrade-final-a",
+        "test:upgrade-main",
+        "test:upgrade-policy",
+        "test:vitest-core",
+        "test:vitest-transport"
+      ],
+      "cache": false,
+      "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
+    },
+    "test:activation-recovery": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:compensation": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:conflicts": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
+    },
+    "test:core-catalog": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:core-lifecycle": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:core-pipeline": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:node-upgrade-crash": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:node-upgrade-terminal": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:final-b": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:node-bootstrap": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": ["WEAVER_TEST_MONGO_URI"]
+    },
+    "test:node-cli": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "test:node-schema": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:node-u9-fs": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:node-u9-mongo-apply": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
+    },
+    "test:node-u9-process": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:stale-activation": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:stale-journal": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:stale-plan": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:terminal": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
+    },
+    "test:upgrade-final-a": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:upgrade-main": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": ["WEAVER_TEST_MONGO_URI"]
+    },
+    "test:upgrade-policy": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:vitest-core": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:vitest-transport": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
     "start": {
       "dependsOn": ["^build"],
       "cache": false

@@ -25,7 +25,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --import tsx --test test/schema-foundations/*.node.mjs",
     "lint": "biome check ."
   },
   "dependencies": {

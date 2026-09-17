@@ -1,0 +1,35 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { createWeaverClient } from "../../src/client.ts";
+import { createLocalTransport } from "../../src/local-transport.ts";
+import { fixture, owner, registration } from "../../../weaver-server/test/schema-foundations/fixtures.mjs";
+
+test("SDK consumes the core defaulted snapshot, not a hypothetical validated value", async (context) => {
+  const { configService, registry, writes, activate } = await fixture({ svc: { plugins: {} } });
+  context.after(() => configService.close());
+  await registry.register(registration({ type: "object", required: ["port"], properties: { port: { type: "integer", default: 80 } } }, [{ slotPath: "/plugins", accepts: "object" }]));
+  await registry.register({ serviceId: "svc", environment: "dev", owner, providerId: "analytics", slotPath: "/plugins", schema: { type: "object", default: {}, properties: { enabled: { type: "boolean", default: false } } } });
+  await activate();
+  const snapshot = await configService.resolveAll();
+  const transport = createLocalTransport({ snapshot });
+  const client = await createWeaverClient({ transport });
+  context.after(() => client.close());
+  assert.equal(client.get("svc.port"), 80);
+  assert.deepEqual(client.getNamespace("svc"), { port: 80, plugins: { analytics: { enabled: false } } });
+  assert.deepEqual(writes, []);
+  context.after(configService.onDelta((delta) => transport.pushDelta(delta)));
+  assert.equal((await configService.set("platform", "svc.port", 50)).success, true);
+  assert.equal(client.get("svc.port"), 50);
+  assert.equal((await configService.remove("platform", "svc.port")).success, true);
+  assert.equal(client.get("svc.port"), 80);
+  assert.equal(client.get("svc.plugins.analytics.enabled"), false);
+  const rejected = await registry.register(registration({ type: "object", properties: { child: { type: "object", additionalProperties: true, default: { nested: [{ _weaver: "mount" }] } } } }, [{ slotPath: "/plugins", accepts: "object" }]));
+  assert.equal(rejected.success, false);
+  assert.equal(client.get("svc.child"), undefined);
+  assert.equal(client.get("svc.port"), 80);
+  assert.equal((await configService.resolveAll()).entries.svc.child, undefined);
+  const synthesized = await registry.register(registration({ type: "object", properties: { child: { type: "object", default: {}, properties: { _weaver: { type: "string", default: "secret-ref" }, provider: { type: "string", default: "vault" }, uri: { type: "string", default: "hidden-reference" } } } } }, [{ slotPath: "/plugins", accepts: "object" }]));
+  assert.equal(synthesized.success, false);
+  assert.equal(client.get("svc.child"), undefined);
+  assert.equal(client.get("svc.port"), 80);
+});

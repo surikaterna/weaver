@@ -6,15 +6,32 @@ export type {
   GetNamespaceInput,
   InspectInput,
   ListScopeValuesInput,
+  PatchRegisteredPathInput,
   RegisterSchemaInput,
   RemoveInput,
   ResolveAllInput,
   SetInput,
   SetManyInput,
+  SetRegisteredObjectInput,
   SubscribeInput,
+  ValidateRegisteredEffectiveInput,
   WeaverConfigContract,
 } from "./contract";
-export { WeaverConfig } from "./contract";
+export {
+  fragmentSchemaRegistrationRequestSchema,
+  registeredEffectiveValidationRequestSchema,
+  registeredEffectiveValidationResponseSchema,
+  registeredObjectWriteRequestSchema,
+  registeredObjectWriteResponseSchema,
+  registeredPathPatchRequestSchema,
+  registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
+  schemaRegistrationOperationSchema,
+  schemaRegistrationOptionsSchema,
+  schemaRegistrationResponseSchema,
+  serviceSchemaRegistrationRequestSchema,
+  WeaverConfig,
+} from "./contract";
 
 export type {
   ScompTransportOptions,
