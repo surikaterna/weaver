@@ -1,3 +1,4 @@
+import type { ConfigurationStorageProvider } from "@weaver-conf/config-types";
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import type { WeaverConfigService } from "../src/core/config-service.js";
 import { createWeaverConfigService } from "../src/core/config-service.js";
@@ -8,15 +9,42 @@ import {
 
 const configService = {} as WeaverConfigService;
 
-function serviceRegistration() {
+const prototypeUnsafeEnvironments = [
+  "__proto__",
+  "constructor",
+  "prototype",
+] as const;
+
+function serviceRegistration(environment = "default") {
   return {
     serviceId: "lynx",
-    environment: "default",
+    environment,
     owner: { name: "Lynx", contact: "lynx@example.com" },
     schema: { type: "object" as const },
     schemaVersion: "1.2.3",
     fragmentSlots: [{ slotPath: "/plugins", accepts: "object" as const }],
   };
+}
+
+function createCountingProvider() {
+  let mutationCount = 0;
+  const provider: ConfigurationStorageProvider = {
+    id: "platform",
+    layer: "platform",
+    writable: true,
+    async load() {
+      return { entries: {} };
+    },
+    async write() {
+      mutationCount++;
+      return { success: true };
+    },
+    async remove() {
+      mutationCount++;
+      return { success: true };
+    },
+  };
+  return { provider, mutationCount: () => mutationCount };
 }
 
 function fragmentRegistration(providerId = "ghost.settings.panel") {
@@ -146,6 +174,48 @@ describe("SchemaRegistry", () => {
         })
       ).success,
     ).toBe(false);
+  });
+
+  it("rejects prototype-unsafe environments without transient mutation", async () => {
+    const registry = createSchemaRegistry({ configService });
+
+    for (const environment of prototypeUnsafeEnvironments) {
+      const result = await registry.register(serviceRegistration(environment));
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("VALIDATION_ERROR");
+    }
+
+    expect(registry.listAll()).toEqual({});
+  });
+
+  it("rejects prototype-unsafe environments before persistent effects", async () => {
+    const { provider, mutationCount } = createCountingProvider();
+    const persistentConfigService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+    });
+    const registry = await createPersistentSchemaRegistry({
+      configService: persistentConfigService,
+    });
+    const objectPrototype = Object.getPrototypeOf({});
+
+    for (const environment of prototypeUnsafeEnvironments) {
+      const result = await registry.register(serviceRegistration(environment));
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("VALIDATION_ERROR");
+    }
+
+    expect(registry.listAll()).toEqual({});
+    expect(mutationCount()).toBe(0);
+    expect(await persistentConfigService.get("_weaver.registry.schemas")).toBe(
+      undefined,
+    );
+    expect(Object.getPrototypeOf({})).toBe(objectPrototype);
+
+    const restarted = await createPersistentSchemaRegistry({
+      configService: persistentConfigService,
+    });
+    expect(restarted.listAll()).toEqual({});
   });
 
   it("persists and hydrates registry metadata under the protected internal root", async () => {

@@ -162,6 +162,30 @@ describe("schema registration request schemas", () => {
     ).toBe(false);
   });
 
+  it("rejects prototype-unsafe registration environments", () => {
+    for (const environment of ["__proto__", "constructor", "prototype"]) {
+      expect(
+        serviceSchemaRegistrationRequestSchema.safeParse({
+          serviceId: "lynx",
+          environment,
+          owner: { name: "Lynx", contact: "lynx@example.com" },
+          schema: { type: "object" },
+          fragmentSlots: [],
+        }).success,
+      ).toBe(false);
+      expect(
+        fragmentSchemaRegistrationRequestSchema.safeParse({
+          serviceId: "lynx",
+          providerId: "ghost.settings.panel",
+          slotPath: "/plugins",
+          environment,
+          owner: { name: "Ghost", contact: "ghost@example.com" },
+          schema: { type: "object" },
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   it("accepts response metadata with owner, provider identity, and audit", () => {
     const result = schemaRegistrationMetadataSchema.safeParse({
       serviceId: "lynx",

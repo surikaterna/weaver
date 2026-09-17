@@ -2,6 +2,19 @@ import { z } from "zod";
 import { weaverErrorSchema } from "./errors";
 import { configurationPropertySchemaSchema } from "./schemas-property";
 
+const prototypeUnsafeIdentifiers = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
+const registrationEnvironmentSchema = z
+  .string()
+  .min(1)
+  .refine((value) => !prototypeUnsafeIdentifiers.has(value), {
+    message: "Environment uses a reserved identifier",
+  });
+
 export const registrationOwnerSchema = z.strictObject({
   name: z.string().min(1),
   contact: z.string().min(1),
@@ -19,7 +32,7 @@ export const schemaRegistrationAuditMetadataSchema = z.strictObject({
 
 export const serviceSchemaRegistrationRequestSchema = z.strictObject({
   serviceId: z.string().min(1),
-  environment: z.string().min(1),
+  environment: registrationEnvironmentSchema,
   owner: registrationOwnerSchema,
   schema: configurationPropertySchemaSchema,
   schemaVersion: z.string().min(1).optional(),
@@ -30,7 +43,7 @@ export const fragmentSchemaRegistrationRequestSchema = z.strictObject({
   serviceId: z.string().min(1),
   providerId: z.string().min(1),
   slotPath: z.string().min(1),
-  environment: z.string().min(1),
+  environment: registrationEnvironmentSchema,
   owner: registrationOwnerSchema,
   schema: configurationPropertySchemaSchema,
   schemaVersion: z.string().min(1).optional(),
