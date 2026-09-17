@@ -213,10 +213,8 @@ function issueSummary(issues) {
   return `Partition manifest invalid (${issues.length} issues):\n${shown.join("\n")}`;
 }
 
-export function validatePartitionManifest(inventory, manifests = gateManifests) {
-  const issues = [];
+function collectAssignments(inventory, manifests, expected, issues) {
   const assigned = new Map();
-  const expected = new Set([...inventory.node, ...inventory.vitest]);
   const gateCounts = {};
   for (const gate of Object.keys(manifests).sort()) {
     const manifest = manifests[gate];
@@ -237,6 +235,10 @@ export function validatePartitionManifest(inventory, manifests = gateManifests) 
       }
     }
   }
+  return { assigned, gateCounts };
+}
+
+function validateManifestShape(manifests, gateCounts, issues) {
   for (const gate of Object.keys(gateManifests).sort()) {
     if (!(gate in manifests)) issues.push(`missing gate: ${gate}`);
   }
@@ -255,11 +257,22 @@ export function validatePartitionManifest(inventory, manifests = gateManifests) 
     const gate = partitionGates[name];
     if (!(name in (manifests[gate] ?? {}))) issues.push(`missing partition: ${gate}: ${name}`);
   }
+}
+
+function validateAssignments(expected, assigned, issues) {
   for (const file of [...expected].sort()) {
     const owners = assigned.get(file) ?? [];
     if (owners.length === 0) issues.push(`missing assignment: ${file}`);
     if (owners.length > 1) issues.push(`duplicate assignment (${owners.length}): ${file}: ${owners.sort().join(", ")}`);
   }
+}
+
+export function validatePartitionManifest(inventory, manifests = gateManifests) {
+  const issues = [];
+  const expected = new Set([...inventory.node, ...inventory.vitest]);
+  const { assigned, gateCounts } = collectAssignments(inventory, manifests, expected, issues);
+  validateManifestShape(manifests, gateCounts, issues);
+  validateAssignments(expected, assigned, issues);
   issues.sort();
   return Object.freeze({
     counts: Object.freeze({ node: inventory.node.length, vitest: inventory.vitest.length }),
