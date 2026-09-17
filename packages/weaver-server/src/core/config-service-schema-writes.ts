@@ -175,7 +175,12 @@ async function preparePatchedValue(
   const baseValue = await getLayerValue(anchor.storageKey);
   const baseValidation = validateExistingLayerValue(baseValue, resolved);
   if (!baseValidation.success) return baseValidation;
-  const patch = buildSchemaPatch(baseValue, segments, value);
+  const patch = buildSchemaPatch(
+    baseValue,
+    segments,
+    value,
+    resolved.anchor.schema,
+  );
   if (!patch.success) return patchFailure(patch, resolved);
   const validation = validatePartialConfiguration(
     resolved.anchor.schema,

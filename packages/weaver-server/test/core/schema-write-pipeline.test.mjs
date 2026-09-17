@@ -536,6 +536,58 @@ describe("schema-registered config writes", () => {
     expect((await providerEntries(provider)).billing.items).toEqual(["first"]);
   });
 
+  test("missing containers follow object-key and array schemas", async () => {
+    const provider = createTestProvider("p1", "platform", { service: {} });
+    const service = await createWeaverConfigService({ providers: [provider], environment: "test" });
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        map: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            0: { type: "object", properties: {
+              1: { type: "object", properties: { name: { type: "string" } } },
+            } },
+          },
+        },
+        list: { type: "array", items: { type: "string" } },
+      },
+    }, [], "service"));
+
+    const objectResult = await patchRegistered(service, registry, "/service/map/0/1/name", "zero");
+    const arrayResult = await patchRegistered(service, registry, "/service/list/0", "first");
+    const stored = (await providerEntries(provider)).service;
+
+    expect([objectResult, arrayResult]).toEqual([{ success: true }, { success: true }]);
+    expect(provider.writes).toHaveLength(2);
+    expect(stored).toEqual({ map: { 0: { 1: { name: "zero" } } }, list: ["first"] });
+    expect(Array.isArray(stored.map)).toBe(false);
+    expect(Array.isArray(stored.list)).toBe(true);
+  });
+
+  test("patch cloning preserves reserved own data properties", async () => {
+    const data = JSON.parse('{"__proto__":{"marker":"proto"},"constructor":{"marker":"constructor"},"prototype":{"marker":"prototype"}}');
+    const provider = createTestProvider("p1", "platform", { service: data });
+    const service = await createWeaverConfigService({ providers: [provider], environment: "test" });
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration(extensibleServiceSchema, [], "service"));
+
+    const result = await patchRegistered(service, registry, "/service/other", true);
+    const stored = (await providerEntries(provider)).service;
+
+    expect(result).toEqual({ success: true });
+    expect(provider.writes).toHaveLength(1);
+    expect(Object.keys(stored)).toEqual(["__proto__", "constructor", "prototype", "other"]);
+    expect(stored.__proto__).toEqual({ marker: "proto" });
+    expect(stored.constructor).toEqual({ marker: "constructor" });
+    expect(stored.prototype).toEqual({ marker: "prototype" });
+    expect(Object.getPrototypeOf(stored)).toBe(Object.prototype);
+    expect(Object.prototype.marker).toBe(undefined);
+  });
+
   test("out-of-range array patches reject before provider effects", async () => {
     const initialEntries = { billing: { mode: "test", items: [] } };
     const { provider, registry, service } = await makeRegisteredService(initialEntries);
@@ -645,7 +697,7 @@ describe("schema-registered config writes", () => {
     }
     cursor.next = "old";
 
-    const result = buildSchemaPatch(root, segments, "new");
+    const result = buildSchemaPatch(root, segments, "new", undefined);
 
     expect(result.success).toBe(true);
     if (!result.success) return;
