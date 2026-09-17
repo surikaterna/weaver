@@ -47,6 +47,53 @@ async function expectNoEffects(provider, service, entries, revision) {
   expect(service.revision).toBe(revision);
 }
 
+function runArrayPatchMatrix() {
+  const scalarSchema = { type: "array", items: { type: "string" } };
+  const nestedSchema = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: { name: { type: "string" } },
+    },
+  };
+  return [
+    buildSchemaPatch([], ["0"], "append", scalarSchema),
+    buildSchemaPatch(new Array(1), ["0"], "hole", scalarSchema),
+    buildSchemaPatch([], ["0", "name"], "append", nestedSchema),
+    buildSchemaPatch(new Array(1), ["0", "name"], "hole", nestedSchema),
+    buildSchemaPatch(["old"], ["0"], "dense", scalarSchema),
+  ];
+}
+
+function expectPrototypeDescriptors(target, descriptors) {
+  expect(Reflect.ownKeys(target)).toEqual(Reflect.ownKeys(descriptors));
+  for (const key of Reflect.ownKeys(descriptors)) {
+    expect(Object.getOwnPropertyDescriptor(target, key)).toEqual(descriptors[key]);
+  }
+}
+
+function expectArrayPatchMatrix(results) {
+  expect(results).toEqual([
+    { success: true, value: ["append"] },
+    { success: true, value: ["hole"] },
+    { success: true, value: [{ name: "append" }] },
+    { success: true, value: [{ name: "hole" }] },
+    { success: true, value: ["dense"] },
+  ]);
+  for (const result of results) {
+    expect(result.value).toHaveLength(1);
+    expect(Object.getOwnPropertyDescriptor(result.value, "0")).toEqual({
+      configurable: true,
+      enumerable: true,
+      value: result.value[0],
+      writable: true,
+    });
+    expect(Object.getPrototypeOf(result.value)).toBe(Array.prototype);
+  }
+  expect(Object.getPrototypeOf(results[2].value[0])).toBe(Object.prototype);
+  expect(Object.getPrototypeOf(results[3].value[0])).toBe(Object.prototype);
+}
+
 function owner(name = "billing") {
   return { name, contact: `${name}@example.com` };
 }
@@ -534,6 +581,49 @@ describe("schema-registered config writes", () => {
     expect(result).toEqual({ success: true });
     expect(provider.writes).toHaveLength(1);
     expect((await providerEntries(provider)).billing.items).toEqual(["first"]);
+  });
+
+  test("array patch writes ignore inherited numeric accessors", () => {
+    const previousDescriptor = Object.getOwnPropertyDescriptor(Array.prototype, "0");
+    const arrayPrototypeDescriptors = Object.getOwnPropertyDescriptors(Array.prototype);
+    const objectPrototypeDescriptors = Object.getOwnPropertyDescriptors(Object.prototype);
+    let getterCalls = 0;
+    let setterCalls = 0;
+    let installed = false;
+    let restored = false;
+    let results;
+
+    try {
+      installed = Reflect.defineProperty(Array.prototype, "0", {
+        configurable: true,
+        get() {
+          getterCalls += 1;
+          return "inherited";
+        },
+        set() {
+          setterCalls += 1;
+        },
+      });
+      if (installed) results = runArrayPatchMatrix();
+    } finally {
+      const indexRestored = previousDescriptor === undefined
+        ? Reflect.deleteProperty(Array.prototype, "0")
+        : Reflect.defineProperty(Array.prototype, "0", previousDescriptor);
+      const lengthRestored = Reflect.defineProperty(
+        Array.prototype,
+        "length",
+        arrayPrototypeDescriptors.length,
+      );
+      restored = indexRestored && lengthRestored;
+    }
+
+    expect(installed).toBe(true);
+    expect(restored).toBe(true);
+    expect(getterCalls).toBe(0);
+    expect(setterCalls).toBe(0);
+    expectPrototypeDescriptors(Array.prototype, arrayPrototypeDescriptors);
+    expectPrototypeDescriptors(Object.prototype, objectPrototypeDescriptors);
+    expectArrayPatchMatrix(results);
   });
 
   test("missing containers follow object-key and array schemas", async () => {

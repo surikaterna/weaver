@@ -55,10 +55,12 @@ function clonePatchValue(value: unknown): unknown {
   if (!isObject(value)) return value;
   const root = emptyClone(value);
   const clones = new WeakMap<object, CloneContainer>([[value, root]]);
-  const pending: CloneFrame[] = [{ source: value, target: root }];
-  while (pending.length > 0) {
-    const frame = pending.pop();
-    if (frame === undefined) continue;
+  const pending = new Set<CloneFrame>([{ source: value, target: root }]);
+  while (pending.size > 0) {
+    const entry = pending.values().next();
+    if (entry.done) continue;
+    const frame = entry.value;
+    pending.delete(frame);
     for (const [key, member] of Object.entries(frame.source)) {
       const cloned = cloneMember(member, clones, pending);
       defineOwnDataProperty(frame.target, key, cloned);
@@ -70,14 +72,14 @@ function clonePatchValue(value: unknown): unknown {
 function cloneMember(
   value: unknown,
   clones: WeakMap<object, CloneContainer>,
-  pending: CloneFrame[],
+  pending: Set<CloneFrame>,
 ): unknown {
   if (!isObject(value)) return value;
   const existing = clones.get(value);
   if (existing !== undefined) return existing;
   const clone = emptyClone(value);
   clones.set(value, clone);
-  pending.push({ source: value, target: clone });
+  pending.add({ source: value, target: clone });
   return clone;
 }
 
@@ -108,15 +110,33 @@ function patchArray(
       length: current.length,
     };
   }
-  if (final) {
-    if (index === current.length) current.push(value);
-    else current[index] = value;
-    return { success: true, next: value };
+  if (final) return defineOwnArrayIndex(current, index, segment, value);
+  const existing = Object.hasOwn(current, String(index))
+    ? current[index]
+    : undefined;
+  const next = existing ?? createContainer(schemas);
+  return defineOwnArrayIndex(current, index, segment, next);
+}
+
+function defineOwnArrayIndex(
+  current: unknown[],
+  index: number,
+  segment: string,
+  value: unknown,
+): StepResult {
+  try {
+    const defined = Reflect.defineProperty(current, String(index), {
+      configurable: true,
+      enumerable: true,
+      value,
+      writable: true,
+    });
+    return defined
+      ? { success: true, next: value }
+      : { success: false, reason: "invalid-container", segment };
+  } catch {
+    return { success: false, reason: "invalid-container", segment };
   }
-  const next = current[index] ?? createContainer(schemas);
-  if (index === current.length) current.push(next);
-  else current[index] = next;
-  return { success: true, next };
 }
 
 function patchObject(
@@ -173,14 +193,12 @@ function objectMemberSchemas(
   schema: ConfigurationPropertySchema,
   key: string,
 ): ConfigurationPropertySchema[] {
-  const schemas: ConfigurationPropertySchema[] = [];
   const declared = schema.properties?.[key];
-  if (declared !== undefined) schemas.push(declared);
-  for (const [pattern, memberSchema] of Object.entries(
-    schema.patternProperties ?? {},
-  )) {
-    if (new RegExp(pattern).test(key)) schemas.push(memberSchema);
-  }
+  const schemas = Object.entries(schema.patternProperties ?? {}).flatMap(
+    ([pattern, memberSchema]) =>
+      new RegExp(pattern).test(key) ? [memberSchema] : [],
+  );
+  if (declared !== undefined) return [declared, ...schemas];
   if (schemas.length > 0) return schemas;
   const additional = schema.additionalProperties;
   return additional !== null && typeof additional === "object"
