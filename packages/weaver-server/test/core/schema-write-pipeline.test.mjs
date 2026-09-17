@@ -1,4 +1,5 @@
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
+import { buildSchemaPatch } from "../../src/core/config-service-schema-patches.ts";
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { createSchemaRegistry } from "../../src/core/schema-registry.ts";
 
@@ -71,6 +72,18 @@ async function makeRegisteredService(entries = {}) {
   return { provider, registry, service };
 }
 
+function setRegistered(service, registry, path, value) {
+  return service.setRegisteredObject("platform", path, value, {
+    schemaRegistry: registry,
+  });
+}
+
+function patchRegistered(service, registry, path, value) {
+  return service.patchRegisteredPath("platform", path, value, {
+    schemaRegistry: registry,
+  });
+}
+
 const serviceSchema = {
   type: "object",
   required: ["mode"],
@@ -82,6 +95,17 @@ const serviceSchema = {
       type: "object",
       additionalProperties: false,
       properties: { enabled: { type: "boolean" } },
+    },
+    items: { type: "array", items: { type: "string" } },
+    groups: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          values: { type: "array", items: { type: "string" } },
+        },
+      },
     },
   },
 };
@@ -101,20 +125,10 @@ describe("schema-registered config writes", () => {
   test("object writes at registered service anchors validate partial compatibility", async () => {
     const { provider, registry, service } = await makeRegisteredService();
 
-    const partial = await service.setRegisteredObject(
-      "platform",
-      "/billing",
-      { limit: 10 },
-      { schemaRegistry: registry },
-    );
+    const partial = await setRegistered(service, registry, "/billing", { limit: 10 });
     const acceptedEntries = await providerEntries(provider);
     const acceptedRevision = service.revision;
-    const invalid = await service.setRegisteredObject(
-      "platform",
-      "/billing",
-      { mode: "qa" },
-      { schemaRegistry: registry },
-    );
+    const invalid = await setRegistered(service, registry, "/billing", { mode: "qa" });
 
     expect(partial).toEqual({ success: true });
     expect(provider.writes).toEqual([
@@ -146,20 +160,14 @@ describe("schema-registered config writes", () => {
       schema: fragmentSchema,
     });
 
-    const valid = await service.setRegisteredObject(
-      "platform",
-      "/billing/plugins/tax",
-      { providerEnabled: true },
-      { schemaRegistry: registry },
-    );
+    const valid = await setRegistered(service, registry, "/billing/plugins/tax", {
+      providerEnabled: true,
+    });
     const acceptedEntries = await providerEntries(provider);
     const acceptedRevision = service.revision;
-    const invalid = await service.setRegisteredObject(
-      "platform",
-      "/billing/plugins/tax",
-      { providerEnabled: "yes" },
-      { schemaRegistry: registry },
-    );
+    const invalid = await setRegistered(service, registry, "/billing/plugins/tax", {
+      providerEnabled: "yes",
+    });
 
     expect(valid).toEqual({ success: true });
     expect(provider.writes).toEqual([
@@ -186,12 +194,7 @@ describe("schema-registered config writes", () => {
       billing: { mode: "test", limit: 1 },
     });
 
-    const result = await service.patchRegisteredPath(
-      "platform",
-      "/billing/limit",
-      5,
-      { schemaRegistry: registry },
-    );
+    const result = await patchRegistered(service, registry, "/billing/limit", 5);
 
     expect(result).toEqual({ success: true });
     expect(provider.writes).toEqual([
@@ -210,36 +213,13 @@ describe("schema-registered config writes", () => {
     const initialEntries = await providerEntries(provider);
     const initialRevision = service.revision;
 
-    const invalidType = await service.patchRegisteredPath(
-      "platform",
-      "/billing/limit",
-      "high",
-      { schemaRegistry: registry },
-    );
-    const unknown = await service.patchRegisteredPath(
-      "platform",
-      "/billing/unknown",
-      true,
-      { schemaRegistry: registry },
-    );
-    const invalidEnum = await service.patchRegisteredPath(
-      "platform",
-      "/billing/mode",
-      "qa",
-      { schemaRegistry: registry },
-    );
-    const invalidNested = await service.patchRegisteredPath(
-      "platform",
-      "/billing/nested",
-      { enabled: "yes" },
-      { schemaRegistry: registry },
-    );
-    const anchorPatch = await service.patchRegisteredPath(
-      "platform",
-      "/billing",
-      {},
-      { schemaRegistry: registry },
-    );
+    const invalidType = await patchRegistered(service, registry, "/billing/limit", "high");
+    const unknown = await patchRegistered(service, registry, "/billing/unknown", true);
+    const invalidEnum = await patchRegistered(service, registry, "/billing/mode", "qa");
+    const invalidNested = await patchRegistered(service, registry, "/billing/nested", {
+      enabled: "yes",
+    });
+    const anchorPatch = await patchRegistered(service, registry, "/billing", {});
 
     expect(invalidType).toEqual(
       schemaFailure("/billing/limit", "/billing", {
@@ -292,9 +272,7 @@ describe("schema-registered config writes", () => {
     Reflect.deleteProperty(Object.prototype, "x");
     try {
       for (const [path, segment] of attempts) {
-        const result = await service.patchRegisteredPath("platform", path, true, {
-          schemaRegistry: registry,
-        });
+        const result = await patchRegistered(service, registry, path, true);
 
         expect(result).toEqual({
           success: false,
@@ -343,36 +321,11 @@ describe("schema-registered config writes", () => {
     const initialEntries = await providerEntries(provider);
     const initialRevision = service.revision;
 
-    const protectedRoot = await service.setRegisteredObject(
-      "platform",
-      "/_weaver",
-      {},
-      { schemaRegistry: registry },
-    );
-    const bracketRoot = await service.setRegisteredObject(
-      "platform",
-      "[_weaver]",
-      {},
-      { schemaRegistry: registry },
-    );
-    const unregistered = await service.setRegisteredObject(
-      "platform",
-      "/unknown",
-      {},
-      { schemaRegistry: registry },
-    );
-    const malformed = await service.setRegisteredObject(
-      "platform",
-      "billing",
-      {},
-      { schemaRegistry: registry },
-    );
-    const descendant = await service.setRegisteredObject(
-      "platform",
-      "/billing/limit",
-      4,
-      { schemaRegistry: registry },
-    );
+    const protectedRoot = await setRegistered(service, registry, "/_weaver", {});
+    const bracketRoot = await setRegistered(service, registry, "[_weaver]", {});
+    const unregistered = await setRegistered(service, registry, "/unknown", {});
+    const malformed = await setRegistered(service, registry, "billing", {});
+    const descendant = await setRegistered(service, registry, "/billing/limit", 4);
 
     expect(protectedRoot).toEqual(
       writeFailure(
@@ -419,12 +372,7 @@ describe("schema-registered config writes", () => {
     const initialEntries = await providerEntries(provider);
     const initialRevision = service.revision;
 
-    const result = await service.patchRegisteredPath(
-      "platform",
-      "/billing/mode",
-      "prod",
-      { schemaRegistry: registry },
-    );
+    const result = await patchRegistered(service, registry, "/billing/mode", "prod");
 
     expect(result).toEqual(
       schemaFailure("/billing/mode", "/billing", {
@@ -463,12 +411,7 @@ describe("schema-registered config writes", () => {
     const initialEntries = await providerEntries(provider);
     const initialRevision = service.revision;
 
-    const result = await service.patchRegisteredPath(
-      "platform",
-      "/billing/limit",
-      5,
-      { schemaRegistry: registry },
-    );
+    const result = await patchRegistered(service, registry, "/billing/limit", 5);
 
     expect(result).toEqual(
       schemaFailure("/billing/limit", "/billing", {
@@ -546,5 +489,168 @@ describe("schema-registered config writes", () => {
       ],
     });
     await expectNoEffects(provider, service, initialEntries, initialRevision);
+  });
+
+  test("array patches update existing items and append dense values", async () => {
+    const { provider, registry, service } = await makeRegisteredService({
+      billing: {
+        mode: "test",
+        items: ["old"],
+        groups: [{ values: ["first"] }],
+      },
+    });
+
+    const update = await patchRegistered(service, registry, "/billing/items/0", "new");
+    const append = await patchRegistered(service, registry, "/billing/items/1", "second");
+    const nestedAppend = await patchRegistered(
+      service,
+      registry,
+      "/billing/groups/0/values/1",
+      "nested",
+    );
+
+    expect([update, append, nestedAppend]).toEqual([
+      { success: true },
+      { success: true },
+      { success: true },
+    ]);
+    expect(provider.writes).toHaveLength(3);
+    const entries = await providerEntries(provider);
+    expect(entries.billing.items).toEqual(["new", "second"]);
+    expect(entries.billing.groups[0].values).toEqual(["first", "nested"]);
+    expect(Object.hasOwn(entries.billing.items, 0)).toBe(true);
+    expect(Object.hasOwn(entries.billing.items, 1)).toBe(true);
+    expect(Object.hasOwn(entries.billing.groups[0].values, 0)).toBe(true);
+    expect(Object.hasOwn(entries.billing.groups[0].values, 1)).toBe(true);
+  });
+
+  test("array patches append index zero to an empty array", async () => {
+    const { provider, registry, service } = await makeRegisteredService({
+      billing: { mode: "test", items: [] },
+    });
+
+    const result = await patchRegistered(service, registry, "/billing/items/0", "first");
+
+    expect(result).toEqual({ success: true });
+    expect(provider.writes).toHaveLength(1);
+    expect((await providerEntries(provider)).billing.items).toEqual(["first"]);
+  });
+
+  test("out-of-range array patches reject before provider effects", async () => {
+    const initialEntries = { billing: { mode: "test", items: [] } };
+    const { provider, registry, service } = await makeRegisteredService(initialEntries);
+    const initialRevision = service.revision;
+
+    const result = await patchRegistered(service, registry, "/billing/items/2", "blocked");
+
+    expect(result).toEqual(
+      writeFailure(
+        "VALIDATION_ERROR",
+        "Array patch index 2 exceeds current length 0",
+        {
+          path: "/billing/items/2",
+          anchorPath: "/billing",
+          environment: "test",
+          index: 2,
+          length: 0,
+        },
+      ),
+    );
+    await expectNoEffects(provider, service, initialEntries, initialRevision);
+  });
+
+  test.each(["01", "4294967295"])(
+    "noncanonical array index %s rejects before provider effects",
+    async (index) => {
+      const initialEntries = { billing: { mode: "test", items: [] } };
+      const { provider, registry, service } = await makeRegisteredService(initialEntries);
+      const initialRevision = service.revision;
+
+      const result = await patchRegistered(
+        service,
+        registry,
+        `/billing/items/${index}`,
+        "blocked",
+      );
+
+      expect(result.error).toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: "Configuration does not match registered schema",
+        details: {
+          path: `/billing/items/${index}`,
+          anchorPath: "/billing",
+          environment: "test",
+          errors: [expect.objectContaining({ code: "invalid-path" })],
+        },
+      });
+      await expectNoEffects(provider, service, initialEntries, initialRevision);
+    },
+  );
+
+  test("pre-existing sparse arrays reject before provider effects", async () => {
+    const items = new Array(2);
+    items[1] = "present";
+    const initialEntries = { billing: { mode: "test", items } };
+    const { provider, registry, service } = await makeRegisteredService(initialEntries);
+    const persistedEntries = await providerEntries(provider);
+    const initialRevision = service.revision;
+
+    const result = await patchRegistered(service, registry, "/billing/items/1", "blocked");
+
+    expect(result.error).toMatchObject({
+      code: "VALIDATION_ERROR",
+      details: {
+        errors: [
+          expect.objectContaining({
+            code: "invalid-value",
+            path: "$.billing.items[0]",
+          }),
+        ],
+      },
+    });
+    await expectNoEffects(provider, service, persistedEntries, initialRevision);
+  });
+
+  test("cyclic registered writes reject without provider effects", async () => {
+    const provider = createTestProvider("p1", "platform", { service: {} });
+    const service = await createWeaverConfigService({ providers: [provider], environment: "test" });
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration(extensibleServiceSchema, [], "service"));
+    const initialEntries = await providerEntries(provider);
+    const initialRevision = service.revision;
+    const cyclic = {};
+    cyclic.self = cyclic;
+
+    const objectResult = await setRegistered(service, registry, "/service", cyclic);
+    const patchResult = await patchRegistered(service, registry, "/service/cyclic", cyclic);
+
+    expect(objectResult.error.details.errors[0]).toMatchObject({
+      code: "invalid-value",
+      path: "$.service.self",
+    });
+    expect(patchResult.error.details.errors[0]).toMatchObject({
+      code: "invalid-value",
+      path: "$.service.cyclic.self",
+    });
+    await expectNoEffects(provider, service, initialEntries, initialRevision);
+  });
+
+  test("builds depth-5000 patches iteratively", () => {
+    const root = {};
+    const segments = Array.from({ length: 5_000 }, () => "next");
+    let cursor = root;
+    for (let index = 0; index < segments.length - 1; index++) {
+      cursor.next = {};
+      cursor = cursor.next;
+    }
+    cursor.next = "old";
+
+    const result = buildSchemaPatch(root, segments, "new");
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    cursor = result.value;
+    for (const segment of segments) cursor = cursor[segment];
+    expect(cursor).toBe("new");
   });
 });
