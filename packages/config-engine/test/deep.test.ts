@@ -49,6 +49,22 @@ describe("deepSet", () => {
     deepSet(obj, "x", 99);
     expect(obj.x).toBe(99);
   });
+
+  it("rejects dangerous dot and bracket segments without changing Object.prototype", () => {
+    Reflect.deleteProperty(Object.prototype, "polluted");
+    try {
+      for (const path of [
+        "__proto__.polluted",
+        "safe.constructor.polluted",
+        "safe[prototype].polluted",
+      ]) {
+        expect(() => deepSet({}, path, true)).toThrow();
+      }
+      expect(Reflect.get(Object.prototype, "polluted")).toBe(undefined);
+    } finally {
+      Reflect.deleteProperty(Object.prototype, "polluted");
+    }
+  });
 });
 
 describe("deepRemove", () => {

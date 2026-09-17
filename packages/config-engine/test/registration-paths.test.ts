@@ -4,6 +4,7 @@ import {
   deriveFragmentPath,
   deriveServicePath,
   isWeaverInternalPath,
+  normalizeConfigPath,
   WEAVER_INTERNAL_ROOT,
 } from "../src/registration-paths.js";
 
@@ -38,6 +39,28 @@ describe("schema registration paths", () => {
     expect(() => deriveCanonicalSlotPath("lynx", "plugins")).toThrow();
     expect(() => deriveCanonicalSlotPath("lynx", "/lynx/plugins")).toThrow();
     expect(() => deriveCanonicalSlotPath("lynx", "/_weaver")).toThrow();
+  });
+
+  it("rejects dangerous service, slot, fragment, and canonical path segments", () => {
+    Reflect.deleteProperty(Object.prototype, "polluted");
+    try {
+      for (const segment of ["__proto__", "constructor", "prototype"]) {
+        const message = `Path segment "${segment}" is not allowed`;
+        expect(() => deriveServicePath(segment)).toThrow(message);
+        expect(() => deriveCanonicalSlotPath("lynx", `/${segment}`)).toThrow(
+          message,
+        );
+        expect(() => deriveFragmentPath("lynx", "/plugins", segment)).toThrow(
+          message,
+        );
+        expect(() => normalizeConfigPath(`/lynx/${segment}/polluted`)).toThrow(
+          message,
+        );
+      }
+      expect(Reflect.get(Object.prototype, "polluted")).toBe(undefined);
+    } finally {
+      Reflect.deleteProperty(Object.prototype, "polluted");
+    }
   });
 
   it("protects the Weaver internal registry root", () => {

@@ -20,7 +20,7 @@ export type { ResolvedConfiguration } from "./layers";
 export { deepMerge } from "./merge";
 // namespace.ts — Namespace utilities
 // path.ts — Bracket-aware path parsing
-export { buildPath, parsePath } from "./path";
+export { assertSafePathSegment, buildPath, parsePath } from "./path";
 export { clearRegexCache, getCachedRegex, isSafePattern } from "./regex-cache";
 export type {
   DerivedFragmentPath,
