@@ -160,22 +160,33 @@ test("29r/9qje: mutation winning a deterministic barrier invalidates queued sche
   assert.equal((await registry.getSchema("svc", "dev")).properties.n.maximum, undefined);
 });
 
-test("hywh/29r: publication uses the exact prevalidated resolved value, not a second backend read", async (t) => {
+test("hywh/29r: publication uses the exact prevalidated value and later reads re-resolve independently", async (t) => {
   let current = 1;
+  let resolutionCalls = 0;
   const f = await initialized({ records: [record("svc", schema)], data: { svc: { n: { _weaver: "secret-ref", provider: "vault", uri: "n" } } },
-    secretBackend: { resolve: async () => current } });
+    secretBackend: { resolve: async () => { resolutionCalls += 1; return current; } } });
   t.after(() => f.service.close());
+  const resolutionsBeforeMutation = resolutionCalls;
+  let resolutionsAtProviderIo;
+  let resolutionsAtAcknowledgement;
   const commit = f.platform.authority.commitLayer.bind(f.platform.authority);
   t.mock.method(f.platform.authority, "commitLayer", async (...args) => {
+    resolutionsAtProviderIo = resolutionCalls;
     const result = await commit(...args);
+    resolutionsAtAcknowledgement = resolutionCalls;
     current = "invalid-after-validation";
     return result;
   });
   const events = [];
   f.service.onDelta((delta) => events.push(delta));
   assert.equal((await f.service.set("platform", "svc.mode", "updated")).success, true);
+  assert.ok(resolutionsAtProviderIo > resolutionsBeforeMutation);
+  assert.equal(resolutionsAtAcknowledgement, resolutionsAtProviderIo);
+  assert.equal(resolutionCalls, resolutionsAtAcknowledgement);
   assert.deepEqual(events.map((event) => event.value), [{ n: 1, mode: "updated" }]);
+  const resolutionsAfterPublication = resolutionCalls;
   await assert.rejects(f.service.get("svc.n"));
+  assert.ok(resolutionCalls > resolutionsAfterPublication);
 });
 
 test("fteq: read-only control and an unbound capability reject before lifecycle IO", async (t) => {
