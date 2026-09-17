@@ -21,6 +21,12 @@ import {
 import { createSeedResource } from "../src/bootstrap/seed-resource.ts";
 import { openWeaverRuntime } from "../src/server-runtime.ts";
 import { readBuiltinRecoveryEnvelope } from "../src/core/builtin-catalog.ts";
+import {
+  assertPreservationCoverage,
+  assertPreservedControl,
+  expectedCompletedEnvelope,
+  preservationSnapshot,
+} from "./pinned-recovery-preservation.mjs";
 import { createStandaloneFixture } from "./standalone-fixture.ts";
 import { rawRuntimeProviders } from "./upgrade-test-providers.mjs";
 import { durableReplace } from "./upgrade-final-matrix-fixture.mjs";
@@ -84,32 +90,19 @@ test("pinned startup preserves complete unrelated control state across repeated 
   try {
     const runId = await leavePreparedRun(t, fixture);
     const before = await controlFile(fixture);
-    const unrelated = addUnrelatedRecords(before.entries._weaver);
-    before.entries._weaver.format.builtinCatalog.digest = "0".repeat(64);
-    internalConfigurationSchema.parse(before.entries._weaver);
-    for (const journal of Object.values(before.entries._weaver.upgrades.journal))
-      readBuiltinRecoveryEnvelope(journal);
-    await durableReplace(fixture.seed.store.locator.filePath, before);
+    const preservation = await installAdversarialState(fixture, before, runId);
+    const { baseline, expected, selectedPlanId } = preservation;
     recovered = await openWeaverRuntime(fixture.seed, {
       credentials: fixture.credentials,
     });
-    assert.equal(recovered.state, "maintenance");
-    await assert.rejects(recovered.configService.get("svc"), {
-      code: "CONFIG_NOT_READY",
-    });
-    const result = await recovered.recoverUpgrade({
-      version: 1,
+    await assertFirstRecovery(
+      fixture,
+      recovered,
       runId,
-      priorOwnerStopped: stoppedEvidence(),
-    });
-    assert.equal(result.status, "completed");
-    assert.equal(result.effects.completedSteps, 1);
-    assert.equal(recovered.state, "ready");
-    assert.deepEqual(await recovered.configService.get("svc"), {
-      keep: true,
-      added: "recovered",
-    });
-    assertUnrelated(await controlFile(fixture), unrelated);
+      baseline,
+      expected,
+      selectedPlanId,
+    );
     await recovered.close();
     recovered = await openWeaverRuntime(fixture.seed, {
       credentials: fixture.credentials,
@@ -119,7 +112,14 @@ test("pinned startup preserves complete unrelated control state across repeated 
       (await recovered.recoverUpgrade({ version: 1, runId })).status,
       "completed",
     );
-    assertUnrelated(await controlFile(fixture), unrelated);
+    assertPreservedControl(
+      await controlFile(fixture),
+      baseline,
+      expected,
+      selectedPlanId,
+      runId,
+      "repeated terminal recovery",
+    );
   } finally {
     await recovered?.close();
     await fixture.dispose();
@@ -260,6 +260,55 @@ function controlFile(fixture) {
   return readFile(fixture.seed.store.locator.filePath, "utf8").then(JSON.parse);
 }
 
+async function assertFirstRecovery(
+  fixture,
+  recovered,
+  runId,
+  baseline,
+  expected,
+  selectedPlanId,
+) {
+  assert.equal(recovered.state, "maintenance");
+  await assert.rejects(recovered.configService.get("svc"), {
+    code: "CONFIG_NOT_READY",
+  });
+  const result = await recovered.recoverUpgrade({
+    version: 1,
+    runId,
+    priorOwnerStopped: stoppedEvidence(),
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.effects.completedSteps, 1);
+  assert.equal(recovered.state, "ready");
+  assert.deepEqual(await recovered.configService.get("svc"), {
+    keep: true,
+    added: "recovered",
+  });
+  assertPreservedControl(
+    await controlFile(fixture),
+    baseline,
+    expected,
+    selectedPlanId,
+    runId,
+    "first recovery",
+  );
+}
+
+async function installAdversarialState(fixture, envelope, runId) {
+  const unrelated = addUnrelatedRecords(envelope.entries._weaver);
+  envelope.entries._weaver.format.builtinCatalog.digest = "0".repeat(64);
+  internalConfigurationSchema.parse(envelope.entries._weaver);
+  for (const journal of Object.values(envelope.entries._weaver.upgrades.journal))
+    readBuiltinRecoveryEnvelope(journal);
+  await durableReplace(fixture.seed.store.locator.filePath, envelope);
+  const baseline = structuredClone(await controlFile(fixture));
+  const selectedPlanId = baseline.entries._weaver.upgrades.journal[runId].planId;
+  const completed = expectedCompletedEnvelope(baseline, selectedPlanId, runId);
+  const expected = preservationSnapshot(completed, selectedPlanId, runId);
+  assertPreservationCoverage(expected, selectedPlanId, runId, unrelated);
+  return { baseline, expected, selectedPlanId };
+}
+
 function addUnrelatedRecords(state) {
   const selectedPlan = Object.values(state.upgrades.plans)[0];
   const selectedJournal = Object.values(state.upgrades.journal)[0];
@@ -277,11 +326,7 @@ function addUnrelatedRecords(state) {
   state.infrastructure.generations.extra = structuredClone(
     state.infrastructure.generations.g1,
   );
-  return structuredClone({
-    plan,
-    journal,
-    generation: state.infrastructure.generations.extra,
-  });
+  return { planId: plan.id, runId: journal.runId, generationId: "extra" };
 }
 
 function sourceTips(journal) {
@@ -293,14 +338,4 @@ function sourceTips(journal) {
         : undefined;
     return { providerId: source.providerId, revision: receipt ?? source.revision };
   });
-}
-
-function assertUnrelated(file, expected) {
-  const state = file.entries._weaver;
-  assert.deepEqual(state.upgrades.plans[expected.plan.id], expected.plan);
-  assert.deepEqual(
-    state.upgrades.journal[expected.journal.runId],
-    expected.journal,
-  );
-  assert.deepEqual(state.infrastructure.generations.extra, expected.generation);
 }
