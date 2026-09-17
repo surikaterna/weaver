@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -166,12 +167,28 @@ describe("partition runner arguments", () => {
 describe("no-skip reporters", () => {
   it("recognizes Node and Vitest runtime skips and makes them fatal", () => {
     expect(skippedNodeTest({ type: "test:pass", data: { name: "node skip", skip: true } })).toBe("node skip");
+    expect(skippedNodeTest({ type: "test:pass", data: { name: "node todo", todo: true } })).toBe("node todo");
+    expect(skippedNodeTest({ type: "test:pass", data: { name: "node pending", pending: true } })).toBe("node pending");
     const testCase = { fullName: "vitest skip", result: () => ({ state: "skipped" }) };
     expect(skippedVitestTest(testCase)).toBe("vitest skip");
     expect(() => assertNoSkippedTests(["node skip"], "Node test")).toThrow("forbids skipped tests");
     const reporter = new NoSkippedVitestReporter();
     reporter.onTestCaseResult(testCase);
     expect(() => reporter.onTestRunEnd()).toThrow("vitest skip");
+  });
+
+  it.each(["skip", "todo", "pending"])("makes an executable Node %s test fatal", (mode) => {
+    const result = spawnSync(
+      process.execPath,
+      ["--test", "--test-reporter=./test/no-skips-node-reporter.mjs", "test/no-skips-node-reporter.fixture.mjs"],
+      {
+        cwd: packageRoot,
+        encoding: "utf8",
+        env: { ...process.env, NODE_REPORTER_FIXTURE: mode },
+      },
+    );
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toContain(`node ${mode}`);
   });
 });
 
