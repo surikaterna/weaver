@@ -8,6 +8,7 @@ import {
 import type {
   ConfigurationPropertySchema,
   FragmentSlotRegistrationMetadata,
+  ObjectConfigurationPropertySchema,
   SchemaRegistrationAuditMetadata,
   SchemaRegistrationMetadata,
   SchemaRegistrationRequest,
@@ -25,7 +26,7 @@ import type {
 export interface SchemaEntry {
   readonly kind: "service" | "fragment";
   readonly path: string;
-  readonly schema: ConfigurationPropertySchema;
+  readonly schema: ObjectConfigurationPropertySchema;
   readonly environment: string;
   readonly metadata: SchemaRegistrationMetadata;
 }
@@ -47,7 +48,7 @@ type ParsedRegistration =
   | {
       readonly success: true;
       readonly kind: "service" | "fragment";
-      readonly schema: ConfigurationPropertySchema;
+      readonly schema: ObjectConfigurationPropertySchema;
       readonly environment: string;
       readonly metadata: SchemaRegistrationMetadata;
       readonly targetPath: string;
@@ -97,6 +98,11 @@ export function evaluateRegistration(
   request: SchemaRegistrationRequest,
   context?: SchemaRegistrationContext,
 ): RegistrationEvaluation {
+  if (!isObjectCompatibleRoot(request.schema)) {
+    return validationFailure(
+      'Registered schema root must declare type exactly "object"',
+    );
+  }
   const parsed = parseRegistrationRequest(request, context);
   if (!parsed.success) return { result: parsed.result };
 
@@ -127,6 +133,16 @@ export function evaluateRegistration(
       schemaKey(slot.canonicalSlotPath, slot.environment),
     ),
   };
+}
+
+function isObjectCompatibleRoot(schema: unknown): boolean {
+  return (
+    schema !== null &&
+    typeof schema === "object" &&
+    !Array.isArray(schema) &&
+    "type" in schema &&
+    schema.type === "object"
+  );
 }
 
 function findRemovedSlots(

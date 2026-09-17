@@ -49,7 +49,10 @@ export {
   sessionDomainAuditEntrySchema,
   sinkDomainAuditEntrySchema,
 } from "../schemas-promotion";
-export { configurationPropertySchemaSchema } from "../schemas-property";
+export {
+  configurationPropertySchemaSchema,
+  objectConfigurationPropertySchemaSchema,
+} from "../schemas-property";
 export {
   configurationChangeSchema,
   configurationConflictSchema,

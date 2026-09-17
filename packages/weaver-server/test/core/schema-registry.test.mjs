@@ -100,6 +100,48 @@ describe("SchemaRegistry", () => {
     expect(result.hasBreakingChanges).toBe(false);
   });
 
+  test("register rejects non-object and ambiguous service schema roots", async () => {
+    const opts = await makeOptions();
+    const registry = createSchemaRegistry(opts);
+    const invalidSchemas = [
+      { type: "string" },
+      { type: "array", items: { type: "string" } },
+      { properties: { enabled: { type: "boolean" } } },
+      { oneOf: [{ type: "object" }, { type: "string" }] },
+      { type: ["object", "null"] },
+    ];
+
+    for (const schema of invalidSchemas) {
+      const result = await registry.register(serviceRegistration("svc", "dev", schema));
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain('type exactly "object"');
+    }
+    expect(registry.listAll()).toEqual({});
+  });
+
+  test("register rejects non-object and ambiguous fragment schema roots", async () => {
+    const opts = await makeOptions();
+    const registry = createSchemaRegistry(opts);
+    await registry.register({
+      ...serviceRegistration("svc", "dev", { type: "object" }),
+      fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }],
+    });
+
+    for (const schema of [{ type: "string" }, { type: ["object", "null"] }]) {
+      const result = await registry.register({
+        serviceId: "svc",
+        providerId: "plugin",
+        slotPath: "/plugins",
+        environment: "dev",
+        owner: { name: "plugin", contact: "plugin@example.com" },
+        schema,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toContain('type exactly "object"');
+    }
+    expect(Object.keys(registry.listAll())).toEqual(["/svc:dev"]);
+  });
+
   test("register with removed property detects breaking change", async () => {
     const opts = await makeOptions();
     const registry = createSchemaRegistry(opts);
@@ -229,7 +271,7 @@ describe("SchemaRegistry", () => {
     });
   });
 
-  test("listAll includes hydrated persistent schemas", async () => {
+  test("persistent registry rejects non-object service schema roots", async () => {
     const configService = await createWeaverConfigService({
       providers: [
         createTestProvider("p1", "platform", {
@@ -262,9 +304,19 @@ describe("SchemaRegistry", () => {
       environment: "prod",
     });
 
-    const registry = await createPersistentSchemaRegistry({ configService });
+    await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow();
+  });
 
-    expect(registry.listAll()).toEqual({ "/svc:prod": { type: "string" } });
+  test("persistent registry rejects non-object fragment schema roots", async () => {
+    const path = "/billing/extensions/payments";
+    const environmentRegistry = fragmentMetadataCase(path, "schemaVersion", "1.0.0");
+    environmentRegistry.schemas[path].schema = { type: ["object", "null"] };
+    const configService = await createWeaverConfigService({
+      providers: [createTestProvider("p1", "platform", persistedRegistryEntries(environmentRegistry))],
+      environment: "dev",
+    });
+
+    await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow();
   });
 
   test("persistent registry throws for invalid persisted root", async () => {

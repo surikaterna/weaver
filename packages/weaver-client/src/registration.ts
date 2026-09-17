@@ -1,6 +1,7 @@
 import type {
   ConfigurationJsonSchemaType,
   ConfigurationPropertySchema,
+  ObjectConfigurationPropertySchema,
   WeaverError,
 } from "@weaver-conf/config-types";
 import type { ZodRawShape } from "zod";
@@ -32,14 +33,14 @@ const MAX_ZOD_TRAVERSAL_DEPTH = 100;
  */
 export function zodShapeToJsonSchema(
   shape: ZodRawShape,
-): ConfigurationPropertySchema {
+): ObjectConfigurationPropertySchema {
   return shapeToJsonSchema(shape, { activeSchemas: new Set(), depth: 0 });
 }
 
 function shapeToJsonSchema(
   shape: Readonly<Record<string, unknown>>,
   context: ZodTraversalContext,
-): ConfigurationPropertySchema {
+): ObjectConfigurationPropertySchema {
   const properties: Record<string, ConfigurationPropertySchema> = {};
   const required: string[] = [];
 
