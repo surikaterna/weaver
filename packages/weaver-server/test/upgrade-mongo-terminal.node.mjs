@@ -10,11 +10,10 @@ import {
   guardedDrop,
   mongoDefinition,
   requireLiveUris,
-  standaloneUri,
 } from "./upgrade-mongo-fixture.mjs";
 
 test("U9.3 standalone Mongo refuses durable authority without artifacts", async () => {
-  requireLiveUris();
+  const { standaloneUri } = requireLiveUris();
   const database = `weaver_u9_${process.pid}_${randomUUID().replaceAll("-", "")}`;
   assert.match(database, databaseGuard);
   const client = await new MongoClient(standaloneUri, {

@@ -18,6 +18,7 @@
     "lint": "turbo lint",
     "format": "biome check --write .",
     "test": "turbo test --concurrency=8",
+    "test:live-mongo": "turbo run test:live-mongo --filter=@weaver-conf/weaver-server",
     "docs": "typedoc",
     "docs:build": "turbo build && typedoc && cp -r apps/demo/dist/* docs-dist/",
     "changeset": "changeset",

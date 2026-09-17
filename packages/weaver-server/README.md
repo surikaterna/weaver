@@ -74,6 +74,19 @@ failing an already committed write or registration.
 - `createMongoAuditSink(options)` — MongoDB audit sink
 - `createStdoutAuditSink()` — Console audit sink for development
 
+## Testing
+
+The normal `pnpm --filter @weaver-conf/weaver-server test` verification and
+root Turbo `test` aggregate are Mongo-free. They cover 59 Node files and 39
+Vitest files and fail if a test is skipped.
+
+Run the three live integration files explicitly with `pnpm run
+test:live-mongo` from the repository root. Set `WEAVER_TEST_MONGO_URI` to a
+disposable replica set and `WEAVER_TEST_MONGO_STANDALONE_URI` to a distinct
+disposable standalone server. A bounded, read-only `hello` preflight validates
+both endpoints before tests create and later drop uniquely named `weaver_*`
+databases. Never use unknown or shared Mongo services for this gate.
+
 ## License
 
 MIT

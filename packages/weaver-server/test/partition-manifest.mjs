@@ -4,10 +4,9 @@ import { fileURLToPath } from "node:url";
 
 const frozen = (files) => Object.freeze([...files].sort());
 
-export const nodePartitions = Object.freeze({
+export const defaultNodePartitions = Object.freeze({
   "activation-recovery": frozen(["test/upgrade-activation-recovery.node.mjs"]),
   "compensation": frozen(["test/upgrade-compensation.node.mjs"]),
-  "conflicts": frozen(["test/upgrade-mongo-conflicts.node.mjs"]),
   "core-catalog": frozen([
     "test/authority-audit.node.mjs",
     "test/builtin-catalog-audit.node.mjs",
@@ -61,14 +60,12 @@ export const nodePartitions = Object.freeze({
     "test/schema-foundations/slots.node.mjs",
   ]),
   "node-u9-fs": frozen(["test/upgrade-two-provider-recovery.node.mjs"]),
-  "node-u9-mongo-apply": frozen(["test/upgrade-mongo-apply.node.mjs"]),
   "node-u9-process": frozen(["test/upgrade-two-provider-subprocess.node.mjs"]),
   "node-upgrade-crash": frozen(["test/upgrade-recovery-crash-matrix.node.mjs"]),
   "node-upgrade-terminal": frozen(["test/upgrade-terminal-recovery.node.mjs"]),
   "stale-activation": frozen(["test/upgrade-recovery-stale-activation.node.mjs"]),
   "stale-journal": frozen(["test/upgrade-recovery-stale-journal.node.mjs"]),
   "stale-plan": frozen(["test/upgrade-recovery-stale-plan.node.mjs"]),
-  "terminal": frozen(["test/upgrade-mongo-terminal.node.mjs"]),
   "upgrade-final-a": frozen([
     "test/upgrade-final-authority-apply.node.mjs",
     "test/upgrade-final-authority-lineage.node.mjs",
@@ -87,7 +84,7 @@ export const nodePartitions = Object.freeze({
   ]),
 });
 
-export const vitestPartitions = Object.freeze({
+export const defaultVitestPartitions = Object.freeze({
   "vitest-core": frozen([
     "test/audit/audit-service.test.mjs",
     "test/audit/sinks.test.mjs",
@@ -133,14 +130,52 @@ export const vitestPartitions = Object.freeze({
   ]),
 });
 
-export const partitionManifest = Object.freeze({
-  ...nodePartitions,
-  ...vitestPartitions,
+export const defaultPartitionManifest = Object.freeze({
+  ...defaultNodePartitions,
+  ...defaultVitestPartitions,
 });
 
+export const liveNodePartitions = Object.freeze({
+  "live-mongo-conflicts": frozen(["test/upgrade-mongo-conflicts.node.mjs"]),
+  "live-mongo-integration": frozen(["test/upgrade-mongo-live-integration.node.mjs"]),
+  "live-mongo-terminal": frozen(["test/upgrade-mongo-terminal.node.mjs"]),
+});
+
+export const liveVitestPartitions = Object.freeze({});
+
+export const livePartitionManifest = Object.freeze({
+  ...liveNodePartitions,
+  ...liveVitestPartitions,
+});
+
+export const gateManifests = Object.freeze({
+  default: defaultPartitionManifest,
+  live: livePartitionManifest,
+});
+
+export const expectedGateCounts = Object.freeze({
+  default: Object.freeze({ node: 59, vitest: 39 }),
+  live: Object.freeze({ node: 3, vitest: 0 }),
+});
+
+export const partitionManifest = Object.freeze({
+  ...defaultPartitionManifest,
+  ...livePartitionManifest,
+});
+
+const suiteEntries = (partitions, suite) =>
+  Object.keys(partitions).map((name) => [name, suite]);
+
 export const partitionSuites = Object.freeze(Object.fromEntries([
-  ...Object.keys(nodePartitions).map((name) => [name, "node"]),
-  ...Object.keys(vitestPartitions).map((name) => [name, "vitest"]),
+  ...suiteEntries(defaultNodePartitions, "node"),
+  ...suiteEntries(defaultVitestPartitions, "vitest"),
+  ...suiteEntries(liveNodePartitions, "node"),
+  ...suiteEntries(liveVitestPartitions, "vitest"),
+]));
+
+export const partitionGates = Object.freeze(Object.fromEntries([
+  ...Object.keys(defaultPartitionManifest).map((name) => [name, "default"]),
+  ...Object.keys(livePartitionManifest).map((name) => [name, "live"]),
 ]));
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -178,25 +213,47 @@ function issueSummary(issues) {
   return `Partition manifest invalid (${issues.length} issues):\n${shown.join("\n")}`;
 }
 
-export function validatePartitionManifest(inventory, manifest = partitionManifest) {
+export function validatePartitionManifest(inventory, manifests = gateManifests) {
   const issues = [];
   const assigned = new Map();
   const expected = new Set([...inventory.node, ...inventory.vitest]);
-  for (const name of Object.keys(manifest).sort()) {
-    const files = manifest[name];
-    const suite = partitionSuites[name];
-    if (!suite) issues.push(`unknown partition: ${name}`);
-    if (files.length === 0) issues.push(`empty partition: ${name}`);
-    for (const file of files) {
-      const owners = assigned.get(file) ?? [];
-      owners.push(name);
-      assigned.set(file, owners);
-      if (!expected.has(file)) issues.push(`stale assignment: ${name}: ${file}`);
-      else if (!inventory[suite]?.includes(file)) issues.push(`wrong suite: ${name}: ${file}`);
+  const gateCounts = {};
+  for (const gate of Object.keys(manifests).sort()) {
+    const manifest = manifests[gate];
+    gateCounts[gate] = { node: 0, vitest: 0 };
+    for (const name of Object.keys(manifest).sort()) {
+      const files = manifest[name];
+      const suite = partitionSuites[name];
+      if (!suite) issues.push(`unknown partition: ${gate}: ${name}`);
+      if (partitionGates[name] !== gate) issues.push(`wrong gate: ${gate}: ${name}`);
+      if (files.length === 0) issues.push(`empty partition: ${gate}: ${name}`);
+      if (suite) gateCounts[gate][suite] += files.length;
+      for (const file of files) {
+        const owners = assigned.get(file) ?? [];
+        owners.push(`${gate}/${name}`);
+        assigned.set(file, owners);
+        if (!expected.has(file)) issues.push(`stale assignment: ${gate}/${name}: ${file}`);
+        else if (!inventory[suite]?.includes(file)) issues.push(`wrong suite: ${gate}/${name}: ${file}`);
+      }
+    }
+  }
+  for (const gate of Object.keys(gateManifests).sort()) {
+    if (!(gate in manifests)) issues.push(`missing gate: ${gate}`);
+  }
+  for (const gate of Object.keys(manifests).sort()) {
+    if (!(gate in gateManifests)) issues.push(`unknown gate: ${gate}`);
+    const expectedCounts = expectedGateCounts[gate];
+    const actualCounts = gateCounts[gate];
+    if (expectedCounts && actualCounts.node !== expectedCounts.node) {
+      issues.push(`wrong Node count: ${gate}: expected ${expectedCounts.node}, found ${actualCounts.node}`);
+    }
+    if (expectedCounts && actualCounts.vitest !== expectedCounts.vitest) {
+      issues.push(`wrong Vitest count: ${gate}: expected ${expectedCounts.vitest}, found ${actualCounts.vitest}`);
     }
   }
   for (const name of Object.keys(partitionSuites).sort()) {
-    if (!(name in manifest)) issues.push(`missing partition: ${name}`);
+    const gate = partitionGates[name];
+    if (!(name in (manifests[gate] ?? {}))) issues.push(`missing partition: ${gate}: ${name}`);
   }
   for (const file of [...expected].sort()) {
     const owners = assigned.get(file) ?? [];
@@ -206,6 +263,9 @@ export function validatePartitionManifest(inventory, manifest = partitionManifes
   issues.sort();
   return Object.freeze({
     counts: Object.freeze({ node: inventory.node.length, vitest: inventory.vitest.length }),
+    gateCounts: Object.freeze(Object.fromEntries(
+      Object.entries(gateCounts).map(([gate, counts]) => [gate, Object.freeze(counts)]),
+    )),
     issues: Object.freeze(issues),
     message: issues.length === 0 ? "" : issueSummary(issues),
   });
@@ -215,4 +275,10 @@ export async function verifyPartitionManifest() {
   const result = validatePartitionManifest(await discoverTestInventory());
   if (result.issues.length > 0) throw new Error(result.message);
   return result;
+}
+
+export async function verifyGateManifest(gate) {
+  if (!(gate in gateManifests)) throw new Error(`Unknown test gate: ${gate}`);
+  const result = await verifyPartitionManifest();
+  return Object.freeze({ gate, counts: result.gateCounts[gate] });
 }

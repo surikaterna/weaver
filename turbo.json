@@ -18,7 +18,6 @@
       "dependsOn": [
         "test:activation-recovery",
         "test:compensation",
-        "test:conflicts",
         "test:core-catalog",
         "test:core-lifecycle",
         "test:core-pipeline",
@@ -29,17 +28,23 @@
         "test:node-upgrade-crash",
         "test:node-upgrade-terminal",
         "test:node-u9-fs",
-        "test:node-u9-mongo-apply",
         "test:node-u9-process",
         "test:stale-activation",
         "test:stale-journal",
         "test:stale-plan",
-        "test:terminal",
         "test:upgrade-final-a",
         "test:upgrade-main",
         "test:upgrade-policy",
         "test:vitest-core",
         "test:vitest-transport"
+      ],
+      "cache": false
+    },
+    "@weaver-conf/weaver-server#test:live-mongo": {
+      "dependsOn": [
+        "test:live-mongo-conflicts",
+        "test:live-mongo-integration",
+        "test:live-mongo-terminal"
       ],
       "cache": false,
       "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
@@ -51,11 +56,6 @@
     "test:compensation": {
       "dependsOn": ["^build"],
       "cache": false
-    },
-    "test:conflicts": {
-      "dependsOn": ["^build"],
-      "cache": false,
-      "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
     },
     "test:core-catalog": {
       "dependsOn": ["^build"],
@@ -83,8 +83,7 @@
     },
     "test:node-bootstrap": {
       "dependsOn": ["^build"],
-      "cache": false,
-      "env": ["WEAVER_TEST_MONGO_URI"]
+      "cache": false
     },
     "test:node-cli": {
       "dependsOn": ["build"],
@@ -97,11 +96,6 @@
     "test:node-u9-fs": {
       "dependsOn": ["^build"],
       "cache": false
-    },
-    "test:node-u9-mongo-apply": {
-      "dependsOn": ["^build"],
-      "cache": false,
-      "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
     },
     "test:node-u9-process": {
       "dependsOn": ["^build"],
@@ -119,19 +113,13 @@
       "dependsOn": ["^build"],
       "cache": false
     },
-    "test:terminal": {
-      "dependsOn": ["^build"],
-      "cache": false,
-      "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
-    },
     "test:upgrade-final-a": {
       "dependsOn": ["^build"],
       "cache": false
     },
     "test:upgrade-main": {
       "dependsOn": ["^build"],
-      "cache": false,
-      "env": ["WEAVER_TEST_MONGO_URI"]
+      "cache": false
     },
     "test:upgrade-policy": {
       "dependsOn": ["^build"],
@@ -144,6 +132,25 @@
     "test:vitest-transport": {
       "dependsOn": ["^build"],
       "cache": false
+    },
+    "test:live-mongo:preflight": {
+      "cache": false,
+      "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
+    },
+    "test:live-mongo-conflicts": {
+      "dependsOn": ["^build", "test:live-mongo:preflight"],
+      "cache": false,
+      "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
+    },
+    "test:live-mongo-integration": {
+      "dependsOn": ["^build", "test:live-mongo:preflight"],
+      "cache": false,
+      "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
+    },
+    "test:live-mongo-terminal": {
+      "dependsOn": ["^build", "test:live-mongo:preflight"],
+      "cache": false,
+      "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
     },
     "start": {
       "dependsOn": ["^build"],

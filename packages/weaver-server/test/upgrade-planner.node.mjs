@@ -1,28 +1,15 @@
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { canonicalInternalJson, internalRegistrationId } from "@weaver-conf/config-types";
+import { canonicalInternalJson } from "@weaver-conf/config-types";
 import { initializeWeaver } from "../src/bootstrap/initialize.ts";
-import { seedProviderDefinition } from "../src/bootstrap/compile-layout.ts";
-import { initialRegistrationRecord } from "../src/bootstrap/initial-registrations.ts";
-import { authenticateBootstrapAdministrator } from "../src/bootstrap/seed-trust.ts";
 import { openWeaverRuntime } from "../src/server-runtime.ts";
-import { createStandaloneFixture, testAdmin, testJwt } from "./standalone-fixture.ts";
+import { createStandaloneFixture } from "./standalone-fixture.ts";
+import {
+  planRequest,
+  sourceSchema,
+  targetSchema,
+} from "./upgrade-planner-fixture.mjs";
 import { rawRuntimeProviders } from "./upgrade-test-providers.mjs";
-
-const sourceSchema = {
-  type: "object",
-  properties: { keep: { type: "boolean" } },
-  additionalProperties: false,
-};
-const targetSchema = {
-  type: "object",
-  properties: {
-    keep: { type: "boolean" },
-    added: { type: "string", default: "planned" },
-  },
-  additionalProperties: false,
-};
 
 test("runtime planner snapshots real FS authority without writes or lifecycle effects", { timeout: 30_000 }, async (t) => {
   const fixture = await createStandaloneFixture({ schemas: { svc: sourceSchema } });
@@ -72,36 +59,6 @@ test("runtime planner binds concurrent inventory/revision changes without effect
     assert.equal(runtime.state, "ready");
   } finally {
     await runtime?.close();
-    await fixture.dispose();
-  }
-});
-
-test("runtime planner reads real Mongo authority without mutation", { skip: !process.env.WEAVER_TEST_MONGO_URI, timeout: 30_000 }, async () => {
-  const { MongoClient } = await import("mongodb");
-  const uri = process.env.WEAVER_TEST_MONGO_URI;
-  const client = await new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 }).connect();
-  const database = `weaver_planner_${randomUUID().replaceAll("-", "")}`;
-  const fixture = await createStandaloneFixture({ schemas: { svc: sourceSchema } });
-  let runtime;
-  try {
-    const storeId = `mongo:${client.options.hosts.map((host) => host.toString()).sort().join(",")}/${database}.control`;
-    const seed = { ...fixture.seed, store: { factory: "mongodb", locator: { connectionRef: "database", database, collection: "control", storeId } } };
-    const credentials = { resolveCredential: (ref) => ref === "database" ? uri : ref === "administrator" ? testAdmin : ref === "jwt" ? testJwt : undefined };
-    const request = structuredClone(fixture.request);
-    request.generation.providers = [seedProviderDefinition(seed), { id: "platform", factory: "mongodb", options: { database, collection: "platform" }, credentials: { connection: "database" } }];
-    const administrator = await authenticateBootstrapAdministrator(seed, testAdmin, credentials);
-    await initializeWeaver(seed, request, administrator, { credentials });
-    runtime = await openWeaverRuntime(seed, { credentials });
-    assert.equal((await runtime.configService.set("platform", "svc.keep", false)).success, true);
-    const before = await client.db(database).collection("platform").findOne({ layer: "platform" });
-    const result = await runtime.planUpgrade(planRequest(runtime, request, targetSchema));
-    const after = await client.db(database).collection("platform").findOne({ layer: "platform" });
-    assert.equal(result.result.status, "ready");
-    assert.deepEqual(after, before);
-  } finally {
-    await runtime?.close();
-    await client.db(database).dropDatabase();
-    await client.close();
     await fixture.dispose();
   }
 });
@@ -169,29 +126,3 @@ test("snapshot collector is not exposed on the public config service", async () 
     await fixture.dispose();
   }
 });
-
-function planRequest(runtime, initialization, schema) {
-  const sourceCatalog = {
-    registrations: Object.fromEntries(
-      initialization.registrations.map((request) => {
-        const record = initialRegistrationRecord(request);
-        return [internalRegistrationId(record), record];
-      }),
-    ),
-  };
-  const record = { version: 1, kind: "service", request: { serviceId: "svc", environment: "dev", owner: { name: "fixture", contact: "fixture@example.test" }, schema, fragmentSlots: [] }, audit: { actor: "planner" } };
-  const registrations = { [internalRegistrationId(record)]: record };
-  const targetCatalog = { registrations };
-  return {
-    version: 1,
-    expectedAuthorityRevision: runtime.configService.revision,
-    sourceCatalogDigest: digest(sourceCatalog),
-    inventoryRevision: "0",
-    infrastructureGeneration: "g1",
-    target: { catalogDigest: digest(targetCatalog), registrations },
-  };
-}
-
-function digest(value) {
-  return createHash("sha256").update(canonicalInternalJson(value)).digest("hex");
-}

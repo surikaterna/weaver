@@ -4,13 +4,17 @@ import { pathToFileURL } from "node:url";
 import {
   partitionManifest,
   partitionSuites,
+  gateManifests,
+  verifyGateManifest,
   verifyPartitionManifest,
 } from "./partition-manifest.mjs";
 
 export function parseRunnerArgs(args) {
-  if (args.length !== 1) throw new Error("Expected exactly one partition name or 'verify'");
+  if (args.length !== 1) throw new Error("Expected exactly one partition name or verification command");
   const [name] = args;
-  if (name === "verify") return Object.freeze({ kind: "verify" });
+  if (name === "verify-all") return Object.freeze({ kind: "verify-all" });
+  if (name === "verify-default") return Object.freeze({ kind: "verify-gate", gate: "default" });
+  if (name === "verify-live") return Object.freeze({ kind: "verify-gate", gate: "live" });
   if (!(name in partitionManifest)) throw new Error(`Unknown test partition: ${name}`);
   return Object.freeze({ kind: "partition", name });
 }
@@ -18,9 +22,15 @@ export function parseRunnerArgs(args) {
 function commandFor(name) {
   const files = partitionManifest[name];
   if (partitionSuites[name] === "node") {
-    return ["node", ["--import", "tsx", "--test", "--test-concurrency=1", ...files]];
+    return ["node", [
+      "--import", "tsx", "--test", "--test-concurrency=1",
+      "--test-reporter=./test/no-skips-node-reporter.mjs", ...files,
+    ]];
   }
-  return ["pnpm", ["exec", "vitest", "run", "--maxWorkers=1", "--no-file-parallelism", ...files]];
+  return ["corepack", [
+    "pnpm", "exec", "vitest", "run", "--maxWorkers=1", "--no-file-parallelism",
+    "--reporter=default", "--reporter=./test/no-skips-vitest-reporter.mjs", ...files,
+  ]];
 }
 
 async function runPartition(name) {
@@ -47,13 +57,23 @@ async function runPartition(name) {
 
 async function main() {
   const selection = parseRunnerArgs(process.argv.slice(2));
-  const verified = await verifyPartitionManifest();
   if (selection.kind === "partition") {
+    await verifyPartitionManifest();
     await runPartition(selection.name);
     return;
   }
-  console.log(`Verified ${verified.counts.node} Node and ${verified.counts.vitest} Vitest files.`);
-  for (const name of Object.keys(partitionManifest).sort()) {
+  if (selection.kind === "verify-all") {
+    const verified = await verifyPartitionManifest();
+    console.log(`Verified union: ${verified.counts.node} Node and ${verified.counts.vitest} Vitest files.`);
+    for (const gate of Object.keys(gateManifests).sort()) {
+      const counts = verified.gateCounts[gate];
+      console.log(`${gate}: ${counts.node} Node and ${counts.vitest} Vitest files.`);
+    }
+    return;
+  }
+  const verified = await verifyGateManifest(selection.gate);
+  console.log(`Verified ${verified.gate}: ${verified.counts.node} Node and ${verified.counts.vitest} Vitest files.`);
+  for (const name of Object.keys(gateManifests[selection.gate]).sort()) {
     console.log(`${name}: ${partitionManifest[name].length}`);
   }
 }

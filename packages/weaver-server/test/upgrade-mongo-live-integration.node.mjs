@@ -7,16 +7,98 @@ import {
   layerCommitRequestSchema,
 } from "@weaver-conf/config-types";
 import { computeProviderMutationDigest } from "@weaver-conf/storage-providers";
+import { MongoClient } from "mongodb";
+import { initializeWeaver } from "../src/bootstrap/initialize.ts";
+import { seedProviderDefinition } from "../src/bootstrap/compile-layout.ts";
+import { authenticateBootstrapAdministrator } from "../src/bootstrap/seed-trust.ts";
 import { hostForControl } from "../src/core/config-service-internal.ts";
+import { openWeaverRuntime } from "../src/server-runtime.ts";
+import { startWeaverServer } from "../src/server.ts";
+import {
+  createStandaloneFixture,
+  testAdmin,
+  testJwt,
+} from "./standalone-fixture.ts";
 import {
   assertPublicSecretSafe,
   createMongoUpgradeFixture,
   journal,
   observeMongoDataWrites,
   publicRejection,
+  requireLiveUris,
   revision,
   withoutId,
 } from "./upgrade-mongo-fixture.mjs";
+import {
+  planRequest,
+  sourceSchema,
+  targetSchema,
+} from "./upgrade-planner-fixture.mjs";
+
+const bootstrapSchema = { type: "object", default: {}, additionalProperties: false, properties: { value: { type: "integer", default: 1 } } };
+const { primaryUri } = requireLiveUris();
+
+test("qkmd real Mongo seed initialize/start/read/close/restart and failed reload is nonready", { timeout: 60_000 }, async () => {
+  const uri = primaryUri;
+  const client = await new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 }).connect();
+  const database = `weaver_bootstrap_test_${randomUUID().replaceAll("-", "")}`;
+  const fixture = await createStandaloneFixture({ schemas: { svc: bootstrapSchema } });
+  let server;
+  try {
+    const storeId = `mongo:${client.options.hosts.map((host) => host.toString()).sort().join(",")}/${database}.control`;
+    const seed = { ...fixture.seed, store: { factory: "mongodb", locator: { connectionRef: "database", database, collection: "control", storeId } } };
+    const credentials = { resolveCredential: (ref) => ref === "database" ? uri : ref === "administrator" ? testAdmin : ref === "jwt" ? testJwt : undefined };
+    const input = structuredClone(fixture.request);
+    input.generation.providers = [seedProviderDefinition(seed), { id: "platform", factory: "mongodb", options: { database, collection: "platform" }, credentials: { connection: "database" } }];
+    const administrator = await authenticateBootstrapAdministrator(seed, testAdmin, credentials);
+    await initializeWeaver(seed, input, administrator, { credentials });
+    server = await startWeaverServer({ seed, credentials });
+    assert.equal((await server.runtime.configService.set("platform", "svc.value", 9)).success, true);
+    const revision = server.runtime.configService.revision;
+    await server.close();
+    server = await startWeaverServer({ seed, credentials });
+    assert.equal(server.runtime.configService.revision, revision);
+    assert.equal(await server.runtime.configService.get("svc.value"), 9);
+    const collection = client.db(database).collection("platform");
+    const original = await collection.findOne({ layer: "platform" });
+    await collection.updateOne({ layer: "platform" }, { $set: { sequence: "corrupt" } });
+    await assert.rejects(server.runtime.configService.reloadProvider("platform"));
+    assert.equal(server.isReady, false);
+    assert.equal((await fetch(`http://127.0.0.1:${server.port}/readyz`, { signal: AbortSignal.timeout(30_000) })).status, 503);
+    await collection.updateOne({ layer: "platform" }, { $set: { sequence: original.sequence } });
+    await server.runtime.configService.reloadProvider("platform");
+    assert.equal(await server.runtime.configService.get("svc.value"), 9);
+  } finally { await server?.close(); await client.db(database).dropDatabase(); await client.close(); await fixture.dispose(); }
+});
+
+test("runtime planner reads real Mongo authority without mutation", { timeout: 30_000 }, async () => {
+  const uri = primaryUri;
+  const client = await new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 }).connect();
+  const database = `weaver_planner_${randomUUID().replaceAll("-", "")}`;
+  const fixture = await createStandaloneFixture({ schemas: { svc: sourceSchema } });
+  let runtime;
+  try {
+    const storeId = `mongo:${client.options.hosts.map((host) => host.toString()).sort().join(",")}/${database}.control`;
+    const seed = { ...fixture.seed, store: { factory: "mongodb", locator: { connectionRef: "database", database, collection: "control", storeId } } };
+    const credentials = { resolveCredential: (ref) => ref === "database" ? uri : ref === "administrator" ? testAdmin : ref === "jwt" ? testJwt : undefined };
+    const request = structuredClone(fixture.request);
+    request.generation.providers = [seedProviderDefinition(seed), { id: "platform", factory: "mongodb", options: { database, collection: "platform" }, credentials: { connection: "database" } }];
+    const administrator = await authenticateBootstrapAdministrator(seed, testAdmin, credentials);
+    await initializeWeaver(seed, request, administrator, { credentials });
+    runtime = await openWeaverRuntime(seed, { credentials });
+    assert.equal((await runtime.configService.set("platform", "svc.keep", false)).success, true);
+    const before = await client.db(database).collection("platform").findOne({ layer: "platform" });
+    const result = await runtime.planUpgrade(planRequest(runtime, request, targetSchema));
+    const after = await client.db(database).collection("platform").findOne({ layer: "platform" });
+    assert.equal(result.result.status, "ready");
+    assert.deepEqual(after, before);
+  } finally {
+    await runtime?.close();
+    await client.db(database).dropDatabase();
+    await client.close();
+    await fixture.dispose();
+  }
+});
 
 test("U9.3 normal public apply publishes each FS and Mongo effect exactly once", async () => {
   const fixture = await createMongoUpgradeFixture();

@@ -8,20 +8,23 @@ import {
   installTwoProviderPlan,
 } from "./upgrade-two-provider-fixture.mjs";
 
-export const primaryUri = "mongodb://127.0.0.1:27038/?directConnection=true";
-export const standaloneUri = "mongodb://127.0.0.1:27039/?directConnection=true";
 export const databaseGuard = /^weaver_u9_[1-9][0-9]*_[0-9a-f]{32}$/;
 
 export function requireLiveUris() {
-  assert.equal(process.env.WEAVER_TEST_MONGO_URI, primaryUri);
-  assert.equal(process.env.WEAVER_TEST_MONGO_STANDALONE_URI, standaloneUri);
+  const primaryUri = process.env.WEAVER_TEST_MONGO_URI;
+  const standaloneUri = process.env.WEAVER_TEST_MONGO_STANDALONE_URI;
+  assert.ok(primaryUri, "WEAVER_TEST_MONGO_URI is required");
+  assert.ok(standaloneUri, "WEAVER_TEST_MONGO_STANDALONE_URI is required");
+  assert.notEqual(primaryUri, standaloneUri, "live Mongo authorities must be distinct");
+  return { primaryUri, standaloneUri };
 }
 
-export async function createMongoUpgradeFixture(uri = primaryUri) {
-  requireLiveUris();
+export async function createMongoUpgradeFixture(uri) {
+  const live = requireLiveUris();
+  const selectedUri = uri ?? live.primaryUri;
   const database = `weaver_u9_${process.pid}_${randomUUID().replaceAll("-", "")}`;
   assert.match(database, databaseGuard);
-  const client = await new MongoClient(uri, {
+  const client = await new MongoClient(selectedUri, {
     serverSelectionTimeoutMS: 10_000,
     connectTimeoutMS: 10_000,
     socketTimeoutMS: 10_000,
@@ -31,7 +34,7 @@ export async function createMongoUpgradeFixture(uri = primaryUri) {
     base = await createTwoProviderFixture({
       resolveCredential: (reference, fallback) =>
         reference === "mongo-u9"
-          ? uri
+          ? selectedUri
           : fallback.resolveCredential(reference),
       secondaryProvider: mongoDefinition(database),
     });
@@ -156,6 +159,7 @@ export function publicRejection(operation) {
 
 export function assertPublicSecretSafe(error, fixture, secrets = []) {
   const serialized = JSON.stringify(error);
+  const { primaryUri, standaloneUri } = requireLiveUris();
   for (const value of [
     primaryUri,
     standaloneUri,

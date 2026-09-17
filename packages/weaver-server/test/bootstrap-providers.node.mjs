@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
-import { createStandaloneFixture, testAdmin, testJwt } from "./standalone-fixture.ts";
+import { createStandaloneFixture, testAdmin } from "./standalone-fixture.ts";
 import { initializeWeaver } from "../src/bootstrap/initialize.ts";
 import { authenticateBootstrapAdministrator } from "../src/bootstrap/seed-trust.ts";
 import { seedProviderDefinition } from "../src/bootstrap/compile-layout.ts";
@@ -33,40 +32,6 @@ test("qkmd real local Git checkout seed uses local durable authority without rem
     assert.equal(await server.runtime.configService.get("svc.value"), 7);
     assert.equal(server.runtime.configService.providers.find((provider) => provider.id === "control").dirty, false);
   } finally { await server?.close(); await fixture.dispose(); }
-});
-
-test("qkmd real Mongo seed initialize/start/read/close/restart and failed reload is nonready", { timeout: 60_000, skip: !process.env.WEAVER_TEST_MONGO_URI }, async () => {
-  const { MongoClient } = await import("mongodb");
-  const uri = process.env.WEAVER_TEST_MONGO_URI;
-  const client = await new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 }).connect();
-  const database = `weaver_bootstrap_test_${randomUUID().replaceAll("-", "")}`;
-  const fixture = await createStandaloneFixture({ schemas: { svc: schema } });
-  let server;
-  try {
-    const storeId = `mongo:${client.options.hosts.map((host) => host.toString()).sort().join(",")}/${database}.control`;
-    const seed = { ...fixture.seed, store: { factory: "mongodb", locator: { connectionRef: "database", database, collection: "control", storeId } } };
-    const credentials = { resolveCredential: (ref) => ref === "database" ? uri : ref === "administrator" ? testAdmin : ref === "jwt" ? testJwt : undefined };
-    const input = structuredClone(fixture.request);
-    input.generation.providers = [seedProviderDefinition(seed), { id: "platform", factory: "mongodb", options: { database, collection: "platform" }, credentials: { connection: "database" } }];
-    const administrator = await authenticateBootstrapAdministrator(seed, testAdmin, credentials);
-    await initializeWeaver(seed, input, administrator, { credentials });
-    server = await startWeaverServer({ seed, credentials });
-    assert.equal((await server.runtime.configService.set("platform", "svc.value", 9)).success, true);
-    const revision = server.runtime.configService.revision;
-    await server.close();
-    server = await startWeaverServer({ seed, credentials });
-    assert.equal(server.runtime.configService.revision, revision);
-    assert.equal(await server.runtime.configService.get("svc.value"), 9);
-    const collection = client.db(database).collection("platform");
-    const original = await collection.findOne({ layer: "platform" });
-    await collection.updateOne({ layer: "platform" }, { $set: { sequence: "corrupt" } });
-    await assert.rejects(server.runtime.configService.reloadProvider("platform"));
-    assert.equal(server.isReady, false);
-    assert.equal((await fetch(`http://127.0.0.1:${server.port}/readyz`, { signal: AbortSignal.timeout(30_000) })).status, 503);
-    await collection.updateOne({ layer: "platform" }, { $set: { sequence: original.sequence } });
-    await server.runtime.configService.reloadProvider("platform");
-    assert.equal(await server.runtime.configService.get("svc.value"), 9);
-  } finally { await server?.close(); await client.db(database).dropDatabase(); await client.close(); await fixture.dispose(); }
 });
 
 test("qkmd control relocation requires a new explicit seed and leaves the old target untouched", { timeout: 30_000 }, async () => {
