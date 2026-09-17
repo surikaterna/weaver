@@ -1,4 +1,9 @@
-import { assertPublicConfigPath } from "@weaver-conf/config-engine";
+import {
+  assertPublicConfigPath,
+  deriveCanonicalSlotPath,
+  deriveFragmentPath,
+  deriveServicePath,
+} from "@weaver-conf/config-engine";
 import {
   configurationPropertySchemaSchema,
   fragmentSlotRegistrationMetadataSchema,
@@ -111,13 +116,8 @@ function validatePersistedEntry(
   if (entry.metadata.environment !== environment) {
     throw new Error(`Persisted schema "${path}" environment mismatch`);
   }
-  const metadataPath =
-    entry.kind === "service"
-      ? entry.metadata.servicePath
-      : entry.metadata.fragmentPath;
-  if (metadataPath !== path) {
-    throw new Error(`Persisted schema "${path}" metadata path mismatch`);
-  }
+  if (entry.kind === "service") validatePersistedService(path, entry);
+  else validatePersistedFragment(path, entry);
 }
 
 function validatePersistedSlot(
@@ -126,7 +126,90 @@ function validatePersistedSlot(
   slot: z.infer<typeof fragmentSlotRegistrationMetadataSchema>,
 ): void {
   assertPublicConfigPath(path);
-  if (slot.environment !== environment || slot.canonicalSlotPath !== path) {
+  const service = deriveServicePath(slot.serviceId);
+  const canonicalSlotPath = deriveCanonicalSlotPath(
+    slot.serviceId,
+    slot.slotPath,
+  );
+  assertMatchingPath(slot.servicePath, service.servicePath, "slot service");
+  assertMatchingPath(
+    slot.canonicalSlotPath,
+    canonicalSlotPath,
+    "slot canonical",
+  );
+  if (
+    slot.environment !== environment ||
+    slot.providerId !== slot.serviceId ||
+    canonicalSlotPath !== path
+  ) {
     throw new Error(`Persisted slot "${path}" metadata mismatch`);
   }
+}
+
+function validatePersistedService(
+  path: string,
+  entry: PersistedSchemaEntry,
+): void {
+  const metadata = entry.metadata;
+  const service = deriveServicePath(metadata.serviceId);
+  assertMatchingPath(metadata.servicePath, service.servicePath, "service");
+  assertOptionalPublicPath(metadata.canonicalSlotPath);
+  assertOptionalPublicPath(metadata.fragmentPath);
+  if (
+    metadata.providerId !== metadata.serviceId ||
+    metadata.canonicalSlotPath !== undefined ||
+    metadata.fragmentPath !== undefined ||
+    service.servicePath !== path
+  ) {
+    throw new Error(`Persisted schema "${path}" metadata path mismatch`);
+  }
+}
+
+function validatePersistedFragment(
+  path: string,
+  entry: PersistedSchemaEntry,
+): void {
+  const metadata = entry.metadata;
+  const service = deriveServicePath(metadata.serviceId);
+  assertMatchingPath(
+    metadata.servicePath,
+    service.servicePath,
+    "fragment service",
+  );
+  const canonicalSlotPath = requireFragmentSlotPath(metadata.canonicalSlotPath);
+  const slotPath = canonicalSlotPath.slice(service.servicePath.length);
+  const fragment = deriveFragmentPath(
+    metadata.serviceId,
+    slotPath,
+    metadata.providerId,
+  );
+  assertMatchingPath(
+    canonicalSlotPath,
+    fragment.canonicalSlotPath,
+    "fragment slot",
+  );
+  assertMatchingPath(metadata.fragmentPath, fragment.fragmentPath, "fragment");
+  if (fragment.fragmentPath !== path) {
+    throw new Error(`Persisted schema "${path}" metadata path mismatch`);
+  }
+}
+
+function requireFragmentSlotPath(path: string | undefined): string {
+  if (path === undefined)
+    throw new Error("Persisted fragment slot path missing");
+  return assertPublicConfigPath(path);
+}
+
+function assertMatchingPath(
+  actual: string | undefined,
+  expected: string,
+  field: string,
+): void {
+  if (actual === undefined || assertPublicConfigPath(actual) !== expected) {
+    throw new Error(`Persisted ${field} path metadata mismatch`);
+  }
+}
+
+function assertOptionalPublicPath(path: string | undefined): void {
+  if (path !== undefined) assertPublicConfigPath(path);
 }
