@@ -3,6 +3,8 @@ import type {
   ConfigDelta,
   ConfigSnapshot,
   ConfigurationPropertySchema,
+  SchemaRegistrationRequest,
+  SchemaRegistrationResponse,
   ScopeDefinition,
   ScopeInstance,
   WriteResult,
@@ -54,9 +56,8 @@ export interface WeaverTransport {
   ): Promise<string[]>;
   fetchSchemas?(): Promise<Record<string, ConfigurationPropertySchema>>;
   registerSchema?(
-    namespace: string,
-    schema: Record<string, unknown>,
-  ): Promise<void>;
+    request: SchemaRegistrationRequest,
+  ): Promise<SchemaRegistrationResponse>;
   close(): Promise<void>;
 }
 
@@ -192,8 +193,8 @@ export function createScompTransport(
       return result.schemas;
     },
 
-    async registerSchema(namespace, schema) {
-      await client.registerSchema({ namespace, schema });
+    async registerSchema(request) {
+      return client.registerSchema(request);
     },
 
     async close() {

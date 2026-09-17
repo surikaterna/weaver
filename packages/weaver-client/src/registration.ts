@@ -1,3 +1,7 @@
+import type {
+  ConfigurationPropertySchema,
+  WeaverError,
+} from "@weaver-conf/config-types";
 import type { ZodRawShape } from "zod";
 import type { NamespaceDefinition } from "./namespace";
 import type { WeaverTransport } from "./transport";
@@ -15,8 +19,8 @@ export interface SchemaRegistrationResult {
  */
 export function zodShapeToJsonSchema(
   shape: ZodRawShape,
-): Record<string, unknown> {
-  const properties: Record<string, unknown> = {};
+): ConfigurationPropertySchema {
+  const properties: Record<string, ConfigurationPropertySchema> = {};
   const required: string[] = [];
 
   for (const [key, fieldSchema] of Object.entries(shape)) {
@@ -35,22 +39,10 @@ export function zodShapeToJsonSchema(
 }
 
 function inferZodType(schema: unknown): {
-  jsonType: Record<string, unknown>;
+  jsonType: ConfigurationPropertySchema;
   isOptional: boolean;
 } {
-  // SAFETY: duck-typing Zod internals — schema is an opaque Zod type object
-  const s = schema as Record<string, unknown>;
-  let isOptional = false;
-  let current = s;
-
-  // Unwrap optional/nullable wrappers
-  const def = getZodDef(current);
-  if (def && (def.type === "optional" || def.type === "nullable")) {
-    isOptional = true;
-    const inner = def.innerType;
-    if (inner) current = inner as Record<string, unknown>; // SAFETY: Zod innerType is a schema object
-  }
-
+  const { current, isOptional } = unwrapOptionalSchema(schema);
   const innerDef = getZodDef(current);
   const typeName = innerDef?.type as string | undefined; // SAFETY: Zod def.type is always string if present
 
@@ -62,33 +54,73 @@ function inferZodType(schema: unknown): {
   if (typeName === "boolean")
     return { jsonType: { type: "boolean" }, isOptional };
   if (typeName === "array") return { jsonType: { type: "array" }, isOptional };
-  if (typeName === "object") {
-    const shape = innerDef?.shape;
-    if (shape && typeof shape === "object") {
-      return {
-        jsonType: zodShapeToJsonSchema(shape as ZodRawShape),
-        isOptional,
-      }; // SAFETY: confirmed shape is object
-    }
-    return { jsonType: { type: "object" }, isOptional };
-  }
-  if (typeName === "enum") {
-    const entries = innerDef?.entries;
-    if (entries && typeof entries === "object") {
-      return {
-        jsonType: { type: "string", enum: Object.keys(entries as object) },
-        isOptional,
-      }; // SAFETY: entries confirmed as object
-    }
-    return { jsonType: { type: "string" }, isOptional };
-  }
-  if (typeName === "literal") {
-    const value = innerDef?.value;
-    return { jsonType: { type: typeof value, const: value }, isOptional };
+  if (typeName === "object") return inferObjectType(innerDef, isOptional);
+  if (typeName === "enum") return inferEnumType(innerDef, isOptional);
+  if (typeName === "literal") return inferLiteralType(innerDef, isOptional);
+
+  return { jsonType: { type: "object" }, isOptional };
+}
+
+function unwrapOptionalSchema(schema: unknown): {
+  current: Record<string, unknown>;
+  isOptional: boolean;
+} {
+  let current = schema as Record<string, unknown>; // SAFETY: Zod schemas are object-like values
+  const def = getZodDef(current);
+  if (!(def && (def.type === "optional" || def.type === "nullable"))) {
+    return { current, isOptional: false };
   }
 
-  // Fallback
-  return { jsonType: {}, isOptional };
+  const inner = def.innerType;
+  if (inner) current = inner as Record<string, unknown>; // SAFETY: Zod innerType is a schema object
+  return { current, isOptional: true };
+}
+
+function inferObjectType(
+  def: Record<string, unknown> | undefined,
+  isOptional: boolean,
+): { jsonType: ConfigurationPropertySchema; isOptional: boolean } {
+  const shape = def?.shape;
+  if (shape && typeof shape === "object") {
+    return { jsonType: zodShapeToJsonSchema(shape as ZodRawShape), isOptional }; // SAFETY: confirmed shape is object
+  }
+  return { jsonType: { type: "object" }, isOptional };
+}
+
+function inferEnumType(
+  def: Record<string, unknown> | undefined,
+  isOptional: boolean,
+): { jsonType: ConfigurationPropertySchema; isOptional: boolean } {
+  const entries = def?.entries;
+  if (entries && typeof entries === "object") {
+    return {
+      jsonType: { type: "string", enum: Object.keys(entries) },
+      isOptional,
+    };
+  }
+  return { jsonType: { type: "string" }, isOptional };
+}
+
+function inferLiteralType(
+  def: Record<string, unknown> | undefined,
+  isOptional: boolean,
+): { jsonType: ConfigurationPropertySchema; isOptional: boolean } {
+  const value = def?.value;
+  return {
+    jsonType: { type: getJsonSchemaType(value), const: value },
+    isOptional,
+  };
+}
+
+function getJsonSchemaType(
+  value: unknown,
+): ConfigurationPropertySchema["type"] {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  if (Number.isInteger(value)) return "integer";
+  if (typeof value === "number") return "number";
+  if (typeof value === "boolean") return "boolean";
+  return "string";
 }
 
 function getZodDef(
@@ -121,7 +153,20 @@ export async function registerNamespaces(
   for (const def of definitions) {
     try {
       const jsonSchema = zodShapeToJsonSchema(def.schema.shape);
-      await transport.registerSchema(def.prefix, jsonSchema);
+      const response = await transport.registerSchema({
+        serviceId: def.prefix,
+        environment: "default",
+        owner: { name: def.prefix, contact: "unknown" },
+        schema: jsonSchema,
+        fragmentSlots: [],
+      });
+      if (response.success === false) {
+        result.errors.push({
+          namespace: def.prefix,
+          error: schemaRegistrationErrorMessage(response.error),
+        });
+        continue;
+      }
       result.registered.push(def.prefix);
     } catch (e) {
       result.errors.push({
@@ -132,4 +177,10 @@ export async function registerNamespaces(
   }
 
   return result;
+}
+
+function schemaRegistrationErrorMessage(
+  error: WeaverError | undefined,
+): string {
+  return error?.message ?? "Schema registration failed";
 }

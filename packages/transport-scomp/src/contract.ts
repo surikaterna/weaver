@@ -4,6 +4,8 @@ import type {
   ConfigSnapshot,
   ConfigurationInspection,
   ConfigurationPropertySchema,
+  SchemaRegistrationRequest,
+  SchemaRegistrationResponse,
   ScopeDefinition,
   WriteResult,
 } from "@weaver-conf/config-types";
@@ -65,10 +67,7 @@ export type EmptyInput = Record<PropertyKey, never>;
 
 export type FetchSchemasInput = EmptyInput;
 
-export interface RegisterSchemaInput {
-  namespace: string;
-  schema: Record<string, unknown>;
-}
+export type RegisterSchemaInput = SchemaRegistrationRequest;
 
 export interface SubscribeInput {
   namespace?: string;
@@ -93,7 +92,9 @@ export interface WeaverConfigContract {
   fetchSchemas(
     input: FetchSchemasInput,
   ): Promise<{ schemas: Record<string, ConfigurationPropertySchema> }>;
-  registerSchema(input: RegisterSchemaInput): Promise<void>;
+  registerSchema(
+    input: RegisterSchemaInput,
+  ): Promise<SchemaRegistrationResponse>;
 
   // Feed (returns AsyncIterable<T>)
   subscribe(input: SubscribeInput): AsyncIterable<ConfigDelta>;

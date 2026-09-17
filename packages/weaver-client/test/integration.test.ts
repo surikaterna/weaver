@@ -94,11 +94,11 @@ describe("Integration: WeaverClient full flow", () => {
   it("registerNamespaces delegates to transport", async () => {
     const registered: string[] = [];
     const transport = createMockTransport();
-    (transport as unknown as Record<string, unknown>).registerSchema = async (
-      ns: string,
-    ) => {
-      registered.push(ns);
-    };
+    (transport as unknown as Record<string, unknown>).registerSchema =
+      async (request: { serviceId: string }) => {
+        registered.push(request.serviceId);
+        return { success: true, isNewSchema: true, hasBreakingChanges: false };
+      };
 
     const client = await createWeaverClient({ transport });
     const defs = [defineNamespace("editor", { fontSize: z.number() })];

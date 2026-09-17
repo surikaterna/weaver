@@ -2,6 +2,10 @@ import type { ScopeDefinition } from "@weaver-conf/config-types";
 import type { WeaverError } from "../types/errors";
 import { createWeaverError } from "../types/errors";
 import type { WeaverConfigService } from "./config-service";
+import {
+  removeInternalConfig,
+  writeInternalConfig,
+} from "./config-service-internal";
 import type { SchemaRegistry } from "./schema-registry";
 import { isSameScopeLayer, parseScopeLayer } from "./scope-utils";
 
@@ -84,10 +88,13 @@ export function createScopeManager(options: ScopeManagerOptions): ScopeManager {
           p.layer === scopeId,
       );
       if (provider) {
-        await configService.set(scopeLayer, `_weaver.scope.${scopeId}`, value, {
-          environment: "default",
-          actor,
-        });
+        await writeInternalConfig(
+          configService,
+          scopeLayer,
+          `_weaver.scope.${scopeId}`,
+          value,
+          { environment: "default", actor },
+        );
       }
 
       if (!activeScopes.has(scopeId)) {
@@ -123,7 +130,8 @@ export function createScopeManager(options: ScopeManagerOptions): ScopeManager {
       const provider = configService.providers.find(
         (p) => p.layer === scopeLayer || isSameScopeLayer(p.layer, scopeLayer),
       );
-      await configService.remove(
+      await removeInternalConfig(
+        configService,
         provider?.layer ?? scopeLayer,
         `_weaver.scope.${scopeId}`,
         {

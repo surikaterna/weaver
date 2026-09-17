@@ -49,11 +49,11 @@ describe("zodShapeToJsonSchema", () => {
 
 describe("registerNamespaces", () => {
   it("calls transport.registerSchema for each definition", async () => {
-    const registered: Array<{ ns: string; schema: Record<string, unknown> }> =
-      [];
+    const registered: string[] = [];
     const transport = {
-      registerSchema: async (ns: string, schema: Record<string, unknown>) => {
-        registered.push({ ns, schema });
+      registerSchema: async (request: { serviceId: string }) => {
+        registered.push(request.serviceId);
+        return { success: true, isNewSchema: true, hasBreakingChanges: false };
       },
     } as unknown as WeaverTransport;
 
@@ -66,7 +66,7 @@ describe("registerNamespaces", () => {
     expect(result.registered).toEqual(["editor", "theme"]);
     expect(result.skipped.length).toBe(0);
     expect(result.errors.length).toBe(0);
-    expect(registered.length).toBe(2);
+    expect(registered).toEqual(["editor", "theme"]);
   });
 
   it("gracefully handles transport without registerSchema", async () => {
@@ -81,9 +81,10 @@ describe("registerNamespaces", () => {
   it("reports errors per-namespace without aborting", async () => {
     let callCount = 0;
     const transport = {
-      registerSchema: async (ns: string) => {
+      registerSchema: async (request: { serviceId: string }) => {
         callCount++;
-        if (ns === "bad") throw new Error("Server rejected");
+        if (request.serviceId === "bad") throw new Error("Server rejected");
+        return { success: true, isNewSchema: true, hasBreakingChanges: false };
       },
     } as unknown as WeaverTransport;
 
@@ -98,5 +99,35 @@ describe("registerNamespaces", () => {
     expect(result.errors.length).toBe(1);
     expect(result.errors[0].namespace).toBe("bad");
     expect(callCount).toBe(3);
+  });
+
+  it("reports non-throwing failed registration responses", async () => {
+    const transport = {
+      registerSchema: async (request: { serviceId: string }) => {
+        if (request.serviceId === "bad") {
+          return {
+            success: false,
+            isNewSchema: false,
+            hasBreakingChanges: false,
+            error: {
+              code: "SCHEMA_CONFLICT" as const,
+              message: "Schema conflict",
+            },
+          };
+        }
+        return { success: true, isNewSchema: true, hasBreakingChanges: false };
+      },
+    } as unknown as WeaverTransport;
+
+    const defs = [
+      defineNamespace("good", { x: z.string() }),
+      defineNamespace("bad", { y: z.number() }),
+    ];
+
+    const result = await registerNamespaces(defs, transport);
+    expect(result.registered).toEqual(["good"]);
+    expect(result.errors).toEqual([
+      { namespace: "bad", error: "Schema conflict" },
+    ]);
   });
 });

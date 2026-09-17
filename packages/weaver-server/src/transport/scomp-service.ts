@@ -94,11 +94,7 @@ export function createWeaverScompService(deps: ScompServiceDeps) {
     },
 
     async registerSchema(input) {
-      await schemaRegistry.register({
-        serviceId: input.namespace,
-        declaration: input.schema,
-        environment: "default",
-      });
+      return schemaRegistry.register(input);
     },
 
     async *subscribe(_input) {

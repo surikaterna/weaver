@@ -44,6 +44,52 @@ describe("WeaverConfigService", () => {
     expect(svc.revision).not.toBe(oldRev);
   });
 
+  it("rejects public writes to protected Weaver metadata paths", async () => {
+    const svc = await makeService({});
+    const keys = [
+      "_weaver",
+      "_weaver.registry.schemas",
+      "/_weaver",
+      "/_weaver/registry/schemas",
+      "[_weaver].registry.schemas",
+    ];
+
+    for (const key of keys) {
+      const result = await svc.set("app", key, "blocked");
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("VALIDATION_ERROR");
+    }
+
+    expect(await svc.get("_weaver.registry.schemas")).toBe(undefined);
+    expect(await svc.get("[_weaver].registry.schemas")).toBe(undefined);
+  });
+
+  it("rejects public removals and batches for protected Weaver metadata paths", async () => {
+    const keys = [
+      "_weaver.registry.schemas",
+      "/_weaver/registry/schemas",
+      "[_weaver].registry.schemas",
+    ];
+
+    for (const key of keys) {
+      const svc = await makeService({
+        _weaver: { registry: { schemas: "internal" } },
+      });
+      const removeResult = await svc.remove("app", key);
+      const batchResult = await svc.setMany("app", {
+        "app.safe": true,
+        [key]: "blocked",
+      });
+
+      expect(removeResult.success).toBe(false);
+      expect(removeResult.error?.code).toBe("VALIDATION_ERROR");
+      expect(batchResult.success).toBe(false);
+      expect(batchResult.error?.code).toBe("VALIDATION_ERROR");
+      expect(await svc.get("app.safe")).toBe(undefined);
+      expect(await svc.get("_weaver.registry.schemas")).toBe("internal");
+    }
+  });
+
   it("removes a value", async () => {
     const svc = await makeService({ "rm.key": "gone" });
     const result = await svc.remove("app", "rm.key");
