@@ -71,16 +71,19 @@ describe("persistent schema registry hardening", () => {
 
   test("rejects reserved persisted environments before hydration effects", async () => {
     const originalPrototype = Object.getPrototypeOf({});
+    const originalPrototypeProperties = Object.getOwnPropertyNames(
+      Object.prototype,
+    );
     for (const environment of reservedEnvironments) {
       for (const entries of reservedEnvironmentCases(environment)) {
         const harness = await createPersistenceHarness(entries);
-        await expect(
-          createPersistentSchemaRegistry({
-            configService: harness.configService,
-          }),
-        ).rejects.toBeInstanceOf(ZodError);
+        await expectReservedEnvironmentRejection(harness.configService);
         harness.expectNoWrites();
+        expect(await harness.provider.load()).toEqual({ entries });
         expect(Object.getPrototypeOf({})).toBe(originalPrototype);
+        expect(Object.getOwnPropertyNames(Object.prototype)).toEqual(
+          originalPrototypeProperties,
+        );
       }
     }
   });
@@ -338,6 +341,22 @@ async function expectPersistedRegistryRejection(environmentRegistry, segment) {
   await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(
     `Path segment "${segment}" is not allowed`,
   );
+}
+
+async function expectReservedEnvironmentRejection(configService) {
+  try {
+    await createPersistentSchemaRegistry({ configService });
+    throw new Error("Expected persisted environment rejection");
+  } catch (error) {
+    expect(error).toBeInstanceOf(ZodError);
+    expect(error.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "Environment uses a reserved identifier",
+        }),
+      ]),
+    );
+  }
 }
 
 async function withoutPrototypePollution(run) {
