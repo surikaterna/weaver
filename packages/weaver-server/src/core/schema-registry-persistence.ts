@@ -7,6 +7,7 @@ import {
 import {
   fragmentSlotRegistrationMetadataSchema,
   objectConfigurationPropertySchemaSchema,
+  registrationEnvironmentSchema,
   schemaRegistrationMetadataSchema,
 } from "@weaver-conf/config-types";
 import { z } from "zod";
@@ -25,29 +26,39 @@ const persistedEnvironmentRegistrySchema = z.strictObject({
 });
 
 const persistedSchemaRegistrySchema = z.strictObject({
-  environments: z.record(z.string(), persistedEnvironmentRegistrySchema),
+  environments: z.record(
+    registrationEnvironmentSchema,
+    persistedEnvironmentRegistrySchema,
+  ),
 });
 
 type PersistedSchemaEntry = z.infer<typeof persistedSchemaEntrySchema>;
 type PersistedSchemaRegistry = z.infer<typeof persistedSchemaRegistrySchema>;
+type MutablePersistedEnvironment = {
+  readonly schemas: Map<string, PersistedSchemaEntry>;
+  readonly slots: Map<
+    string,
+    z.infer<typeof fragmentSlotRegistrationMetadataSchema>
+  >;
+};
 
 export function serializeRegistry(
   state: RegistryState,
 ): PersistedSchemaRegistry {
-  const persisted: PersistedSchemaRegistry = { environments: {} };
+  const environments = new Map<string, MutablePersistedEnvironment>();
   for (const entry of state.schemas.values()) {
-    const env = getPersistedEnvironment(persisted, entry.environment);
-    env.schemas[entry.path] = {
+    const env = getPersistedEnvironment(environments, entry.environment);
+    env.schemas.set(entry.path, {
       kind: entry.kind,
       schema: entry.schema,
       metadata: entry.metadata,
-    };
+    });
   }
   for (const slot of state.slots.values()) {
-    const env = getPersistedEnvironment(persisted, slot.environment);
-    env.slots[slot.canonicalSlotPath] = slot;
+    const env = getPersistedEnvironment(environments, slot.environment);
+    env.slots.set(slot.canonicalSlotPath, slot);
   }
-  return persisted;
+  return { environments: serializeEnvironments(environments) };
 }
 
 export function parsePersistedRegistry(raw: unknown): RegistryState {
@@ -61,6 +72,7 @@ export function parsePersistedRegistry(raw: unknown): RegistryState {
       "Persisted schema registry must include environments object",
     );
   }
+  validateRawEnvironmentKeys(raw.environments);
   const persisted = persistedSchemaRegistrySchema.parse(raw);
   for (const [environment, env] of Object.entries(persisted.environments)) {
     for (const [path, entry] of Object.entries(env.schemas)) {
@@ -82,15 +94,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function validateRawEnvironmentKeys(
+  environments: Record<string, unknown>,
+): void {
+  for (const environment of Object.keys(environments)) {
+    registrationEnvironmentSchema.parse(environment);
+  }
+}
+
 function getPersistedEnvironment(
-  registry: PersistedSchemaRegistry,
+  environments: Map<string, MutablePersistedEnvironment>,
   environment: string,
-): PersistedSchemaRegistry["environments"][string] {
-  registry.environments[environment] = registry.environments[environment] ?? {
-    schemas: {},
-    slots: {},
-  };
-  return registry.environments[environment];
+): MutablePersistedEnvironment {
+  const existing = environments.get(environment);
+  if (existing !== undefined) return existing;
+  const created = { schemas: new Map(), slots: new Map() };
+  environments.set(environment, created);
+  return created;
+}
+
+function serializeEnvironments(
+  environments: ReadonlyMap<string, MutablePersistedEnvironment>,
+): PersistedSchemaRegistry["environments"] {
+  return Object.fromEntries(
+    [...environments].map(([environment, registry]) => [
+      environment,
+      {
+        schemas: Object.fromEntries(registry.schemas),
+        slots: Object.fromEntries(registry.slots),
+      },
+    ]),
+  );
 }
 
 function toSchemaEntry(

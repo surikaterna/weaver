@@ -204,9 +204,11 @@ export {
   writeResultSchema,
 } from "./schemas-providers";
 export {
+  isReservedPathSegment,
   providerIdPattern,
   providerIdSchema,
   publicConfigPathSchema,
+  registrationEnvironmentSchema,
   serviceIdPattern,
   serviceIdSchema,
   slotPathSchema,

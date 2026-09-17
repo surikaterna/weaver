@@ -8,11 +8,13 @@ import {
 import {
   providerIdSchema,
   publicConfigPathSchema,
+  registrationEnvironmentSchema,
   serviceIdSchema,
   slotPathSchema,
 } from "../src/schemas-registration-paths.js";
 import {
   fragmentSchemaRegistrationRequestSchema,
+  fragmentSlotRegistrationMetadataSchema,
   schemaRegistrationMetadataSchema,
   serviceSchemaRegistrationRequestSchema,
 } from "../src/schemas-schema-registration.js";
@@ -242,6 +244,9 @@ describe("schema registration request schemas", () => {
 
   it("rejects prototype-unsafe registration environments", () => {
     for (const environment of ["__proto__", "constructor", "prototype"]) {
+      expect(registrationEnvironmentSchema.safeParse(environment).success).toBe(
+        false,
+      );
       expect(
         serviceSchemaRegistrationRequestSchema.safeParse({
           serviceId: "lynx",
@@ -259,6 +264,27 @@ describe("schema registration request schemas", () => {
           environment,
           owner: { name: "Ghost", contact: "ghost@example.com" },
           schema: { type: "object" },
+        }).success,
+      ).toBe(false);
+      expect(
+        schemaRegistrationMetadataSchema.safeParse({
+          serviceId: "lynx",
+          servicePath: "/lynx",
+          environment,
+          providerId: "lynx",
+          owner: { name: "Lynx", contact: "lynx@example.com" },
+        }).success,
+      ).toBe(false);
+      expect(
+        fragmentSlotRegistrationMetadataSchema.safeParse({
+          serviceId: "lynx",
+          servicePath: "/lynx",
+          slotPath: "/plugins",
+          canonicalSlotPath: "/lynx/plugins",
+          environment,
+          providerId: "lynx",
+          owner: { name: "Lynx", contact: "lynx@example.com" },
+          accepts: "object",
         }).success,
       ).toBe(false);
     }

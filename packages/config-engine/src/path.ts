@@ -1,15 +1,12 @@
 // Bracket-aware path parsing for compound key identifiers
 
-import { createWeaverError } from "@weaver-conf/config-types";
-
-const DANGEROUS_PATH_SEGMENTS: ReadonlySet<string> = new Set([
-  "__proto__",
-  "constructor",
-  "prototype",
-]);
+import {
+  createWeaverError,
+  isReservedPathSegment,
+} from "@weaver-conf/config-types";
 
 export function assertSafePathSegment(segment: string): void {
-  if (DANGEROUS_PATH_SEGMENTS.has(segment)) {
+  if (isReservedPathSegment(segment)) {
     throw createWeaverError(
       "VALIDATION_ERROR",
       `Path segment "${segment}" is not allowed`,

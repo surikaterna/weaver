@@ -3,22 +3,10 @@ import { weaverErrorSchema } from "./errors";
 import { objectConfigurationPropertySchemaSchema } from "./schemas-property";
 import {
   providerIdSchema,
+  registrationEnvironmentSchema,
   serviceIdSchema,
   slotPathSchema,
 } from "./schemas-registration-paths";
-
-const prototypeUnsafeIdentifiers = new Set([
-  "__proto__",
-  "constructor",
-  "prototype",
-]);
-
-const registrationEnvironmentSchema = z
-  .string()
-  .min(1)
-  .refine((value) => !prototypeUnsafeIdentifiers.has(value), {
-    message: "Environment uses a reserved identifier",
-  });
 
 export const registrationOwnerSchema = z.strictObject({
   name: z.string().min(1),
@@ -76,7 +64,7 @@ export const fragmentSlotRegistrationMetadataSchema = z.strictObject({
   servicePath: z.string(),
   slotPath: z.string(),
   canonicalSlotPath: z.string(),
-  environment: z.string(),
+  environment: registrationEnvironmentSchema,
   providerId: z.string(),
   owner: registrationOwnerSchema,
   accepts: z.literal("object"),
@@ -87,7 +75,7 @@ export const fragmentSlotRegistrationMetadataSchema = z.strictObject({
 export const schemaRegistrationMetadataSchema = z.strictObject({
   serviceId: z.string(),
   servicePath: z.string(),
-  environment: z.string(),
+  environment: registrationEnvironmentSchema,
   providerId: z.string(),
   owner: registrationOwnerSchema,
   schemaVersion: z.string().optional(),

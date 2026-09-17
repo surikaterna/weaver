@@ -1,14 +1,24 @@
 import { z } from "zod";
 
-export const serviceIdPattern =
-  /^(?!(?:__proto__|constructor|prototype)$)[a-z][a-z0-9-]*$/;
-export const providerIdPattern =
-  /^(?!(?:__proto__|constructor|prototype)$)[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const reservedPathSegments = ["__proto__", "constructor", "prototype"];
+const reservedPathSegmentSet = new Set(reservedPathSegments);
+const reservedPathSegmentPattern = reservedPathSegments.join("|");
 
-const unsafePathSegments = new Set(["__proto__", "constructor", "prototype"]);
+export const serviceIdPattern = new RegExp(
+  `^(?!(?:${reservedPathSegmentPattern})$)[a-z][a-z0-9-]*$`,
+);
+export const providerIdPattern = new RegExp(
+  `^(?!(?:${reservedPathSegmentPattern})$)[A-Za-z0-9][A-Za-z0-9._-]*$`,
+);
 
 export const serviceIdSchema = z.string().regex(serviceIdPattern);
 export const providerIdSchema = z.string().regex(providerIdPattern);
+export const registrationEnvironmentSchema = z
+  .string()
+  .min(1)
+  .refine((value) => !isReservedPathSegment(value), {
+    message: "Environment uses a reserved identifier",
+  });
 export const publicConfigPathSchema = z
   .string()
   .superRefine((path, context) => {
@@ -39,9 +49,13 @@ function validatePublicSlashPath(path: string): string | undefined {
     if (segment.includes("[") || segment.includes("]")) {
       return "Path must use canonical slash segments";
     }
-    if (unsafePathSegments.has(segment)) {
+    if (isReservedPathSegment(segment)) {
       return `Path segment "${segment}" is not allowed`;
     }
   }
   return undefined;
+}
+
+export function isReservedPathSegment(segment: string): boolean {
+  return reservedPathSegmentSet.has(segment);
 }
