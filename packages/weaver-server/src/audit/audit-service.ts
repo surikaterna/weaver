@@ -46,7 +46,5 @@ export function createAuditService(options: AuditServiceOptions): AuditService {
 function hasAuditedValues(
   entry: ConfigAuditEntry,
 ): entry is Extract<ConfigAuditEntry, { readonly domain: "config" | "sink" }> {
-  return (
-    !("domain" in entry) || entry.domain === "config" || entry.domain === "sink"
-  );
+  return entry.domain === "config" || entry.domain === "sink";
 }
