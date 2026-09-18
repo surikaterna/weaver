@@ -8,7 +8,6 @@ import {
   deepSet,
 } from "@weaver-conf/config-engine";
 import type {
-  ConfigurationInspection,
   ConfigurationStorageProvider,
   ScopeInstance,
   WriteResult,
@@ -23,7 +22,13 @@ import type {
   WeaverConfigServiceOptions,
   WriteContext,
 } from "./config-service-types";
-import { protectedConfigMutationError } from "./protected-config-paths";
+import {
+  filterProtectedConfigEntries,
+  filterProtectedConfigScopes,
+  isProtectedConfigPath,
+  protectedConfigMutationError,
+} from "./protected-config-paths";
+import { inspectPublicConfig } from "./public-config-inspection";
 import { createResolutionPipeline } from "./resolution-pipeline";
 import {
   buildScopePathString,
@@ -313,15 +318,16 @@ export async function createWeaverConfigService(
       scopePath?: ScopeInstance[];
     }): Promise<ConfigSnapshot> {
       await warmScopeLayers(opts?.scopePath);
-      const rawEntries = getBaseEntries();
+      const rawEntries = filterProtectedConfigEntries(getBaseEntries());
       const entries = pipeline.resolveEntries(rawEntries);
-      const scopes = opts?.scopePath?.length
+      const rawScopes = opts?.scopePath?.length
         ? {
             [buildScopePathString(opts.scopePath)]: getScopeState(
               opts.scopePath,
             ),
           }
         : getAllScopes();
+      const scopes = filterProtectedConfigScopes(rawScopes);
 
       return {
         entries,
@@ -335,8 +341,11 @@ export async function createWeaverConfigService(
       key: string,
       opts?: { scopePath?: ScopeInstance[] },
     ): Promise<unknown> {
+      if (isProtectedConfigPath(key)) return undefined;
       await warmScopeLayers(opts?.scopePath);
-      const state = getMergedState(opts?.scopePath);
+      const state = filterProtectedConfigEntries(
+        getMergedState(opts?.scopePath),
+      );
       const rawValue = deepGet(state, key);
       return pipeline.resolveValue(key, rawValue);
     },
@@ -345,8 +354,11 @@ export async function createWeaverConfigService(
       prefix: string,
       opts?: { scopePath?: ScopeInstance[] },
     ): Promise<Record<string, unknown>> {
+      if (isProtectedConfigPath(prefix)) return {};
       await warmScopeLayers(opts?.scopePath);
-      const state = getMergedState(opts?.scopePath);
+      const state = filterProtectedConfigEntries(
+        getMergedState(opts?.scopePath),
+      );
       const value = deepGet(state, prefix);
       if (
         value !== null &&
@@ -361,32 +373,16 @@ export async function createWeaverConfigService(
       return {};
     },
 
-    async inspect(key: string): Promise<ConfigurationInspection<unknown>> {
-      const layerValues: Record<string, unknown> = {};
-      let effectiveValue: unknown;
-      let effectiveLayer: string | undefined;
-
-      for (const provider of providers) {
-        const entries = layerData.get(provider.id) ?? {};
-        const value = deepGet(entries, key);
-        if (value !== undefined) {
-          layerValues[provider.layer] = value;
-          effectiveValue = value;
-          effectiveLayer = provider.layer;
-        }
-      }
-
-      for (const [layer, entries] of dynamicScopeEntries) {
-        const value = deepGet(entries, key);
-        if (value !== undefined) {
-          const normalizedLayer = normalizeScopeLayer(layer);
-          layerValues[normalizedLayer] = value;
-          effectiveValue = value;
-          effectiveLayer = normalizedLayer;
-        }
-      }
-
-      return { key, effectiveValue, effectiveLayer, layerValues };
+    async inspect(key) {
+      const baseLayers = providers.map((provider) => ({
+        layer: provider.layer,
+        entries: layerData.get(provider.id) ?? {},
+      }));
+      const scopedLayers = [...dynamicScopeEntries].map(([layer, entries]) => ({
+        layer: normalizeScopeLayer(layer),
+        entries,
+      }));
+      return inspectPublicConfig(key, [...baseLayers, ...scopedLayers]);
     },
 
     async reloadProvider(providerId: string): Promise<void> {
@@ -488,7 +484,7 @@ export async function createWeaverConfigService(
         environment: opts?.environment ?? environment,
         timestamp: new Date().toISOString(),
       };
-      fireDelta(delta);
+      if (!isInternalWrite(opts)) fireDelta(delta);
 
       autoFlush();
       return result;
@@ -578,7 +574,7 @@ export async function createWeaverConfigService(
         environment: opts?.environment ?? environment,
         timestamp: new Date().toISOString(),
       };
-      fireDelta(delta);
+      if (!isInternalWrite(opts)) fireDelta(delta);
 
       autoFlush();
       return result;
@@ -656,6 +652,7 @@ export async function createWeaverConfigService(
   };
 
   registerInternalConfigAccess(service, {
+    read: async (key) => deepGet(getMergedState(), key),
     write: (layer, key, value, opts) =>
       service.set(layer, key, value, withInternalWrite(opts)),
     remove: (layer, key, opts) =>

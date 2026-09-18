@@ -193,26 +193,26 @@ describe("SchemaRegistry", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(await configService.get("_weaver.registry.schemas")).toEqual({
-      environments: {
-        dev: {
+    expect(await configService.get("_weaver.registry.schemas")).toBe(undefined);
+    expect((await provider.load()).entries).toMatchObject({
+      _weaver: {
+        registry: {
           schemas: {
-            "/billing": {
-              kind: "service",
-              schema: {
-                type: "object",
-                properties: { enabled: { type: "boolean" } },
-              },
-              metadata: {
-                serviceId: "billing",
-                servicePath: "/billing",
-                environment: "dev",
-                providerId: "billing",
-                owner: { name: "billing", contact: "billing@example.com" },
+            environments: {
+              dev: {
+                schemas: {
+                  "/billing": {
+                    kind: "service",
+                    schema: {
+                      type: "object",
+                      properties: { enabled: { type: "boolean" } },
+                    },
+                  },
+                },
+                slots: {},
               },
             },
           },
-          slots: {},
         },
       },
     });

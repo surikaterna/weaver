@@ -86,7 +86,33 @@ describe("WeaverConfigService", () => {
       expect(batchResult.success).toBe(false);
       expect(batchResult.error?.code).toBe("VALIDATION_ERROR");
       expect(await svc.get("app.safe")).toBe(undefined);
-      expect(await svc.get("_weaver.registry.schemas")).toBe("internal");
+      expect(await svc.get("_weaver.registry.schemas")).toBe(undefined);
+    }
+  });
+
+  it("filters protected metadata from public read shapes", async () => {
+    const svc = await makeService({
+      app: { name: "public" },
+      _weaver: { registry: { schemas: { private: true } } },
+    });
+
+    expect((await svc.resolveAll()).entries).toEqual({
+      app: { name: "public" },
+    });
+    for (const path of [
+      "_weaver",
+      "_weaver.registry.schemas",
+      "/_weaver/registry/schemas",
+      "[_weaver].registry.schemas",
+    ]) {
+      expect(await svc.get(path)).toBe(undefined);
+      expect(await svc.getNamespace(path)).toEqual({});
+      expect(await svc.inspect(path)).toEqual({
+        key: path,
+        effectiveValue: undefined,
+        effectiveLayer: undefined,
+        layerValues: {},
+      });
     }
   });
 
