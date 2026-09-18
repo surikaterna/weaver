@@ -75,6 +75,13 @@ test("parsePath: error on double dot", () => {
   expect(() => parsePath("a..b")).toThrow(/Empty segment/);
 });
 
+test("parsePath: rejects dangerous dot and bracket segments", () => {
+  for (const segment of ["__proto__", "constructor", "prototype"]) {
+    expect(() => parsePath(`safe.${segment}.value`)).toThrow(`Path segment "${segment}" is not allowed`);
+    expect(() => parsePath(`safe[${segment}].value`)).toThrow(`Path segment "${segment}" is not allowed`);
+  }
+});
+
 // buildPath tests
 
 test("buildPath: simple segments", () => {
@@ -106,6 +113,12 @@ test("buildPath: round-trip compound", () => {
 test("buildPath: round-trip multiple compounds", () => {
   const segments = ["a", "b.c", "d.e"];
   expect(parsePath(buildPath(segments))).toEqual(segments);
+});
+
+test("buildPath: rejects dangerous segments", () => {
+  for (const segment of ["__proto__", "constructor", "prototype"]) {
+    expect(() => buildPath(["safe", segment])).toThrow(`Path segment "${segment}" is not allowed`);
+  }
 });
 
 // isCompoundSegment tests

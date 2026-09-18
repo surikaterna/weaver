@@ -1,19 +1,12 @@
 import { z } from "zod";
 import { weaverErrorSchema } from "./errors";
-import { configurationPropertySchemaSchema } from "./schemas-property";
-
-const prototypeUnsafeIdentifiers = new Set([
-  "__proto__",
-  "constructor",
-  "prototype",
-]);
-
-const registrationEnvironmentSchema = z
-  .string()
-  .min(1)
-  .refine((value) => !prototypeUnsafeIdentifiers.has(value), {
-    message: "Environment uses a reserved identifier",
-  });
+import { objectConfigurationPropertySchemaSchema } from "./schemas-property";
+import {
+  providerIdSchema,
+  registrationEnvironmentSchema,
+  serviceIdSchema,
+  slotPathSchema,
+} from "./schemas-registration-paths";
 
 export const registrationOwnerSchema = z.strictObject({
   name: z.string().min(1),
@@ -21,7 +14,7 @@ export const registrationOwnerSchema = z.strictObject({
 });
 
 export const fragmentSlotDeclarationSchema = z.strictObject({
-  slotPath: z.string().min(1),
+  slotPath: slotPathSchema,
   accepts: z.literal("object"),
 });
 
@@ -30,31 +23,48 @@ export const schemaRegistrationAuditMetadataSchema = z.strictObject({
   actor: z.string().min(1).optional(),
 });
 
-export const serviceSchemaRegistrationRequestSchema = z.strictObject({
-  serviceId: z.string().min(1),
-  environment: registrationEnvironmentSchema,
-  owner: registrationOwnerSchema,
-  schema: configurationPropertySchemaSchema,
-  schemaVersion: z.string().min(1).optional(),
-  fragmentSlots: z.array(fragmentSlotDeclarationSchema).readonly(),
-});
+export const serviceSchemaRegistrationRequestSchema = z
+  .strictObject({
+    serviceId: serviceIdSchema,
+    environment: registrationEnvironmentSchema,
+    owner: registrationOwnerSchema,
+    schema: objectConfigurationPropertySchemaSchema,
+    schemaVersion: z.string().min(1).optional(),
+    fragmentSlots: z.array(fragmentSlotDeclarationSchema).readonly(),
+  })
+  .superRefine((request, context) => {
+    for (const [index, slot] of request.fragmentSlots.entries()) {
+      if (slot.slotPath.slice(1).split("/")[0] === request.serviceId) {
+        context.addIssue({
+          code: "custom",
+          message: "slotPath must be service-relative",
+          path: ["fragmentSlots", index, "slotPath"],
+        });
+      }
+    }
+  });
 
-export const fragmentSchemaRegistrationRequestSchema = z.strictObject({
-  serviceId: z.string().min(1),
-  providerId: z.string().min(1),
-  slotPath: z.string().min(1),
-  environment: registrationEnvironmentSchema,
-  owner: registrationOwnerSchema,
-  schema: configurationPropertySchemaSchema,
-  schemaVersion: z.string().min(1).optional(),
-});
+export const fragmentSchemaRegistrationRequestSchema = z
+  .strictObject({
+    serviceId: serviceIdSchema,
+    providerId: providerIdSchema,
+    slotPath: slotPathSchema,
+    environment: registrationEnvironmentSchema,
+    owner: registrationOwnerSchema,
+    schema: objectConfigurationPropertySchemaSchema,
+    schemaVersion: z.string().min(1).optional(),
+  })
+  .refine(
+    (request) => request.slotPath.slice(1).split("/")[0] !== request.serviceId,
+    { message: "slotPath must be service-relative", path: ["slotPath"] },
+  );
 
 export const fragmentSlotRegistrationMetadataSchema = z.strictObject({
   serviceId: z.string(),
   servicePath: z.string(),
   slotPath: z.string(),
   canonicalSlotPath: z.string(),
-  environment: z.string(),
+  environment: registrationEnvironmentSchema,
   providerId: z.string(),
   owner: registrationOwnerSchema,
   accepts: z.literal("object"),
@@ -65,7 +75,7 @@ export const fragmentSlotRegistrationMetadataSchema = z.strictObject({
 export const schemaRegistrationMetadataSchema = z.strictObject({
   serviceId: z.string(),
   servicePath: z.string(),
-  environment: z.string(),
+  environment: registrationEnvironmentSchema,
   providerId: z.string(),
   owner: registrationOwnerSchema,
   schemaVersion: z.string().optional(),

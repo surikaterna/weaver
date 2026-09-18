@@ -1,5 +1,5 @@
 import type { WeaverError } from "./errors";
-import type { ConfigurationPropertySchema } from "./property-schema";
+import type { ObjectConfigurationPropertySchema } from "./property-schema";
 
 /** Accountable owner contact metadata for schema registrations. */
 export interface RegistrationOwner {
@@ -23,7 +23,7 @@ export interface ServiceSchemaRegistrationRequest {
   readonly serviceId: string;
   readonly environment: string;
   readonly owner: RegistrationOwner;
-  readonly schema: ConfigurationPropertySchema;
+  readonly schema: ObjectConfigurationPropertySchema;
   readonly schemaVersion?: string | undefined;
   readonly fragmentSlots: ReadonlyArray<FragmentSlotDeclaration>;
 }
@@ -35,7 +35,7 @@ export interface FragmentSchemaRegistrationRequest {
   readonly slotPath: string;
   readonly environment: string;
   readonly owner: RegistrationOwner;
-  readonly schema: ConfigurationPropertySchema;
+  readonly schema: ObjectConfigurationPropertySchema;
   readonly schemaVersion?: string | undefined;
 }
 

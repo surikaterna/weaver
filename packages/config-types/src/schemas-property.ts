@@ -2,7 +2,10 @@
 
 import { z } from "zod";
 
-import type { ConfigurationPropertySchema } from "./property-schema";
+import type {
+  ConfigurationPropertySchema,
+  ObjectConfigurationPropertySchema,
+} from "./property-schema";
 import {
   configurationJsonSchemaTypeSchema,
   weaverPropertyExtensionsSchema,
@@ -62,4 +65,9 @@ export const configurationPropertySchemaSchema: z.ZodType<ConfigurationPropertyS
 
       "x-weaver": weaverPropertyExtensionsSchema.optional(),
     }),
+  );
+
+export const objectConfigurationPropertySchemaSchema: z.ZodType<ObjectConfigurationPropertySchema> =
+  configurationPropertySchemaSchema.and(
+    z.object({ type: z.literal("object") }),
   );
