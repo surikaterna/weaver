@@ -1,16 +1,19 @@
 // REST route definitions for config and scope endpoints
 
 import { buildPath } from "@weaver-conf/config-engine";
-import type { WriteResult } from "@weaver-conf/config-types";
 import type { WeaverConfigService, WriteContext } from "../core/config-service";
 import type { SchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
 import { parseScopeQuery } from "../core/scope-utils";
-import type { WeaverErrorCode } from "../types/index";
-import { createWeaverError, httpStatusForError } from "../types/index";
+import { createWeaverError } from "../types/index";
 import type { AuthGate } from "./auth-gate";
 import type { RestRequest, RestResponse, RestRoute } from "./rest-adapter";
-import { envelope, errorEnvelope, v1Headers } from "./rest-helpers";
+import {
+  extractExpectedRevision,
+  v1Error,
+  v1Response,
+  writeFailureResponse,
+} from "./rest-route-boundary";
 import { buildSchemaRoutes } from "./rest-schema-routes";
 import {
   configBatchBodySchema,
@@ -42,55 +45,6 @@ function queryOpt(
 ): string | undefined {
   const v = query[name];
   return v === undefined ? undefined : v;
-}
-
-function v1Response<T>(
-  configService: WeaverConfigService,
-  status: number,
-  data: T,
-): RestResponse {
-  const rev = configService.revision;
-  return { status, body: envelope(data, rev), headers: v1Headers(rev) };
-}
-
-function v1Error(
-  configService: WeaverConfigService,
-  code: WeaverErrorCode,
-  message: string,
-): RestResponse {
-  const rev = configService.revision;
-  const err = createWeaverError(code, message);
-  return {
-    status: httpStatusForError(code),
-    body: errorEnvelope(err, rev),
-    headers: v1Headers(rev),
-  };
-}
-
-function extractExpectedRevision(req: RestRequest): string | undefined {
-  const ifMatch = req.headers["if-match"];
-  if (ifMatch === undefined) return undefined;
-  return ifMatch.replace(/^"|"$/g, "");
-}
-
-function writeErrorResponse(
-  configService: WeaverConfigService,
-  result: WriteResult,
-  fallback: string,
-): RestResponse {
-  const errorObj = result.error;
-  const msg = errorObj?.message ?? fallback;
-  const code: WeaverErrorCode =
-    errorObj?.code === "REVISION_CONFLICT"
-      ? "REVISION_CONFLICT"
-      : "VALIDATION_ERROR";
-  const status = code === "REVISION_CONFLICT" ? 409 : httpStatusForError(code);
-  const rev = configService.revision;
-  return {
-    status,
-    body: errorEnvelope(createWeaverError(code, msg), rev),
-    headers: v1Headers(rev),
-  };
 }
 
 export function buildRoutes(deps: RouteFactoryDeps): RestRoute[] {
@@ -173,7 +127,7 @@ function configSetRoute(deps: RouteFactoryDeps): RestRoute {
         requestWriteContext(req),
       );
       if (!result.success) {
-        return writeErrorResponse(configService, result, "Write failed");
+        return writeFailureResponse(configService, result, "Write failed");
       }
       return v1Response(configService, 200, result);
     },
@@ -196,7 +150,7 @@ function configRemoveRoute(deps: RouteFactoryDeps): RestRoute {
         requestWriteContext(req),
       );
       if (!result.success) {
-        return writeErrorResponse(configService, result, "Remove failed");
+        return writeFailureResponse(configService, result, "Remove failed");
       }
       return v1Response(configService, 200, result);
     },
@@ -221,7 +175,11 @@ function configBatchRoute(deps: RouteFactoryDeps): RestRoute {
         requestWriteContext(req),
       );
       if (!result.success) {
-        return writeErrorResponse(configService, result, "Batch write failed");
+        return writeFailureResponse(
+          configService,
+          result,
+          "Batch write failed",
+        );
       }
       return v1Response(configService, 200, {
         ...result,

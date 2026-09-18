@@ -80,11 +80,7 @@ async function handleRest(
 }
 
 function queryParameters(url: URL): Record<string, string> {
-  const query: Record<string, string> = {};
-  url.searchParams.forEach((value, key) => {
-    query[key] = value;
-  });
-  return query;
+  return Object.fromEntries(url.searchParams.entries());
 }
 
 function requestHeaders(req: Request): Record<string, string> {
