@@ -179,6 +179,94 @@ describe("REST schema operation audit", () => {
     expect(response.status).toBe(200);
     expect(errors).toHaveLength(1);
   });
+
+  it("audits thrown and malformed outcomes once for every schema action", async () => {
+    const scenarios = [
+      {
+        auditError: "Schema operation failed unexpectedly",
+        thrown: true,
+      },
+      {
+        auditError: "Schema operation returned malformed response",
+        thrown: false,
+      },
+    ];
+
+    for (const operation of restSchemaOperationCases()) {
+      for (const scenario of scenarios) {
+        const audit = createAuditCapture();
+        const configService = createMockConfigService();
+        const schemaRegistry = createMockSchemaRegistry();
+        const primaryError = new Error(`provider-secret-${operation.action}`);
+        let calls = 0;
+        operation.install(configService, schemaRegistry, async () => {
+          calls += 1;
+          if (scenario.thrown) throw primaryError;
+          return { malformedPayload: `secret-${operation.action}` };
+        });
+        const adapter = createRestAdapter({
+          configService,
+          schemaRegistry,
+          auditService: audit.service,
+          defaultEnvironment: "default",
+        });
+
+        const response = await send(
+          adapter,
+          operation.method,
+          operation.path,
+          operation.request,
+        );
+
+        expect(response.status).toBe(500);
+        expect(calls).toBe(1);
+        expect(audit.entries).toEqual([
+          expect.objectContaining({
+            action: operation.action,
+            success: false,
+            error: scenario.auditError,
+          }),
+        ]);
+        expect(JSON.stringify(audit.entries[0])).not.toContain("secret-");
+      }
+    }
+  });
+
+  it("preserves typed failure translation for every schema action", async () => {
+    for (const operation of restSchemaOperationCases()) {
+      const audit = createAuditCapture();
+      const configService = createMockConfigService();
+      const schemaRegistry = createMockSchemaRegistry();
+      let calls = 0;
+      operation.install(configService, schemaRegistry, async () => {
+        calls += 1;
+        return operation.failure;
+      });
+      const adapter = createRestAdapter({
+        configService,
+        schemaRegistry,
+        auditService: audit.service,
+        defaultEnvironment: "default",
+      });
+
+      const response = await send(
+        adapter,
+        operation.method,
+        operation.path,
+        operation.request,
+      );
+
+      expect(response.status).toBe(operation.failureStatus);
+      expect(calls).toBe(1);
+      expect(audit.entries).toEqual([
+        expect.objectContaining({
+          action: operation.action,
+          success: false,
+          error: operation.failureError,
+        }),
+      ]);
+    }
+  });
 });
 
 function createAuditCapture(): {
@@ -311,5 +399,106 @@ function fragmentRegistration(): SchemaRegistrationRequest {
     environment: "prod",
     owner: { name: "Billing", contact: "billing@example.com" },
     schema: { type: "object" },
+  };
+}
+
+function restSchemaOperationCases() {
+  const install = (
+    target: object,
+    name: string,
+    implementation: () => Promise<unknown>,
+  ): void => {
+    Object.defineProperty(target, name, {
+      configurable: true,
+      value: implementation,
+    });
+  };
+  return [
+    {
+      action: "schema.register.service",
+      method: "POST",
+      path: "/v1/admin/schemas/services",
+      request: { body: serviceRegistration() },
+      failure: registrationFailureResult("service registration rejected"),
+      failureError: "service registration rejected",
+      failureStatus: 400,
+      install: (
+        _config: WeaverConfigService,
+        registry: SchemaRegistry,
+        implementation: () => Promise<unknown>,
+      ) => install(registry, "register", implementation),
+    },
+    {
+      action: "schema.register.fragment",
+      method: "POST",
+      path: "/v1/admin/schemas/fragments",
+      request: { body: fragmentRegistration() },
+      failure: registrationFailureResult("fragment registration rejected"),
+      failureError: "fragment registration rejected",
+      failureStatus: 400,
+      install: (
+        _config: WeaverConfigService,
+        registry: SchemaRegistry,
+        implementation: () => Promise<unknown>,
+      ) => install(registry, "register", implementation),
+    },
+    {
+      action: "schema.write.object",
+      method: "PUT",
+      path: "/v1/registered/objects/checkout",
+      request: { body: { value: {} } },
+      failure: writeFailureResult("object write rejected"),
+      failureError: "object write rejected",
+      failureStatus: 400,
+      install: (
+        config: WeaverConfigService,
+        _registry: SchemaRegistry,
+        implementation: () => Promise<unknown>,
+      ) => install(config, "setRegisteredObject", implementation),
+    },
+    {
+      action: "schema.patch.path",
+      method: "PATCH",
+      path: "/v1/registered/paths/checkout/enabled",
+      request: { body: { value: true } },
+      failure: writeFailureResult("path patch rejected"),
+      failureError: "path patch rejected",
+      failureStatus: 400,
+      install: (
+        config: WeaverConfigService,
+        _registry: SchemaRegistry,
+        implementation: () => Promise<unknown>,
+      ) => install(config, "patchRegisteredPath", implementation),
+    },
+    {
+      action: "schema.validate.effective",
+      method: "GET",
+      path: "/v1/registered/effective/checkout",
+      request: {},
+      failure: { valid: false, errors: [] },
+      failureError: "Registered effective validation failed",
+      failureStatus: 422,
+      install: (
+        config: WeaverConfigService,
+        _registry: SchemaRegistry,
+        implementation: () => Promise<unknown>,
+      ) => install(config, "validateRegisteredEffective", implementation),
+    },
+  ];
+}
+
+function registrationFailureResult(message: string) {
+  return {
+    success: false,
+    isNewSchema: false,
+    hasBreakingChanges: false,
+    error: { code: "VALIDATION_ERROR", message },
+  };
+}
+
+function writeFailureResult(message: string): WriteResult {
+  return {
+    success: false,
+    error: { code: "VALIDATION_ERROR", message },
   };
 }

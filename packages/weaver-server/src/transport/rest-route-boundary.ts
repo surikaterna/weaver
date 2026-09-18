@@ -1,4 +1,8 @@
-import type { WriteResult } from "@weaver-conf/config-types";
+import {
+  registeredSchemasResponseSchema,
+  type SchemaRegistrationResponse,
+  type WriteResult,
+} from "@weaver-conf/config-types";
 import type { z } from "zod";
 import type { WeaverConfigService } from "../core/config-service";
 import type { WeaverErrorCode } from "../types/index";
@@ -13,16 +17,23 @@ export class RestResponseContractError extends Error {
   }
 }
 
-export function parseRestResponse<T>(
+export function parseRestResponse<Schema extends z.ZodType>(
   operation: string,
-  schema: z.ZodType<T>,
+  schema: Schema,
   value: unknown,
-): T {
+): z.output<Schema> {
   const result = schema.safeParse(value);
   if (!result.success) {
     throw new RestResponseContractError(operation, result.error);
   }
   return result.data;
+}
+
+export function restResponseParser<Schema extends z.ZodType>(
+  operation: string,
+  schema: Schema,
+): (value: unknown) => z.output<Schema> {
+  return (value) => parseRestResponse(operation, schema, value);
 }
 
 export function v1Response<T>(
@@ -51,6 +62,38 @@ export function v1Error(
     body: errorEnvelope(error, revision),
     headers: v1Headers(revision),
   };
+}
+
+export function unavailable(configService: WeaverConfigService): RestResponse {
+  return v1Error(
+    configService,
+    "VALIDATION_ERROR",
+    "Schema registry not configured",
+  );
+}
+
+export function registrationFailure(
+  configService: WeaverConfigService,
+  result: SchemaRegistrationResponse,
+): RestResponse {
+  return v1Error(
+    configService,
+    "VALIDATION_ERROR",
+    result.error?.message ?? "Schema registration failed",
+    result.error?.details,
+  );
+}
+
+export function registeredSchemasResponse(
+  configService: WeaverConfigService,
+  schemas: unknown,
+): RestResponse {
+  const response = parseRestResponse(
+    "registered schemas",
+    registeredSchemasResponseSchema,
+    { schemas },
+  );
+  return v1Response(configService, 200, response);
 }
 
 export function extractExpectedRevision(

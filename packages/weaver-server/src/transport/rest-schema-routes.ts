@@ -3,8 +3,6 @@ import {
   registeredEffectiveValidationResponseSchema,
   registeredObjectWriteResponseSchema,
   registeredPathPatchResponseSchema,
-  registeredSchemasResponseSchema,
-  type SchemaRegistrationResponse,
   schemaRegistrationResponseSchema,
 } from "@weaver-conf/config-types";
 import type { AuditService } from "../audit/audit-service";
@@ -20,7 +18,9 @@ import type { AuthGate } from "./auth-gate";
 import type { RestRequest, RestResponse, RestRoute } from "./rest-adapter";
 import {
   extractExpectedRevision,
-  parseRestResponse,
+  registeredSchemasResponse,
+  registrationFailure,
+  unavailable,
   v1Error,
   v1Response,
   writeFailureResponse,
@@ -36,12 +36,15 @@ import {
   serviceSchemaRegistrationBodySchema,
 } from "./rest-schemas";
 import {
-  auditRestEffectiveValidation,
-  auditRestObjectWrite,
-  auditRestPathPatch,
-  auditRestSchemaRegistration,
-  restSchemaRegistrationContext,
+  effectiveValidationAuditOutcome,
+  restSchemaAuditIdentity,
+  schemaRegistrationAuditContext,
+  schemaRegistrationAuditOutcome,
+  schemaRegistrationPersistenceContext,
+  schemaWriteAuditContext,
+  schemaWriteAuditOutcome,
 } from "./schema-operation-audit";
+import { runRestSchemaOperation } from "./schema-operation-runner";
 
 export interface SchemaRouteDeps {
   configService: WeaverConfigService;
@@ -49,14 +52,6 @@ export interface SchemaRouteDeps {
   authGate?: AuthGate | undefined;
   auditService?: AuditService | undefined;
   defaultEnvironment: string;
-}
-
-function unavailable(configService: WeaverConfigService): RestResponse {
-  return v1Error(
-    configService,
-    "VALIDATION_ERROR",
-    "Schema registry not configured",
-  );
 }
 
 function canonicalRoutePath(
@@ -185,12 +180,7 @@ function listSchemasRoute(deps: SchemaRouteDeps): RestRoute {
       if (denied) return denied;
       parseAdminQuery(req.query);
       if (!schemaRegistry) return unavailable(configService);
-      const response = parseRestResponse(
-        "registered schemas",
-        registeredSchemasResponseSchema,
-        { schemas: schemaRegistry.listAll() },
-      );
-      return v1Response(configService, 200, response);
+      return registeredSchemasResponse(configService, schemaRegistry.listAll());
     },
   };
 }
@@ -206,12 +196,19 @@ function registerServiceRoute(deps: SchemaRouteDeps): RestRoute {
       parseAdminQuery(req.query);
       if (!schemaRegistry) return unavailable(configService);
       const body = serviceSchemaRegistrationBodySchema.parse(req.body);
-      const result = parseRestResponse(
+      const identity = restSchemaAuditIdentity(req.authContext);
+      const result = await runRestSchemaOperation(
+        deps.auditService,
+        schemaRegistrationAuditContext(body, identity),
+        () =>
+          schemaRegistry.register(
+            body,
+            schemaRegistrationPersistenceContext(identity),
+          ),
         "service schema registration",
         schemaRegistrationResponseSchema,
-        await schemaRegistry.register(body, restSchemaRegistrationContext(req)),
+        schemaRegistrationAuditOutcome,
       );
-      await auditRestSchemaRegistration(deps.auditService, req, body, result);
       if (!result.success) return registrationFailure(configService, result);
       return v1Response(configService, 201, result);
     },
@@ -229,12 +226,19 @@ function registerFragmentRoute(deps: SchemaRouteDeps): RestRoute {
       parseAdminQuery(req.query);
       if (!schemaRegistry) return unavailable(configService);
       const body = fragmentSchemaRegistrationBodySchema.parse(req.body);
-      const result = parseRestResponse(
+      const identity = restSchemaAuditIdentity(req.authContext);
+      const result = await runRestSchemaOperation(
+        deps.auditService,
+        schemaRegistrationAuditContext(body, identity),
+        () =>
+          schemaRegistry.register(
+            body,
+            schemaRegistrationPersistenceContext(identity),
+          ),
         "fragment schema registration",
         schemaRegistrationResponseSchema,
-        await schemaRegistry.register(body, restSchemaRegistrationContext(req)),
+        schemaRegistrationAuditOutcome,
       );
-      await auditRestSchemaRegistration(deps.auditService, req, body, result);
       if (!result.success) return registrationFailure(configService, result);
       return v1Response(configService, 201, result);
     },
@@ -256,22 +260,25 @@ function setRegisteredObjectRoute(deps: SchemaRouteDeps): RestRoute {
       if (denied) return denied;
       if (!schemaRegistry) return unavailable(configService);
       const request = parseRegisteredObjectRequest(metadata, req.body);
-      const result = parseRestResponse(
+      const result = await runRestSchemaOperation(
+        deps.auditService,
+        schemaWriteAuditContext(
+          "schema.write.object",
+          request.anchorPath,
+          request.environment ?? deps.defaultEnvironment,
+          restSchemaAuditIdentity(req.authContext),
+        ),
+        () =>
+          configService.setRegisteredObject(
+            request.layer ?? "platform",
+            request.anchorPath,
+            request.value,
+            { ...writeContext(request), schemaRegistry },
+          ),
         "registered object write",
         registeredObjectWriteResponseSchema,
-        await configService.setRegisteredObject(
-          request.layer ?? "platform",
-          request.anchorPath,
-          request.value,
-          { ...writeContext(request), schemaRegistry },
-        ),
-      );
-      await auditRestObjectWrite(
-        deps.auditService,
-        req,
-        request,
-        result,
-        deps.defaultEnvironment,
+        (response) =>
+          schemaWriteAuditOutcome(response, "Registered object write failed"),
       );
       if (!result.success) {
         return writeFailureResponse(
@@ -301,22 +308,25 @@ function patchRegisteredPathRoute(deps: SchemaRouteDeps): RestRoute {
       if (denied) return denied;
       if (!schemaRegistry) return unavailable(configService);
       const request = parseRegisteredPathRequest(metadata, req.body);
-      const result = parseRestResponse(
+      const result = await runRestSchemaOperation(
+        deps.auditService,
+        schemaWriteAuditContext(
+          "schema.patch.path",
+          request.path,
+          request.environment ?? deps.defaultEnvironment,
+          restSchemaAuditIdentity(req.authContext),
+        ),
+        () =>
+          configService.patchRegisteredPath(
+            request.layer ?? "platform",
+            request.path,
+            request.value,
+            { ...writeContext(request), schemaRegistry },
+          ),
         "registered path patch",
         registeredPathPatchResponseSchema,
-        await configService.patchRegisteredPath(
-          request.layer ?? "platform",
-          request.path,
-          request.value,
-          { ...writeContext(request), schemaRegistry },
-        ),
-      );
-      await auditRestPathPatch(
-        deps.auditService,
-        req,
-        request,
-        result,
-        deps.defaultEnvironment,
+        (response) =>
+          schemaWriteAuditOutcome(response, "Registered path patch failed"),
       );
       if (!result.success) {
         return writeFailureResponse(
@@ -347,20 +357,22 @@ function validateRegisteredEffectiveRoute(deps: SchemaRouteDeps): RestRoute {
         return { ...unavailable(configService), status: 422 };
       }
       const request = parseRegisteredEffectiveRequest(metadata);
-      const validation = parseRestResponse(
+      const validation = await runRestSchemaOperation(
+        deps.auditService,
+        schemaWriteAuditContext(
+          "schema.validate.effective",
+          request.anchorPath,
+          request.environment ?? deps.defaultEnvironment,
+          restSchemaAuditIdentity(req.authContext),
+        ),
+        () =>
+          configService.validateRegisteredEffective(
+            request.anchorPath,
+            effectiveValidationContext(request, schemaRegistry),
+          ),
         "registered effective validation",
         registeredEffectiveValidationResponseSchema,
-        await configService.validateRegisteredEffective(
-          request.anchorPath,
-          effectiveValidationContext(request, schemaRegistry),
-        ),
-      );
-      await auditRestEffectiveValidation(
-        deps.auditService,
-        req,
-        request,
-        validation,
-        deps.defaultEnvironment,
+        effectiveValidationAuditOutcome,
       );
       return v1Response(
         configService,
@@ -384,16 +396,4 @@ function effectiveValidationContext(
     ...(request.environment ? { environment: request.environment } : {}),
     ...(scopePath ? { scopePath } : {}),
   };
-}
-
-function registrationFailure(
-  configService: WeaverConfigService,
-  result: SchemaRegistrationResponse,
-): RestResponse {
-  return v1Error(
-    configService,
-    "VALIDATION_ERROR",
-    result.error?.message ?? "Schema registration failed",
-    result.error?.details,
-  );
 }

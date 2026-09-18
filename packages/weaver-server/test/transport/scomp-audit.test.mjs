@@ -159,6 +159,119 @@ describe("SCOMP schema operation audit", () => {
     expect(result.success).toBe(true);
     expect(errors).toHaveLength(1);
   });
+
+  test("audits thrown and malformed outcomes once for every schema action", async () => {
+    const scenarios = [
+      {
+        auditError: "Schema operation failed unexpectedly",
+        thrown: true,
+      },
+      {
+        auditError: "Schema operation returned malformed response",
+        thrown: false,
+      },
+    ];
+
+    for (const operation of schemaOperationCases()) {
+      for (const scenario of scenarios) {
+        const audit = auditCapture();
+        const deps = mockDeps();
+        const primaryError = new Error(`provider-secret-${operation.action}`);
+        let calls = 0;
+        operation.install(deps, async () => {
+          calls += 1;
+          if (scenario.thrown) throw primaryError;
+          return { malformedPayload: `secret-${operation.action}` };
+        });
+        const service = createWeaverScompService({
+          ...deps,
+          auditService: audit.service,
+        });
+
+        let caught;
+        try {
+          await invoke(service, operation.name, operation.input);
+        } catch (error) {
+          caught = error;
+        }
+
+        expect(calls).toBe(1);
+        if (scenario.thrown) expect(caught).toBe(primaryError);
+        else expect(caught).toBeInstanceOf(Error);
+        expect(audit.entries).toEqual([
+          expect.objectContaining({
+            action: operation.action,
+            success: false,
+            error: scenario.auditError,
+          }),
+        ]);
+        expect(JSON.stringify(audit.entries[0])).not.toContain("secret-");
+      }
+    }
+  });
+
+  test("preserves typed failures for every schema action", async () => {
+    for (const operation of schemaOperationCases()) {
+      const audit = auditCapture();
+      const deps = mockDeps();
+      let calls = 0;
+      operation.install(deps, async () => {
+        calls += 1;
+        return operation.failure;
+      });
+      const service = createWeaverScompService({
+        ...deps,
+        auditService: audit.service,
+      });
+
+      const result = await invoke(service, operation.name, operation.input);
+
+      expect(result).toEqual(operation.failure);
+      expect(calls).toBe(1);
+      expect(audit.entries).toEqual([
+        expect.objectContaining({
+          action: operation.action,
+          success: false,
+          error: operation.failureError,
+        }),
+      ]);
+    }
+  });
+
+  test("a rejecting sink cannot replace or replay a primary error", async () => {
+    const errors = [];
+    const auditService = createAuditService({
+      sinks: [{ record: async () => Promise.reject(new Error("sink down")) }],
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: (...args) => errors.push(args),
+      },
+    });
+    const deps = mockDeps();
+    const primaryError = new Error("provider secret");
+    let calls = 0;
+    deps.configService.setRegisteredObject = async () => {
+      calls += 1;
+      throw primaryError;
+    };
+    const service = createWeaverScompService({ ...deps, auditService });
+
+    let caught;
+    try {
+      await invoke(service, "setRegisteredObject", {
+        anchorPath: "/checkout",
+        value: {},
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(primaryError);
+    expect(calls).toBe(1);
+    expect(errors).toHaveLength(1);
+  });
 });
 
 function auditCapture() {
@@ -248,6 +361,67 @@ function fragmentRegistration() {
     environment: "prod",
     owner: { name: "Billing", contact: "billing@example.com" },
     schema: { type: "object" },
+  };
+}
+
+function schemaOperationCases() {
+  return [
+    {
+      action: "schema.register.service",
+      name: "registerSchema",
+      input: serviceRegistration(),
+      failure: registrationFailure("service registration rejected"),
+      failureError: "service registration rejected",
+      install: (deps, implementation) => { deps.schemaRegistry.register = implementation; },
+    },
+    {
+      action: "schema.register.fragment",
+      name: "registerSchema",
+      input: fragmentRegistration(),
+      failure: registrationFailure("fragment registration rejected"),
+      failureError: "fragment registration rejected",
+      install: (deps, implementation) => { deps.schemaRegistry.register = implementation; },
+    },
+    {
+      action: "schema.write.object",
+      name: "setRegisteredObject",
+      input: { anchorPath: "/checkout", value: {} },
+      failure: writeFailure("object write rejected"),
+      failureError: "object write rejected",
+      install: (deps, implementation) => { deps.configService.setRegisteredObject = implementation; },
+    },
+    {
+      action: "schema.patch.path",
+      name: "patchRegisteredPath",
+      input: { path: "/checkout/enabled", value: true },
+      failure: writeFailure("path patch rejected"),
+      failureError: "path patch rejected",
+      install: (deps, implementation) => { deps.configService.patchRegisteredPath = implementation; },
+    },
+    {
+      action: "schema.validate.effective",
+      name: "validateRegisteredEffective",
+      input: { anchorPath: "/checkout" },
+      failure: { valid: false, errors: [] },
+      failureError: "Registered effective validation failed",
+      install: (deps, implementation) => { deps.configService.validateRegisteredEffective = implementation; },
+    },
+  ];
+}
+
+function registrationFailure(message) {
+  return {
+    success: false,
+    isNewSchema: false,
+    hasBreakingChanges: false,
+    error: { code: "VALIDATION_ERROR", message },
+  };
+}
+
+function writeFailure(message) {
+  return {
+    success: false,
+    error: { code: "VALIDATION_ERROR", message },
   };
 }
 

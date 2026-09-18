@@ -5,9 +5,6 @@ import {
 } from "@weaver-conf/config-engine";
 import type {
   FragmentSchemaRegistrationRequest,
-  RegisteredEffectiveValidationRequest,
-  RegisteredObjectWriteRequest,
-  RegisteredPathPatchRequest,
   SchemaAuditAction,
   SchemaOperationAuditMetadata,
   SchemaRegistrationRequest,
@@ -19,7 +16,6 @@ import { schemaDomainAuditEntrySchema } from "@weaver-conf/config-types";
 import type { AuditService } from "../audit/audit-service";
 import type { AuthContext } from "../auth/auth-middleware";
 import type { SchemaRegistrationContext } from "../core/schema-registry";
-import type { RestRequest } from "./rest-adapter";
 
 export interface SchemaAuditIdentity {
   readonly actor: string;
@@ -110,198 +106,44 @@ export async function recordSchemaAuditOutcome(
   await auditService.record(entry);
 }
 
-export function restSchemaRegistrationContext(
-  request: RestRequest,
-): SchemaRegistrationContext {
-  return schemaRegistrationPersistenceContext(
-    restSchemaAuditIdentity(request.authContext),
-  );
-}
-
 export function scompSchemaRegistrationContext(): SchemaRegistrationContext {
   return schemaRegistrationPersistenceContext(scompSchemaAuditIdentity());
 }
 
-export async function auditRestSchemaRegistration(
-  auditService: AuditService | undefined,
-  request: RestRequest,
-  registration: SchemaRegistrationRequest,
+export function schemaRegistrationAuditOutcome(
   result: SchemaRegistrationResponse,
-): Promise<void> {
-  await auditRegistration(
-    auditService,
-    registration,
-    result,
-    restSchemaAuditIdentity(request.authContext),
-  );
-}
-
-export async function auditScompSchemaRegistration(
-  auditService: AuditService | undefined,
-  request: SchemaRegistrationRequest,
-  result: SchemaRegistrationResponse,
-): Promise<void> {
-  await auditRegistration(
-    auditService,
-    request,
-    result,
-    scompSchemaAuditIdentity(),
-  );
-}
-
-export function auditRestObjectWrite(
-  auditService: AuditService | undefined,
-  request: RestRequest,
-  operation: RegisteredObjectWriteRequest,
-  result: WriteResult,
-  defaultEnvironment: string,
-): Promise<void> {
-  return auditWrite(
-    auditService,
-    operation.anchorPath,
-    operation.environment ?? defaultEnvironment,
-    "schema.write.object",
-    result,
-    restSchemaAuditIdentity(request.authContext),
-    "Registered object write failed",
-  );
-}
-
-export function auditScompObjectWrite(
-  auditService: AuditService | undefined,
-  request: RegisteredObjectWriteRequest,
-  result: WriteResult,
-  defaultEnvironment: string,
-): Promise<void> {
-  return auditWrite(
-    auditService,
-    request.anchorPath,
-    request.environment ?? defaultEnvironment,
-    "schema.write.object",
-    result,
-    scompSchemaAuditIdentity(),
-    "Registered object write failed",
-  );
-}
-
-export function auditRestPathPatch(
-  auditService: AuditService | undefined,
-  request: RestRequest,
-  operation: RegisteredPathPatchRequest,
-  result: WriteResult,
-  defaultEnvironment: string,
-): Promise<void> {
-  return auditWrite(
-    auditService,
-    operation.path,
-    operation.environment ?? defaultEnvironment,
-    "schema.patch.path",
-    result,
-    restSchemaAuditIdentity(request.authContext),
-    "Registered path patch failed",
-  );
-}
-
-export function auditScompPathPatch(
-  auditService: AuditService | undefined,
-  request: RegisteredPathPatchRequest,
-  result: WriteResult,
-  defaultEnvironment: string,
-): Promise<void> {
-  return auditWrite(
-    auditService,
-    request.path,
-    request.environment ?? defaultEnvironment,
-    "schema.patch.path",
-    result,
-    scompSchemaAuditIdentity(),
-    "Registered path patch failed",
-  );
-}
-
-export function auditRestEffectiveValidation(
-  auditService: AuditService | undefined,
-  request: RestRequest,
-  operation: RegisteredEffectiveValidationRequest,
-  result: SchemaValidationResult,
-  defaultEnvironment: string,
-): Promise<void> {
-  return auditEffectiveValidation(
-    auditService,
-    operation,
-    result,
-    defaultEnvironment,
-    restSchemaAuditIdentity(request.authContext),
-  );
-}
-
-export function auditScompEffectiveValidation(
-  auditService: AuditService | undefined,
-  request: RegisteredEffectiveValidationRequest,
-  result: SchemaValidationResult,
-  defaultEnvironment: string,
-): Promise<void> {
-  return auditEffectiveValidation(
-    auditService,
-    request,
-    result,
-    defaultEnvironment,
-    scompSchemaAuditIdentity(),
-  );
-}
-
-async function auditRegistration(
-  auditService: AuditService | undefined,
-  request: SchemaRegistrationRequest,
-  result: SchemaRegistrationResponse,
-  identity: SchemaAuditIdentity,
-): Promise<void> {
-  const context = schemaRegistrationAuditContext(request, identity);
-  await recordSchemaAuditOutcome(auditService, context, {
+): SchemaAuditOutcome {
+  return {
     success: result.success,
-    ...(result.error?.message ? { error: result.error.message } : {}),
-  });
+    ...(!result.success
+      ? { error: result.error?.message ?? "Schema registration failed" }
+      : {}),
+  };
 }
 
-async function auditWrite(
-  auditService: AuditService | undefined,
-  path: string,
-  environment: string,
-  action: "schema.write.object" | "schema.patch.path",
+export function schemaWriteAuditOutcome(
   result: WriteResult,
-  identity: SchemaAuditIdentity,
   fallback: string,
-): Promise<void> {
-  const context = schemaWriteAuditContext(action, path, environment, identity);
-  await recordSchemaAuditOutcome(auditService, context, {
+): SchemaAuditOutcome {
+  return {
     success: result.success,
     ...(result.error?.message
       ? { error: result.error.message }
       : result.success
         ? {}
         : { error: fallback }),
-  });
+  };
 }
 
-async function auditEffectiveValidation(
-  auditService: AuditService | undefined,
-  request: RegisteredEffectiveValidationRequest,
+export function effectiveValidationAuditOutcome(
   result: SchemaValidationResult,
-  defaultEnvironment: string,
-  identity: SchemaAuditIdentity,
-): Promise<void> {
-  const context = schemaWriteAuditContext(
-    "schema.validate.effective",
-    request.anchorPath,
-    request.environment ?? defaultEnvironment,
-    identity,
-  );
-  await recordSchemaAuditOutcome(auditService, context, {
+): SchemaAuditOutcome {
+  return {
     success: result.valid,
     ...(result.valid
       ? {}
       : { error: "Registered effective validation failed" }),
-  });
+  };
 }
 
 function serviceRegistrationContext(
