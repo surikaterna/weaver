@@ -1,9 +1,29 @@
 import type { WriteResult } from "@weaver-conf/config-types";
+import type { z } from "zod";
 import type { WeaverConfigService } from "../core/config-service";
 import type { WeaverErrorCode } from "../types/index";
 import { createWeaverError, httpStatusForError } from "../types/index";
 import type { RestRequest, RestResponse } from "./rest-adapter";
 import { envelope, errorEnvelope, v1Headers } from "./rest-helpers";
+
+export class RestResponseContractError extends Error {
+  constructor(operation: string, cause: z.ZodError) {
+    super(`Malformed ${operation} response: ${cause.message}`, { cause });
+    this.name = "RestResponseContractError";
+  }
+}
+
+export function parseRestResponse<T>(
+  operation: string,
+  schema: z.ZodType<T>,
+  value: unknown,
+): T {
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    throw new RestResponseContractError(operation, result.error);
+  }
+  return result.data;
+}
 
 export function v1Response<T>(
   configService: WeaverConfigService,

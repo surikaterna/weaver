@@ -12,6 +12,7 @@ import {
   WeaverConfig,
   type WeaverConfigContract,
 } from "@weaver-conf/transport-scomp";
+import type { AuditService } from "../audit/audit-service";
 import type {
   EffectiveValidationContext,
   WeaverConfigService,
@@ -21,11 +22,20 @@ import type { SchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
 import { parseScopeQuery } from "../core/scope-utils";
 import type { ConfigDelta } from "../types/index";
+import {
+  auditScompEffectiveValidation,
+  auditScompObjectWrite,
+  auditScompPathPatch,
+  auditScompSchemaRegistration,
+  scompSchemaRegistrationContext,
+} from "./schema-operation-audit";
 
 export interface ScompServiceDeps {
   configService: WeaverConfigService;
   scopeManager: ScopeManager;
   schemaRegistry: SchemaRegistry;
+  auditService?: AuditService | undefined;
+  defaultEnvironment?: string | undefined;
 }
 
 export function createWeaverScompService(deps: ScompServiceDeps) {
@@ -147,7 +157,12 @@ function schemaHandlers(
     },
 
     async registerSchema(input) {
-      return schemaRegistry.register(input);
+      const result = await schemaRegistry.register(
+        input,
+        scompSchemaRegistrationContext(),
+      );
+      await auditScompSchemaRegistration(deps.auditService, input, result);
+      return result;
     },
   };
 }
@@ -159,33 +174,51 @@ function registeredWriteHandlers(
   return {
     async setRegisteredObject(input) {
       const request = registeredObjectWriteRequestSchema.parse(input);
-      const writeOpts: WriteContext = {
-        ...(request.environment ? { environment: request.environment } : {}),
-        ...(request.ifRevision ? { expectedRevision: request.ifRevision } : {}),
-      };
+      const writeOpts = registeredWriteOptions(request);
       const response = await configService.setRegisteredObject(
         request.layer ?? "platform",
         request.anchorPath,
         request.value,
         { ...writeOpts, schemaRegistry },
       );
-      return registeredObjectWriteResponseSchema.parse(response);
+      const result = registeredObjectWriteResponseSchema.parse(response);
+      await auditScompObjectWrite(
+        deps.auditService,
+        request,
+        result,
+        deps.defaultEnvironment ?? "default",
+      );
+      return result;
     },
 
     async patchRegisteredPath(input) {
       const request = registeredPathPatchRequestSchema.parse(input);
-      const writeOpts: WriteContext = {
-        ...(request.environment ? { environment: request.environment } : {}),
-        ...(request.ifRevision ? { expectedRevision: request.ifRevision } : {}),
-      };
+      const writeOpts = registeredWriteOptions(request);
       const response = await configService.patchRegisteredPath(
         request.layer ?? "platform",
         request.path,
         request.value,
         { ...writeOpts, schemaRegistry },
       );
-      return registeredPathPatchResponseSchema.parse(response);
+      const result = registeredPathPatchResponseSchema.parse(response);
+      await auditScompPathPatch(
+        deps.auditService,
+        request,
+        result,
+        deps.defaultEnvironment ?? "default",
+      );
+      return result;
     },
+  };
+}
+
+function registeredWriteOptions(request: {
+  readonly environment?: string | undefined;
+  readonly ifRevision?: string | undefined;
+}): WriteContext {
+  return {
+    ...(request.environment ? { environment: request.environment } : {}),
+    ...(request.ifRevision ? { expectedRevision: request.ifRevision } : {}),
   };
 }
 
@@ -208,7 +241,15 @@ function registeredValidationHandler(
         request.anchorPath,
         context,
       );
-      return registeredEffectiveValidationResponseSchema.parse(response);
+      const result =
+        registeredEffectiveValidationResponseSchema.parse(response);
+      await auditScompEffectiveValidation(
+        deps.auditService,
+        request,
+        result,
+        deps.defaultEnvironment ?? "default",
+      );
+      return result;
     },
   };
 }

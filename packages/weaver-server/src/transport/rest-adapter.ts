@@ -2,6 +2,7 @@
 
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 import { ZodError } from "zod";
+import type { AuditService } from "../audit/audit-service";
 import type { AuthContext } from "../auth/auth-middleware";
 import type { WeaverConfigService } from "../core/config-service";
 import type { SchemaRegistry } from "../core/schema-registry";
@@ -45,6 +46,8 @@ export interface RestAdapterOptions {
   scopeManager?: ScopeManager;
   corsOrigins?: string[];
   authGate?: AuthGate;
+  auditService?: AuditService;
+  defaultEnvironment?: string;
 }
 
 export interface RestAdapter {
@@ -62,12 +65,21 @@ interface RouteMatch {
 }
 
 export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
-  const { configService, schemaRegistry, scopeManager, authGate } = options;
+  const {
+    configService,
+    schemaRegistry,
+    scopeManager,
+    authGate,
+    auditService,
+    defaultEnvironment,
+  } = options;
   const routes: RestRoute[] = buildRoutes({
     configService,
     schemaRegistry,
     scopeManager,
     authGate,
+    auditService,
+    defaultEnvironment,
   });
   return {
     routes,
