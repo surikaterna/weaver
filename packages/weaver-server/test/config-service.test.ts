@@ -1,5 +1,6 @@
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import { createWeaverConfigService } from "../src/core/config-service.js";
+import { isProtectedConfigPath } from "../src/core/protected-config-paths.js";
 
 describe("WeaverConfigService", () => {
   async function makeService(entries: Record<string, unknown> = {}) {
@@ -114,6 +115,132 @@ describe("WeaverConfigService", () => {
         layerValues: {},
       });
     }
+  });
+
+  it("fails closed on malformed protected-root aliases without effects", async () => {
+    const protectedPaths = [
+      "_weaver",
+      "/_weaver",
+      "[_weaver]",
+      "_weaver..registry.schemas",
+      "_weaver.__proto__.registry.schemas",
+      "_weaver[constructor].registry.schemas",
+      "_weaver[prototype].registry.schemas",
+    ];
+    const calls = { writes: 0, removes: 0 };
+    const provider = {
+      id: "counting",
+      layer: "app",
+      writable: true as const,
+      async load() {
+        return {
+          entries: Object.fromEntries(
+            protectedPaths.map((key) => [key, "private"]),
+          ),
+        };
+      },
+      async write() {
+        calls.writes += 1;
+        return { success: true } as const;
+      },
+      async remove() {
+        calls.removes += 1;
+        return { success: true } as const;
+      },
+    };
+    const svc = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const revision = svc.revision;
+    const deltas: unknown[] = [];
+    svc.onDelta((delta) => deltas.push(delta));
+
+    for (const path of protectedPaths) {
+      expect(isProtectedConfigPath(path)).toBe(true);
+      expect(await svc.get(path)).toBeUndefined();
+      expect(await svc.getNamespace(path)).toEqual({});
+      expect((await svc.inspect(path)).effectiveValue).toBeUndefined();
+      expect((await svc.set("app", path, "blocked")).success).toBe(false);
+      expect((await svc.remove("app", path)).success).toBe(false);
+      expect(
+        (await svc.setMany("app", { safe: true, [path]: "blocked" })).success,
+      ).toBe(false);
+    }
+
+    expect((await svc.resolveAll()).entries).toEqual({});
+    expect(calls).toEqual({ writes: 0, removes: 0 });
+    expect(svc.revision).toBe(revision);
+    expect(deltas).toEqual([]);
+  });
+
+  it("does not classify literal non-root bracket keys as protected", () => {
+    for (const path of [
+      "[_weaver.registry]",
+      "x._weaver",
+      "_weaverish",
+      "[x._weaver]",
+    ]) {
+      expect(isProtectedConfigPath(path)).toBe(false);
+    }
+  });
+
+  it("resolves mounts only through the public config view", async () => {
+    const mount = (source: string) => ({ _weaver: "mount", source });
+    const svc = await makeService({
+      _weaver: { registry: { schemas: { private: true } } },
+      direct: mount("_weaver.registry.schemas"),
+      nested: { leak: mount("_weaver.registry.schemas") },
+      chained: mount("direct"),
+      alias: mount("[_weaver].registry.schemas"),
+      ordinary: mount("public.value"),
+      public: { value: "visible" },
+    });
+
+    for (const key of ["direct", "nested.leak", "chained", "alias"]) {
+      expect(await svc.get(key)).toBeUndefined();
+    }
+    expect(await svc.getNamespace("nested")).toEqual({ leak: undefined });
+    expect(await svc.get("ordinary")).toBe("visible");
+    expect((await svc.resolveAll()).entries).toEqual({
+      direct: undefined,
+      nested: { leak: undefined },
+      chained: undefined,
+      alias: undefined,
+      ordinary: "visible",
+      public: { value: "visible" },
+    });
+  });
+
+  it("resolves scoped mounts only through the public merged view", async () => {
+    const platform = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {
+        _weaver: { registry: { schemas: { private: true } } },
+        public: { value: "visible" },
+      },
+    });
+    const tenant = createInMemoryStorageProvider({
+      id: "tenant",
+      layer: "tenant:acme",
+      initialEntries: {
+        leak: { _weaver: "mount", source: "_weaver.registry.schemas" },
+        ordinary: { _weaver: "mount", source: "public.value" },
+      },
+    });
+    const svc = await createWeaverConfigService({
+      providers: [platform, tenant],
+      environment: "test",
+    });
+    const scopePath = [{ scopeId: "tenant", value: "acme" }];
+
+    expect(await svc.get("leak", { scopePath })).toBeUndefined();
+    expect(await svc.get("ordinary", { scopePath })).toBe("visible");
+    expect((await svc.resolveAll()).scopes["tenant:acme"]).toEqual({
+      leak: undefined,
+      ordinary: "visible",
+    });
   });
 
   it("removes a value", async () => {
