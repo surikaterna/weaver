@@ -4,66 +4,61 @@ interface VisitFrame {
   readonly value: unknown;
 }
 
-interface LeaveFrame {
-  readonly kind: "leave";
-  readonly value: object;
-}
-
-type ValidationFrame = LeaveFrame | VisitFrame;
+type SerializationFrame =
+  | { readonly kind: "emit"; readonly value: string }
+  | { readonly kind: "leave"; readonly value: object }
+  | VisitFrame;
 
 export function serializeHttpJsonValue(value: unknown): string {
-  validateHttpJsonValue(value);
-  const serialized = JSON.stringify(value);
-  if (typeof serialized !== "string") {
-    throw new TypeError("HTTP body is not representable as JSON");
-  }
-  return serialized;
-}
-
-function validateHttpJsonValue(value: unknown): void {
   const active = new Set<object>();
-  const stack: ValidationFrame[] = [{ kind: "visit", path: "$", value }];
+  const chunks: string[] = [];
+  const stack: SerializationFrame[] = [{ kind: "visit", path: "$", value }];
   while (stack.length > 0) {
     const frame = stack.pop();
     if (!frame) continue;
-    if (frame.kind === "leave") {
-      active.delete(frame.value);
-      continue;
-    }
-    visitValue(frame, active, stack);
+    if (frame.kind === "emit") chunks.push(frame.value);
+    else if (frame.kind === "leave") active.delete(frame.value);
+    else visitValue(frame, active, stack, chunks);
   }
+  return chunks.join("");
 }
 
 function visitValue(
   frame: VisitFrame,
   active: Set<object>,
-  stack: ValidationFrame[],
+  stack: SerializationFrame[],
+  chunks: string[],
 ): void {
   const { path, value } = frame;
-  if (isJsonPrimitive(value)) return;
-  if (typeof value === "number") {
-    validateNumber(value, path);
+  const primitive = encodePrimitive(value, path);
+  if (primitive !== undefined) {
+    chunks.push(primitive);
     return;
   }
   if (value === null || typeof value !== "object") {
     throw new TypeError(`${path} is not representable as JSON`);
   }
   if (active.has(value)) throw new TypeError(`${path} contains a cycle`);
-  const children = Array.isArray(value)
-    ? inspectArray(value, path)
-    : inspectRecord(value, path);
-  active.add(value);
-  stack.push({ kind: "leave", value });
-  for (let index = children.length - 1; index >= 0; index--) {
-    const child = children[index];
-    if (child) stack.push(child);
+  if (Array.isArray(value)) {
+    active.add(value);
+    stack.push({ kind: "leave", value }, { kind: "emit", value: "]" });
+    chunks.push("[");
+    scheduleArray(value, path, stack);
+    return;
   }
+  active.add(value);
+  stack.push({ kind: "leave", value }, { kind: "emit", value: "}" });
+  chunks.push("{");
+  scheduleRecord(value, path, stack);
 }
 
-function isJsonPrimitive(value: unknown): boolean {
-  return (
-    value === null || typeof value === "boolean" || typeof value === "string"
-  );
+function encodePrimitive(value: unknown, path: string): string | undefined {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "string") return encodeScalar(value);
+  if (typeof value !== "number") return undefined;
+  validateNumber(value, path);
+  return encodeScalar(value);
 }
 
 function validateNumber(value: number, path: string): void {
@@ -75,7 +70,17 @@ function validateNumber(value: number, path: string): void {
   }
 }
 
-function inspectArray(value: unknown[], path: string): VisitFrame[] {
+function encodeScalar(value: number | string): string {
+  const encoded = JSON.stringify(value);
+  if (typeof encoded !== "string") throw new TypeError("Invalid JSON scalar");
+  return encoded;
+}
+
+function scheduleArray(
+  value: unknown[],
+  path: string,
+  stack: SerializationFrame[],
+): void {
   if (Object.getPrototypeOf(value) !== Array.prototype) {
     throw new TypeError(`${path} has a custom array prototype`);
   }
@@ -96,31 +101,24 @@ function inspectArray(value: unknown[], path: string): VisitFrame[] {
       value: descriptor.value,
     });
   }
-  if (
-    keys.some((key) => key !== "length" && !isArrayIndex(key, value.length))
-  ) {
-    throw new TypeError(`${path} has extra array properties`);
+  for (let index = children.length - 1; index >= 0; index--) {
+    const child = children[index];
+    if (!child) continue;
+    stack.push(child);
+    if (index > 0) stack.push({ kind: "emit", value: "," });
   }
-  return children;
 }
 
-function isArrayIndex(key: PropertyKey, length: number): boolean {
-  if (typeof key !== "string" || key === "") return false;
-  const index = Number(key);
-  return (
-    Number.isInteger(index) &&
-    index >= 0 &&
-    index < length &&
-    String(index) === key
-  );
-}
-
-function inspectRecord(value: object, path: string): VisitFrame[] {
+function scheduleRecord(
+  value: object,
+  path: string,
+  stack: SerializationFrame[],
+): void {
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== null && prototype !== Object.prototype) {
     throw new TypeError(`${path} has a custom object prototype`);
   }
-  const children: VisitFrame[] = [];
+  const entries: Array<{ key: string; frame: VisitFrame }> = [];
   for (const key of Reflect.ownKeys(value)) {
     if (typeof key !== "string") {
       throw new TypeError(`${path} has a symbol property`);
@@ -129,11 +127,17 @@ function inspectRecord(value: object, path: string): VisitFrame[] {
     if (!descriptor?.enumerable || !("value" in descriptor)) {
       throw new TypeError(`${path}.${key} is not an enumerable data value`);
     }
-    children.push({
-      kind: "visit",
-      path: `${path}.${key}`,
-      value: descriptor.value,
+    entries.push({
+      key,
+      frame: { kind: "visit", path: `${path}.${key}`, value: descriptor.value },
     });
   }
-  return children;
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (!entry) continue;
+    stack.push(entry.frame);
+    stack.push({ kind: "emit", value: ":" });
+    stack.push({ kind: "emit", value: encodeScalar(entry.key) });
+    if (index > 0) stack.push({ kind: "emit", value: "," });
+  }
 }

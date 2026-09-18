@@ -580,7 +580,7 @@ describe("registered HTTP request contracts", () => {
     expect(mock.calls()).toBe(0);
   });
 
-  it("preserves exact JSON values without mutating the caller", async () => {
+  it("matches native JSON for the accepted shallow corpus", async () => {
     const shared = { enabled: true };
     const nullRecord = Object.create(null) as Record<string, unknown>;
     Object.defineProperty(nullRecord, "__proto__", {
@@ -589,21 +589,75 @@ describe("registered HTTP request contracts", () => {
     });
     nullRecord.constructor = "constructor-data";
     nullRecord.prototype = "prototype-data";
-    const value = {
-      dense: [null, true, "text", 2.5],
-      left: shared,
-      right: shared,
+    const ordered: Record<string, unknown> = { beta: true };
+    ordered["10"] = "ten";
+    ordered["2"] = "two";
+    ordered.alpha = false;
+    const sharedValue = { left: shared, right: shared };
+    const escapedKey = "control\n\u0000\uD800";
+    const values: unknown[] = [
+      null,
+      true,
+      false,
+      'quote" slash\\ control\n lone\uD800',
+      0,
+      -12,
+      1.25,
+      1e21,
+      1e-7,
+      [null, { nested: [true, "text"] }],
+      ordered,
       nullRecord,
-    };
+      { [escapedKey]: escapedKey },
+      sharedValue,
+    ];
+    const mock = sequenceFetch(
+      values.map(() => response(200, { success: true, revision: "rev-2" })),
+    );
+    const transport = transportFor(mock.fetch);
+    for (const [index, value] of values.entries()) {
+      await requireResult(transport.setRegisteredObject?.("/checkout", value));
+      expect(mock.requests[index]?.init?.body).toBe(JSON.stringify({ value }));
+    }
+    expect(mock.requests.at(-1)?.init?.body).toContain(
+      '"left":{"enabled":true},"right":{"enabled":true}',
+    );
+    expect(sharedValue.left).toBe(sharedValue.right);
+    expect(Object.getPrototypeOf(nullRecord)).toBeNull();
+  });
+
+  it("serializes a depth-6000 value with one fetch", async () => {
+    const depth = 6_000;
+    let value: unknown = null;
+    for (let level = 0; level < depth; level++) value = { next: value };
     const mock = sequenceFetch([
       response(200, { success: true, revision: "rev-2" }),
     ]);
     await requireResult(
       transportFor(mock.fetch).setRegisteredObject?.("/checkout", value),
     );
-    expect(JSON.parse(String(mock.requests[0]?.init?.body))).toEqual({ value });
-    expect(value.left).toBe(value.right);
-    expect(Object.getPrototypeOf(nullRecord)).toBeNull();
+    const expected = `{"value":${'{"next":'.repeat(depth)}null${"}".repeat(depth)}}`;
+    expect(mock.requests[0]?.init?.body).toBe(expected);
+    expect(mock.calls()).toBe(1);
+  });
+
+  it("rejects accessors without invoking their getter", async () => {
+    let getterCalls = 0;
+    const value = Object.defineProperty({}, "secret", {
+      enumerable: true,
+      get: () => {
+        getterCalls++;
+        return "hidden";
+      },
+    });
+    const mock = sequenceFetch([]);
+    await expect(
+      requireResult(
+        transportFor(mock.fetch).setRegisteredObject?.("/checkout", value),
+      ),
+    ).rejects.toThrow();
+    expect(getterCalls).toBe(0);
+    expect(mock.calls()).toBe(0);
   });
 
   it.each([
