@@ -1,4 +1,6 @@
+import { createHmac } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ConfigurationStorageProvider } from "@weaver-conf/config-types";
@@ -69,6 +71,46 @@ function createFailingProvider(id: string): ConfigurationStorageProvider {
   };
 }
 
+function signTestJwt(secret: string, claims: Record<string, unknown>): string {
+  const header = Buffer.from(
+    JSON.stringify({ alg: "HS256", typ: "JWT" }),
+  ).toString("base64url");
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  const signingInput = `${header}.${payload}`;
+  const signature = createHmac("sha256", secret)
+    .update(signingInput)
+    .digest("base64url");
+  return `${signingInput}.${signature}`;
+}
+
+function bearer(token: string): Record<string, string> {
+  return { Authorization: `Bearer ${token}` };
+}
+
+async function rawRequest(
+  port: number,
+  path: string,
+  headers?: Record<string, string>,
+): Promise<{ readonly status: number; readonly body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      { hostname: "127.0.0.1", port, path, headers },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => {
+          resolve({
+            status: response.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      },
+    );
+    request.on("error", reject);
+    request.end();
+  });
+}
+
 async function startWithProviders(
   providers: ConfigurationStorageProvider[],
   onDispose: () => void,
@@ -109,6 +151,68 @@ describe("Weaver server auth gate", () => {
       await server.close();
     }
   });
+
+  it("authorizes effective validation with the registered schema", async () => {
+    const secret = "registered-schema-secret";
+    const server = await startWeaverServer({
+      port: 0,
+      environment: "development",
+      jwtSecret: secret,
+      providers: [
+        createInMemoryStorageProvider({ id: "test", layer: "platform" }),
+      ],
+    });
+    const reader = signTestJwt(secret, { sub: "reader", roles: ["reader"] });
+    const admin = signTestJwt(secret, { sub: "admin", roles: ["admin"] });
+
+    try {
+      const registration = await fetch(
+        `http://localhost:${server.port}/v1/admin/schemas/services`,
+        {
+          method: "POST",
+          headers: { ...bearer(admin), "Content-Type": "application/json" },
+          body: JSON.stringify({
+            serviceId: "checkout",
+            environment: "development",
+            owner: { name: "Checkout", contact: "checkout@example.com" },
+            schema: {
+              type: "object",
+              "x-weaver": { visibility: "admin" },
+              properties: { enabled: { type: "boolean" } },
+              required: ["enabled"],
+            },
+            fragmentSlots: [],
+          }),
+        },
+      );
+      expect(registration.status).toBe(201);
+
+      const readerEffective = await fetch(
+        `http://localhost:${server.port}/v1/registered/effective/checkout`,
+        { headers: bearer(reader) },
+      );
+      expect(readerEffective.status).toBe(403);
+
+      const adminEffective = await fetch(
+        `http://localhost:${server.port}/v1/registered/effective/checkout?env=development`,
+        { headers: bearer(admin) },
+      );
+      expect([200, 422]).toContain(adminEffective.status);
+
+      const readerList = await fetch(
+        `http://localhost:${server.port}/v1/admin/schemas`,
+        { headers: bearer(reader) },
+      );
+      expect(readerList.status).toBe(403);
+      const adminList = await fetch(
+        `http://localhost:${server.port}/v1/admin/schemas`,
+        { headers: bearer(admin) },
+      );
+      expect(adminList.status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 describe("Weaver server error handling", () => {
@@ -141,6 +245,111 @@ describe("Weaver server error handling", () => {
         `http://localhost:${server.port}/v1/admin/schemas?__proto__=value`,
       );
       expect(response.status).toBe(400);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it.each([
+    "env=bad&env=prod",
+    "env=prod&env=prod",
+    "env=&env=prod",
+    "%65nv=prod&env=prod",
+    "layer=platform&layer=platform",
+    "scope=tenant%3Aone&scope=tenant%3Atwo",
+    "inspect=&inspect=",
+    "unknown=one&unknown=two",
+    "__proto__=one&__proto__=two",
+  ])("rejects duplicate decoded v1 query keys before auth: %s", async (query) => {
+    const server = await startWeaverServer({
+      port: 0,
+      jwtSecret: "target-secret",
+    });
+
+    try {
+      const route =
+        query.startsWith("env") || query.startsWith("%65")
+          ? "/v1/registered/effective/checkout"
+          : "/v1/config/key";
+      const response = await rawRequest(server.port, `${route}?${query}`);
+      expect(response.status).toBe(400);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it.each([
+    "/v1/registered/effective/a%",
+    "/v1/registered/effective/a%2",
+    "/v1/registered/effective/a%C3%28",
+    "/v1/registered/effective/a%c3%a9",
+    "/v1/registered/effective/%61",
+    "/v1/registered/effective/%3A",
+    "/v1/registered/effective/a%2Fb",
+    "/v1/registered/effective/a%2fb",
+    "/v1/registered/effective/a%5Cb",
+    "/v1/registered/effective/__proto__",
+    "/v1/registered/effective/%5F%5Fproto%5F%5F",
+    "/v1/registered/effective/constructor",
+    "/v1/registered/effective/prototype",
+    "/v1/registered/effective/a%00b",
+    "/v1/registered/effective/a%7Fb",
+    "/v1/registered/effective/a%C2%80b",
+    "/v1/registered/effective/a%252Fb",
+    "/v1/registered/effective/a%255Cb",
+  ])("rejects non-canonical request paths before auth: %s", async (path) => {
+    const server = await startWeaverServer({
+      port: 0,
+      jwtSecret: "target-secret",
+    });
+
+    try {
+      expect((await rawRequest(server.port, path)).status).toBe(400);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it.each([
+    "/v1/registered/effective/check%20out",
+    "/v1/registered/effective/caf%C3%A9",
+    "/v1/registered/effective/what%3F",
+    "/v1/registered/effective/hash%23",
+    "/v1/registered/effective/100%25",
+    "/v1/registered/effective/a!$&'()*+,;=:@-._~",
+  ])("decodes one canonical request path before auth: %s", async (path) => {
+    const server = await startWeaverServer({
+      port: 0,
+      jwtSecret: "target-secret",
+    });
+
+    try {
+      expect((await rawRequest(server.port, path)).status).toBe(401);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("passes a decoded canonical identity to generic config routing", async () => {
+    const server = await startWeaverServer({
+      port: 0,
+      providers: [
+        createInMemoryStorageProvider({
+          id: "test",
+          layer: "platform",
+          initialEntries: { "hello world": "decoded" },
+        }),
+      ],
+    });
+
+    try {
+      const response = await rawRequest(
+        server.port,
+        "/v1/config/hello%20world?inspect=",
+      );
+      expect(response.status).toBe(200);
+      expect(response.body).toContain("hello world");
+      expect(response.body).toContain("decoded");
     } finally {
       await server.close();
     }
