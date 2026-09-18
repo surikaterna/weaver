@@ -1,4 +1,9 @@
-import type { ScopeDefinition } from "@weaver-conf/config-types";
+import {
+  type ScopeDefinition,
+  weaverErrorSchema,
+  writeResultSchema,
+} from "@weaver-conf/config-types";
+import { z } from "zod";
 import type { HttpContext } from "./http-transport-context";
 import {
   buildScopeQuery,
@@ -7,6 +12,11 @@ import {
 } from "./http-transport-context";
 import type { WeaverTransport, WriteOptions, WriteResult } from "./transport";
 import type { ConfigDelta, ConfigSnapshot, Unsubscribe } from "./types";
+
+const legacyWriteEnvelopeSchema = z.looseObject({
+  data: z.unknown(),
+  error: weaverErrorSchema.optional(),
+});
 
 export function readMethods(
   context: HttpContext,
@@ -145,12 +155,8 @@ async function sendWrite(
     headers,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  const envelope = (await response.json()) as {
-    data: WriteResult;
-    error?: WriteResult["error"];
-  };
-  if (!response.ok && envelope.error) {
-    return { success: false, error: envelope.error };
-  }
-  return envelope.data;
+  const envelope = legacyWriteEnvelopeSchema.parse(await response.json());
+  if (response.ok) return writeResultSchema.parse(envelope.data);
+  const error = weaverErrorSchema.parse(envelope.error);
+  return { success: false, error };
 }

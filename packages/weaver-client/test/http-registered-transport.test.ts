@@ -16,6 +16,8 @@ interface OperationCase {
   readonly name: string;
   readonly kind: "read" | "mutation";
   readonly data: unknown;
+  readonly status: number;
+  readonly wrongStatus: number;
   run(transport: HttpTransport): Promise<unknown>;
 }
 
@@ -47,12 +49,16 @@ const operations: readonly OperationCase[] = [
     name: "schema listing",
     kind: "read",
     data: { schemas: { "/checkout": { type: "object" } } },
+    status: 200,
+    wrongStatus: 201,
     run: (transport) => requireResult(transport.fetchSchemas?.()),
   },
   {
     name: "service registration",
     kind: "mutation",
     data: registrationResponse,
+    status: 201,
+    wrongStatus: 200,
     run: (transport) =>
       requireResult(transport.registerSchema?.(serviceRequest)),
   },
@@ -60,6 +66,8 @@ const operations: readonly OperationCase[] = [
     name: "fragment registration",
     kind: "mutation",
     data: registrationResponse,
+    status: 201,
+    wrongStatus: 200,
     run: (transport) =>
       requireResult(transport.registerSchema?.(fragmentRequest)),
   },
@@ -67,6 +75,8 @@ const operations: readonly OperationCase[] = [
     name: "registered object write",
     kind: "mutation",
     data: { success: true, revision: "rev-2" },
+    status: 200,
+    wrongStatus: 201,
     run: (transport) =>
       requireResult(transport.setRegisteredObject?.("/checkout", {})),
   },
@@ -74,6 +84,8 @@ const operations: readonly OperationCase[] = [
     name: "registered path patch",
     kind: "mutation",
     data: { success: true, revision: "rev-2" },
+    status: 200,
+    wrongStatus: 201,
     run: (transport) =>
       requireResult(transport.patchRegisteredPath?.("/checkout/enabled", true)),
   },
@@ -81,6 +93,8 @@ const operations: readonly OperationCase[] = [
     name: "effective validation",
     kind: "read",
     data: { valid: true, errors: [] },
+    status: 200,
+    wrongStatus: 201,
     run: (transport) =>
       requireResult(
         transport.validateRegisteredEffective?.({ anchorPath: "/checkout" }),
@@ -100,13 +114,28 @@ async function requireResult<T>(result: Promise<T> | undefined): Promise<T> {
   return result;
 }
 
-function response(status: number, data: unknown): Response {
+function envelopeResponse(
+  status: number,
+  envelope: unknown,
+  contentType = "application/json",
+): Response {
+  return new Response(JSON.stringify(envelope), {
+    status,
+    headers: { "Content-Type": contentType },
+  });
+}
+
+function response(
+  status: number,
+  data: unknown,
+  contentType = "application/json",
+): Response {
   return new Response(
     JSON.stringify({
       data,
       meta: { revision: "rev-1", timestamp: new Date(0).toISOString() },
     }),
-    { status, headers: { "Content-Type": "application/json" } },
+    { status, headers: { "Content-Type": contentType } },
   );
 }
 
@@ -152,11 +181,66 @@ function transportFor(
   });
 }
 
+function malformedJsonValues(): readonly unknown[] {
+  const cycle: Record<string, unknown> = {};
+  cycle.self = cycle;
+  const sparse = new Array(1);
+  const extraArray = Object.assign([], { extra: true });
+  const accessor = Object.defineProperty({}, "value", {
+    enumerable: true,
+    get: () => "hidden",
+  });
+  const symbolProperty = { value: true };
+  Object.defineProperty(symbolProperty, Symbol("hidden"), {
+    enumerable: true,
+    value: true,
+  });
+  const nonEnumerable = Object.defineProperty({}, "hidden", { value: true });
+  return [
+    undefined,
+    () => true,
+    Symbol("value"),
+    1n,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    -0,
+    { nested: undefined },
+    cycle,
+    sparse,
+    extraArray,
+    accessor,
+    symbolProperty,
+    nonEnumerable,
+    new Date(0),
+    new Map(),
+    Object.create({ inherited: true }),
+  ];
+}
+
+async function setWithOptions(
+  transport: HttpTransport,
+  options: unknown,
+): Promise<unknown> {
+  const operation = transport.setRegisteredObject;
+  if (!operation) throw new Error("Registered operation is unsupported");
+  return Reflect.apply(operation, transport, ["/checkout", {}, options]);
+}
+
+async function validateWithOptions(
+  transport: HttpTransport,
+  options: unknown,
+): Promise<unknown> {
+  const operation = transport.validateRegisteredEffective;
+  if (!operation) throw new Error("Registered operation is unsupported");
+  return Reflect.apply(operation, transport, [options]);
+}
+
 describe("registered HTTP response contracts", () => {
   it.each(
     operations,
   )("parses successful $name responses", async (operation) => {
-    const mock = sequenceFetch([response(200, operation.data)]);
+    const mock = sequenceFetch([response(operation.status, operation.data)]);
     await expect(operation.run(transportFor(mock.fetch))).resolves.toEqual(
       operation.name === "schema listing"
         ? { "/checkout": { type: "object" } }
@@ -166,19 +250,26 @@ describe("registered HTTP response contracts", () => {
 
   it.each(operations)("rejects malformed $name data", async (operation) => {
     const errors: TransportError[] = [];
-    const mock = sequenceFetch([response(200, { malformed: true })]);
+    const mock = sequenceFetch([
+      response(operation.status, { malformed: true }),
+    ]);
     await expect(
       operation.run(transportFor(mock.fetch, (error) => errors.push(error))),
     ).rejects.toBeInstanceOf(ZodError);
     expect(errors).toEqual([expect.objectContaining({ type: "parse" })]);
+    expect(mock.calls()).toBe(1);
   });
 
   it.each(
     operations,
   )("rejects malformed non-success $name envelopes", async (operation) => {
     const malformed = new Response(
-      JSON.stringify({ data: operation.data, error: { message: "bad" } }),
-      { status: 400 },
+      JSON.stringify({
+        data: operation.data,
+        meta: { revision: "rev-1", timestamp: "1970-01-01T00:00:00.000Z" },
+        error: { message: "bad" },
+      }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
     );
     await expect(
       operation.run(transportFor(sequenceFetch([malformed]).fetch)),
@@ -189,10 +280,136 @@ describe("registered HTTP response contracts", () => {
     operations,
   )("rejects non-error non-success $name responses", async (operation) => {
     await expect(
-      operation.run(
-        transportFor(sequenceFetch([response(400, operation.data)]).fetch),
-      ),
+      operation.run(transportFor(sequenceFetch([response(400, null)]).fetch)),
     ).rejects.toBeInstanceOf(HttpResponseContractError);
+  });
+
+  it.each(
+    operations,
+  )("rejects an unlisted 2xx for $name", async (operation) => {
+    const mock = sequenceFetch([
+      response(operation.wrongStatus, operation.data),
+    ]);
+    await expect(
+      operation.run(transportFor(mock.fetch)),
+    ).rejects.toBeInstanceOf(HttpResponseContractError);
+    expect(mock.calls()).toBe(1);
+  });
+
+  it.each(
+    operations,
+  )("accepts JSON media parameters for $name", async (operation) => {
+    const mock = sequenceFetch([
+      response(
+        operation.status,
+        operation.data,
+        'Application/JSON; Charset="utf-8"',
+      ),
+    ]);
+    await expect(
+      operation.run(transportFor(mock.fetch)),
+    ).resolves.toBeDefined();
+  });
+
+  it.each(
+    operations.flatMap((operation) =>
+      [
+        undefined,
+        "text/html",
+        "application/problem+json",
+        "application/json;",
+      ].map((contentType) => ({ contentType, operation })),
+    ),
+  )("rejects invalid media $contentType for $operation.name", async ({
+    operation,
+    contentType,
+  }) => {
+    const body = JSON.stringify({
+      data: operation.data,
+      meta: { revision: "rev-1", timestamp: "1970-01-01T00:00:00.000Z" },
+    });
+    const headers = contentType ? { "Content-Type": contentType } : undefined;
+    const mock = sequenceFetch([
+      new Response(body, { status: operation.status, headers }),
+    ]);
+    await expect(
+      operation.run(transportFor(mock.fetch)),
+    ).rejects.toBeInstanceOf(HttpResponseContractError);
+    expect(mock.calls()).toBe(1);
+  });
+
+  const malformedEnvelopes = [
+    {
+      name: "missing data",
+      value: { meta: { revision: "r", timestamp: "t" } },
+    },
+    { name: "missing meta", value: { data: null } },
+    {
+      name: "missing revision",
+      value: { data: null, meta: { timestamp: "t" } },
+    },
+    {
+      name: "missing timestamp",
+      value: { data: null, meta: { revision: "r" } },
+    },
+    {
+      name: "unknown envelope field",
+      value: {
+        data: null,
+        meta: { revision: "r", timestamp: "t" },
+        extra: true,
+      },
+    },
+    {
+      name: "unknown meta field",
+      value: {
+        data: null,
+        meta: { revision: "r", timestamp: "t", extra: true },
+      },
+    },
+  ];
+
+  it.each(
+    operations.flatMap((operation) =>
+      malformedEnvelopes.map((malformed) => ({ malformed, operation })),
+    ),
+  )("rejects $malformed.name for $operation.name", async ({
+    malformed,
+    operation,
+  }) => {
+    const mock = sequenceFetch([
+      envelopeResponse(operation.status, malformed.value),
+    ]);
+    await expect(
+      operation.run(transportFor(mock.fetch)),
+    ).rejects.toBeInstanceOf(ZodError);
+    expect(mock.calls()).toBe(1);
+  });
+
+  it.each(
+    operations,
+  )("rejects success-with-error for $name", async (operation) => {
+    const mock = sequenceFetch([errorResponse(operation.status)]);
+    await expect(
+      operation.run(transportFor(mock.fetch)),
+    ).rejects.toBeInstanceOf(HttpResponseContractError);
+    expect(mock.calls()).toBe(1);
+  });
+
+  it.each(
+    operations,
+  )("rejects non-null error data for $name", async (operation) => {
+    const mock = sequenceFetch([
+      envelopeResponse(400, {
+        data: operation.data,
+        meta: { revision: "rev-1", timestamp: "now" },
+        error: { code: "VALIDATION_ERROR", message: "bad" },
+      }),
+    ]);
+    await expect(
+      operation.run(transportFor(mock.fetch)),
+    ).rejects.toBeInstanceOf(ZodError);
+    expect(mock.calls()).toBe(1);
   });
 });
 
@@ -200,7 +417,16 @@ describe("registered HTTP retry classification", () => {
   it.each(readOperations)("retries $name after 503", async (operation) => {
     const mock = sequenceFetch([
       errorResponse(503, "SERVER_DEGRADED"),
-      response(200, operation.data),
+      response(operation.status, operation.data),
+    ]);
+    await operation.run(transportFor(mock.fetch));
+    expect(mock.calls()).toBe(2);
+  });
+
+  it.each(readOperations)("retries $name after 429", async (operation) => {
+    const mock = sequenceFetch([
+      errorResponse(429),
+      response(operation.status, operation.data),
     ]);
     await operation.run(transportFor(mock.fetch));
     expect(mock.calls()).toBe(2);
@@ -211,7 +437,7 @@ describe("registered HTTP retry classification", () => {
   )("retries $name after a network failure", async (operation) => {
     const mock = sequenceFetch([
       new Error("temporary network failure"),
-      response(200, operation.data),
+      response(operation.status, operation.data),
     ]);
     await operation.run(transportFor(mock.fetch));
     expect(mock.calls()).toBe(2);
@@ -222,7 +448,7 @@ describe("registered HTTP retry classification", () => {
   )("does not replay $name after 503", async (operation) => {
     const mock = sequenceFetch([
       errorResponse(503, "SERVER_DEGRADED"),
-      response(200, operation.data),
+      response(operation.status, operation.data),
     ]);
     await expect(
       operation.run(transportFor(mock.fetch)),
@@ -237,7 +463,7 @@ describe("registered HTTP retry classification", () => {
   )("does not replay $name after a network failure", async (operation) => {
     const mock = sequenceFetch([
       new Error("ambiguous completion"),
-      response(200, operation.data),
+      response(operation.status, operation.data),
     ]);
     await expect(operation.run(transportFor(mock.fetch))).rejects.toThrow(
       "ambiguous completion",
@@ -263,6 +489,20 @@ describe("registered HTTP retry classification", () => {
       operation.run(transportFor(fetch, undefined, 1)),
     ).rejects.toThrow("timed out");
     expect(calls).toBe(1);
+  });
+
+  it.each(
+    readOperations,
+  )("parses a malformed terminal 503 for $name only after retries", async (operation) => {
+    const malformed = envelopeResponse(503, {
+      data: null,
+      meta: { revision: "rev-1", timestamp: "now" },
+    });
+    const mock = sequenceFetch([errorResponse(503), malformed]);
+    await expect(
+      operation.run(transportFor(mock.fetch)),
+    ).rejects.toBeInstanceOf(HttpResponseContractError);
+    expect(mock.calls()).toBe(2);
   });
 });
 
@@ -315,6 +555,117 @@ describe("registered HTTP request contracts", () => {
       transport.patchRegisteredPath?.("/checkout", true, { layer: "" }),
     ).rejects.toBeInstanceOf(ZodError);
     expect(mock.calls()).toBe(0);
+  });
+
+  it.each(
+    malformedJsonValues(),
+  )("rejects lossy registered JSON value %# before fetch", async (value) => {
+    const mock = sequenceFetch([]);
+    const transport = transportFor(mock.fetch);
+    await expect(
+      requireResult(transport.setRegisteredObject?.("/checkout", value)),
+    ).rejects.toThrow();
+    expect(mock.calls()).toBe(0);
+  });
+
+  it("rejects lossy registration defaults before fetch", async () => {
+    const mock = sequenceFetch([]);
+    const transport = transportFor(mock.fetch);
+    await expect(
+      transport.registerSchema?.({
+        ...serviceRequest,
+        schema: { type: "object", default: Number.NaN },
+      }),
+    ).rejects.toThrow("non-finite");
+    expect(mock.calls()).toBe(0);
+  });
+
+  it("preserves exact JSON values without mutating the caller", async () => {
+    const shared = { enabled: true };
+    const nullRecord = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(nullRecord, "__proto__", {
+      enumerable: true,
+      value: "data",
+    });
+    nullRecord.constructor = "constructor-data";
+    nullRecord.prototype = "prototype-data";
+    const value = {
+      dense: [null, true, "text", 2.5],
+      left: shared,
+      right: shared,
+      nullRecord,
+    };
+    const mock = sequenceFetch([
+      response(200, { success: true, revision: "rev-2" }),
+    ]);
+    await requireResult(
+      transportFor(mock.fetch).setRegisteredObject?.("/checkout", value),
+    );
+    expect(JSON.parse(String(mock.requests[0]?.init?.body))).toEqual({ value });
+    expect(value.left).toBe(value.right);
+    expect(Object.getPrototypeOf(nullRecord)).toBeNull();
+  });
+
+  it.each([
+    { extra: true },
+    { layer: undefined },
+    { environment: "" },
+    { ifRevision: "" },
+    Object.create({ layer: "tenant" }),
+    Object.defineProperty({}, "__proto__", { enumerable: true, value: {} }),
+    Object.defineProperty({}, "layer", {
+      enumerable: true,
+      get: () => "tenant",
+    }),
+    Object.defineProperty({}, "hidden", { value: true }),
+    Object.defineProperty({}, Symbol("hidden"), {
+      enumerable: true,
+      value: true,
+    }),
+  ])("rejects unsafe write options %# before fetch", async (options) => {
+    const mock = sequenceFetch([]);
+    await expect(
+      setWithOptions(transportFor(mock.fetch), options),
+    ).rejects.toThrow();
+    expect(mock.calls()).toBe(0);
+  });
+
+  it.each([
+    { anchorPath: "/checkout", extra: true },
+    { anchorPath: "/checkout", environment: undefined },
+    { anchorPath: "/checkout", environment: "" },
+    Object.assign(Object.create({ environment: "prod" }), {
+      anchorPath: "/checkout",
+    }),
+    { anchorPath: "/checkout", scopePath: [{ scopeId: "", value: "acme" }] },
+    { anchorPath: "/checkout", scopePath: [{ scopeId: "tenant", value: "" }] },
+    {
+      anchorPath: "/checkout",
+      scopePath: [{ scopeId: "tenant:", value: "acme" }],
+    },
+    {
+      anchorPath: "/checkout",
+      scopePath: [{ scopeId: "tenant", value: "a,cme" }],
+    },
+  ])("rejects unsafe effective options %# before fetch", async (options) => {
+    const mock = sequenceFetch([]);
+    await expect(
+      validateWithOptions(transportFor(mock.fetch), options),
+    ).rejects.toThrow();
+    expect(mock.calls()).toBe(0);
+  });
+
+  it("omits an empty scope query", async () => {
+    const mock = sequenceFetch([response(200, { valid: true, errors: [] })]);
+    await requireResult(
+      transportFor(mock.fetch).validateRegisteredEffective?.({
+        anchorPath: "/checkout",
+        scopePath: [],
+      }),
+    );
+    expect(mock.requests[0]?.input).toBe(
+      "http://localhost:3399/v1/registered/effective/checkout",
+    );
   });
 
   it("rejects paths D1 cannot represent before fetch", async () => {

@@ -18,13 +18,16 @@ import {
 } from "@weaver-conf/config-types";
 import { type RefinementCtx, z } from "zod";
 import type { HttpServerError, ValidatedRequestOptions } from "./http-request";
-import type {
-  EffectiveValidationOptions,
-  WriteOptions,
-  WriteResult,
+import {
+  type EffectiveValidationOptions,
+  effectiveValidationOptionsSchema,
+  type WriteOptions,
+  type WriteResult,
 } from "./transport";
 
-const effectiveValidationStatuses = new Set([422]);
+const okStatus = new Set([200]);
+const createdStatus = new Set([201]);
+const effectiveValidationStatuses = new Set([200, 422]);
 const forbiddenOwnKeys = new Set(["__proto__", "constructor", "prototype"]);
 const percentTripletPattern = /%[0-9A-Fa-f]{2}/;
 const controlPattern = /\p{Cc}/u;
@@ -37,6 +40,16 @@ const wirePathSegmentSchema = z
       !controlPattern.test(segment) &&
       !percentTripletPattern.test(segment),
     "Path segment cannot be represented by the canonical HTTP encoding",
+  );
+const writeOptionsSchema = z
+  .unknown()
+  .superRefine(rejectUnsafeOptions)
+  .pipe(
+    z.strictObject({
+      layer: z.string().min(1).optional(),
+      environment: z.string().min(1).optional(),
+      ifRevision: z.string().min(1).optional(),
+    }),
   );
 
 export interface HttpRegisteredContext {
@@ -57,6 +70,8 @@ export async function fetchRegisteredSchemas(
     "GET",
     "/v1/admin/schemas",
     registeredSchemasResponseSchema,
+    undefined,
+    { dataStatuses: okStatus },
   );
   return result.schemas;
 }
@@ -75,7 +90,7 @@ export function postSchemaRegistration(
     path,
     schemaRegistrationResponseSchema,
     request,
-    { mapServerError: failedRegistration },
+    { dataStatuses: createdStatus, mapServerError: failedRegistration },
   );
 }
 
@@ -85,8 +100,9 @@ export function putRegisteredObject(
   value: unknown,
   options?: WriteOptions,
 ): Promise<WriteResult> {
+  const writeOptions = parseWriteOptions(options);
   const request = parseRequest(registeredObjectWriteRequestSchema, {
-    ...options,
+    ...writeOptions,
     anchorPath,
     value,
   });
@@ -99,8 +115,9 @@ export function patchRegisteredPath(
   value: unknown,
   options?: WriteOptions,
 ): Promise<WriteResult> {
+  const writeOptions = parseWriteOptions(options);
   const request = parseRequest(registeredPathPatchRequestSchema, {
-    ...options,
+    ...writeOptions,
     path,
     value,
   });
@@ -111,10 +128,11 @@ export function validateRegisteredEffective(
   context: HttpRegisteredContext,
   options: EffectiveValidationOptions,
 ): Promise<RegisteredEffectiveValidationResponse> {
-  const scope = registeredScopeQuery(options.scopePath);
+  const validatedOptions = effectiveValidationOptionsSchema.parse(options);
+  const scope = registeredScopeQuery(validatedOptions.scopePath);
   const request = parseRequest(registeredEffectiveValidationRequestSchema, {
-    anchorPath: options.anchorPath,
-    environment: options.environment,
+    anchorPath: validatedOptions.anchorPath,
+    environment: validatedOptions.environment,
     scope: scope || undefined,
   });
   const query = context.queryString({
@@ -126,11 +144,11 @@ export function validateRegisteredEffective(
     `/v1/registered/effective${wirePath(request.anchorPath)}${query}`,
     registeredEffectiveValidationResponseSchema,
     undefined,
-    { acceptedStatuses: effectiveValidationStatuses },
+    { dataStatuses: effectiveValidationStatuses },
   );
 }
 
-function registeredScopeQuery(scopePath?: ScopeInstance[]): string {
+function registeredScopeQuery(scopePath?: readonly ScopeInstance[]): string {
   return (
     scopePath?.map(({ scopeId, value }) => `${scopeId}:${value}`).join(",") ??
     ""
@@ -166,7 +184,7 @@ function writeRequest(
     `/v1/registered/${route}${wirePath(path)}${query}`,
     responseSchema,
     { value: request.value },
-    { headers, mapServerError: failedWrite },
+    { dataStatuses: okStatus, headers, mapServerError: failedWrite },
   );
 }
 
@@ -179,25 +197,75 @@ function parseRegistrationRequest(
   return parseRequest(serviceSchemaRegistrationRequestSchema, request);
 }
 
-function parseRequest<T>(schema: z.ZodType<T>, value: unknown): T {
-  return z
-    .unknown()
-    .superRefine(rejectForbiddenOwnKeys)
-    .pipe(schema)
-    .parse(value);
+function parseWriteOptions(options: WriteOptions | undefined) {
+  return writeOptionsSchema.parse(options ?? {});
 }
 
-function rejectForbiddenOwnKeys(value: unknown, context: RefinementCtx): void {
+function parseRequest<T>(schema: z.ZodType<T>, value: unknown): T {
+  return z.unknown().superRefine(rejectUnsafeRecord).pipe(schema).parse(value);
+}
+
+function rejectUnsafeRecord(value: unknown, context: RefinementCtx): void {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    context.addIssue({ code: "custom", message: "Expected a plain object" });
     return;
   }
-  for (const key of Object.keys(value)) {
-    if (!forbiddenOwnKeys.has(key)) continue;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== null && prototype !== Object.prototype) {
     context.addIssue({
       code: "custom",
-      path: [key],
+      message: "Custom prototypes are not allowed",
+    });
+  }
+  for (const key of Reflect.ownKeys(value))
+    rejectUnsafeProperty(value, key, context);
+}
+
+function rejectUnsafeProperty(
+  value: object,
+  key: PropertyKey,
+  context: RefinementCtx,
+): void {
+  const path = [typeof key === "symbol" ? key.toString() : key];
+  if (typeof key === "string" && forbiddenOwnKeys.has(key)) {
+    context.addIssue({
+      code: "custom",
+      path,
       message: `Property '${key}' is not allowed`,
     });
+    return;
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (typeof key !== "string" || !descriptor?.enumerable) {
+    context.addIssue({
+      code: "custom",
+      path,
+      message: "Property is not enumerable",
+    });
+    return;
+  }
+  if (!("value" in descriptor)) {
+    context.addIssue({
+      code: "custom",
+      path,
+      message: "Accessors are not allowed",
+    });
+  }
+}
+
+function rejectUnsafeOptions(value: unknown, context: RefinementCtx): void {
+  rejectUnsafeRecord(value, context);
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return;
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor && "value" in descriptor && descriptor.value === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [typeof key === "symbol" ? key.toString() : key],
+        message: "Present write options cannot be undefined",
+      });
+    }
   }
 }
 

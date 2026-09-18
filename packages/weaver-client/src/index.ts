@@ -52,6 +52,7 @@ export type {
   WriteOptions,
   WriteResult,
 } from "./transport";
+export { effectiveValidationOptionsSchema } from "./transport";
 export type { NamespaceClientDeps } from "./typed-namespace-client";
 export { createTypedNamespaceClient } from "./typed-namespace-client";
 export type {

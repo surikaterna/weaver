@@ -1,10 +1,11 @@
 import { weaverErrorSchema } from "@weaver-conf/config-types";
 import { z } from "zod";
+import { serializeHttpJsonValue } from "./http-json-value";
 import { fetchWithRetry, type RetryOptions } from "./http-retry";
 import type { TransportError } from "./http-transport-types";
 
 const serverErrorSchema = weaverErrorSchema.strict();
-const responseEnvelopeSchema = z
+const legacyResponseEnvelopeSchema = z
   .strictObject({
     data: z.unknown(),
     meta: z
@@ -24,6 +25,33 @@ const responseEnvelopeSchema = z
       });
     }
   });
+const validatedResponseEnvelopeSchema = z
+  .strictObject({
+    data: z.unknown(),
+    meta: z.strictObject({
+      revision: z.string(),
+      timestamp: z.string(),
+    }),
+    error: serverErrorSchema.optional(),
+  })
+  .superRefine((envelope, context) => {
+    if (!Object.hasOwn(envelope, "data")) {
+      context.addIssue({
+        code: "custom",
+        message: "Response envelopes must contain data",
+        path: ["data"],
+      });
+    }
+    if (envelope.error !== undefined && envelope.data !== null) {
+      context.addIssue({
+        code: "custom",
+        message: "Error responses must contain null data",
+        path: ["data"],
+      });
+    }
+  });
+const mediaParameterPattern =
+  /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+\s*=\s*(?:[!#$%&'*+\-.^_`|~0-9A-Za-z]+|"(?:[\t !#-[\]-~]|\\[\t !-~])*")$/;
 
 export type HttpServerError = z.infer<typeof serverErrorSchema>;
 
@@ -54,7 +82,7 @@ export class HttpResponseContractError extends Error {
 }
 
 export interface ValidatedRequestOptions<T> {
-  readonly acceptedStatuses?: ReadonlySet<number> | undefined;
+  readonly dataStatuses: ReadonlySet<number>;
   readonly headers?: Record<string, string> | undefined;
   readonly mapServerError?: ((error: HttpServerError) => T) | undefined;
 }
@@ -117,23 +145,19 @@ async function requestEnvelope(
   body?: unknown,
   requestHeaders?: Record<string, string>,
 ) {
+  const serializedBody =
+    body === undefined ? undefined : (JSON.stringify(body) ?? undefined);
   const response = await fetchResponse(
     options,
     method,
     path,
-    body,
+    serializedBody,
     requestHeaders,
   );
-  let rawResponse: unknown;
+  const rawResponse = await parseResponseJson(response, path, options.onError);
+  let envelope: z.infer<typeof legacyResponseEnvelopeSchema>;
   try {
-    rawResponse = await response.json();
-  } catch (error) {
-    reportParseError(error, response.status, options.onError);
-    throw new Error(`Failed to parse response from ${path}`);
-  }
-  let envelope: z.infer<typeof responseEnvelopeSchema>;
-  try {
-    envelope = responseEnvelopeSchema.parse(rawResponse);
+    envelope = legacyResponseEnvelopeSchema.parse(rawResponse);
   } catch (error) {
     reportParseError(error, response.status, options.onError);
     throw error;
@@ -142,6 +166,64 @@ async function requestEnvelope(
     return rejectUnexpectedStatus(options, response, path);
   }
   return { response, envelope };
+}
+
+async function requestValidatedEnvelope(
+  options: HttpRequesterOptions,
+  method: string,
+  path: string,
+  body: unknown,
+  requestHeaders?: Record<string, string>,
+) {
+  const serializedBody =
+    body === undefined ? undefined : serializeHttpJsonValue(body);
+  const response = await fetchResponse(
+    options,
+    method,
+    path,
+    serializedBody,
+    requestHeaders,
+  );
+  requireJsonContentType(options, response, path);
+  const rawResponse = await parseResponseJson(response, path, options.onError);
+  const envelope = parseResponse(
+    validatedResponseEnvelopeSchema,
+    rawResponse,
+    response.status,
+    options.onError,
+  );
+  return { response, envelope };
+}
+
+async function parseResponseJson(
+  response: Response,
+  path: string,
+  onError: HttpRequesterOptions["onError"],
+): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch (error) {
+    reportParseError(error, response.status, onError);
+    throw new Error(`Failed to parse response from ${path}`);
+  }
+}
+
+function requireJsonContentType(
+  options: HttpRequesterOptions,
+  response: Response,
+  path: string,
+): void {
+  const contentType = response.headers.get("content-type");
+  if (contentType && isJsonContentType(contentType)) return;
+  rejectUnexpectedStatus(options, response, path);
+}
+
+function isJsonContentType(contentType: string): boolean {
+  const [mediaType, ...parameters] = contentType.split(";");
+  if (mediaType?.trim().toLowerCase() !== "application/json") return false;
+  return parameters.every((parameter) =>
+    mediaParameterPattern.test(parameter.trim()),
+  );
 }
 
 function reportServerError(
@@ -196,14 +278,24 @@ async function requestValidated<T>(
   body?: unknown,
   requestOptions?: ValidatedRequestOptions<T>,
 ): Promise<T> {
-  const { response, envelope } = await requestEnvelope(
+  const { response, envelope } = await requestValidatedEnvelope(
     options,
     method,
     path,
     body,
     requestOptions?.headers,
   );
-  if (response.ok) {
+  const dataStatuses = requestOptions?.dataStatuses;
+  if (!dataStatuses) return rejectUnexpectedStatus(options, response, path);
+  if (response.status >= 200 && response.status < 300) {
+    if (!dataStatuses.has(response.status) || envelope.error !== undefined) {
+      return rejectUnexpectedStatus(options, response, path);
+    }
+  }
+  if (dataStatuses.has(response.status)) {
+    if (envelope.error !== undefined) {
+      return rejectUnexpectedStatus(options, response, path);
+    }
     return parseResponse(
       responseSchema,
       envelope.data,
@@ -224,22 +316,14 @@ async function requestValidated<T>(
     }
     throw new HttpServerResponseError(envelope.error, response.status);
   }
-  if (!requestOptions?.acceptedStatuses?.has(response.status)) {
-    return rejectUnexpectedStatus(options, response, path);
-  }
-  return parseResponse(
-    responseSchema,
-    envelope.data,
-    response.status,
-    options.onError,
-  );
+  return rejectUnexpectedStatus(options, response, path);
 }
 
 function fetchResponse(
   options: HttpRequesterOptions,
   method: string,
   path: string,
-  body?: unknown,
+  serializedBody?: string,
   requestHeaders?: Record<string, string>,
 ): Promise<Response> {
   return fetchWithRetry(
@@ -247,7 +331,7 @@ function fetchResponse(
     {
       method,
       headers: { ...options.buildHeaders(), ...requestHeaders },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(serializedBody !== undefined ? { body: serializedBody } : {}),
     },
     {
       ...options,
