@@ -1,5 +1,6 @@
 import {
   fragmentSchemaRegistrationRequestSchema,
+  registeredEffectiveValidationRequestSchema,
   serviceSchemaRegistrationRequestSchema,
 } from "@weaver-conf/config-types";
 import { z } from "zod";
@@ -33,3 +34,22 @@ export const serviceSchemaRegistrationBodySchema =
 /** POST /v1/admin/schemas/fragments body */
 export const fragmentSchemaRegistrationBodySchema =
   fragmentSchemaRegistrationRequestSchema;
+
+export const registeredObjectWriteBodySchema = z
+  .strictObject({ value: z.unknown() })
+  .refine((data) => "value" in data, {
+    message: "Missing required field 'value'",
+    path: ["value"],
+  });
+
+export const registeredPathPatchBodySchema = z
+  .strictObject({ value: z.unknown() })
+  .refine((data) => "value" in data, {
+    message: "Missing required field 'value'",
+    path: ["value"],
+  });
+
+export const registeredEffectiveValidationQuerySchema =
+  registeredEffectiveValidationRequestSchema
+    .pick({ environment: true, scope: true })
+    .strict();
