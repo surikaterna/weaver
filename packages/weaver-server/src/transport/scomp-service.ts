@@ -1,6 +1,16 @@
 import { createScompService } from "@scompr/core";
+import {
+  registeredEffectiveValidationRequestSchema,
+  registeredEffectiveValidationResponseSchema,
+  registeredObjectWriteRequestSchema,
+  registeredObjectWriteResponseSchema,
+  registeredPathPatchRequestSchema,
+  registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
+} from "@weaver-conf/config-types";
 import { WeaverConfig } from "@weaver-conf/transport-scomp";
 import type {
+  EffectiveValidationContext,
   WeaverConfigService,
   WriteContext,
 } from "../core/config-service-types";
@@ -90,11 +100,60 @@ export function createWeaverScompService(deps: ScompServiceDeps) {
     },
 
     async fetchSchemas(_input) {
-      return { schemas: schemaRegistry.listAll() };
+      return registeredSchemasResponseSchema.parse({
+        schemas: schemaRegistry.listAll(),
+      });
     },
 
     async registerSchema(input) {
       return schemaRegistry.register(input);
+    },
+
+    async setRegisteredObject(input) {
+      const request = registeredObjectWriteRequestSchema.parse(input);
+      const writeOpts: WriteContext = {
+        ...(request.environment ? { environment: request.environment } : {}),
+        ...(request.ifRevision ? { expectedRevision: request.ifRevision } : {}),
+      };
+      const response = await configService.setRegisteredObject(
+        request.layer ?? "platform",
+        request.anchorPath,
+        request.value,
+        { ...writeOpts, schemaRegistry },
+      );
+      return registeredObjectWriteResponseSchema.parse(response);
+    },
+
+    async patchRegisteredPath(input) {
+      const request = registeredPathPatchRequestSchema.parse(input);
+      const writeOpts: WriteContext = {
+        ...(request.environment ? { environment: request.environment } : {}),
+        ...(request.ifRevision ? { expectedRevision: request.ifRevision } : {}),
+      };
+      const response = await configService.patchRegisteredPath(
+        request.layer ?? "platform",
+        request.path,
+        request.value,
+        { ...writeOpts, schemaRegistry },
+      );
+      return registeredPathPatchResponseSchema.parse(response);
+    },
+
+    async validateRegisteredEffective(input) {
+      const request = registeredEffectiveValidationRequestSchema.parse(input);
+      const scopePath = request.scope
+        ? parseScopeQuery(request.scope)
+        : undefined;
+      const context: EffectiveValidationContext = {
+        schemaRegistry,
+        ...(request.environment ? { environment: request.environment } : {}),
+        ...(scopePath ? { scopePath } : {}),
+      };
+      const response = await configService.validateRegisteredEffective(
+        request.anchorPath,
+        context,
+      );
+      return registeredEffectiveValidationResponseSchema.parse(response);
     },
 
     async *subscribe(_input) {

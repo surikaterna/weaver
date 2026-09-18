@@ -13,12 +13,15 @@ function route(name) {
 
 function createTestProvider(id, layer, entries, writable = true) {
   let data = JSON.parse(JSON.stringify(entries));
+  let writeCalls = 0;
   return {
     id,
     layer,
     writable,
+    get writeCalls() { return writeCalls; },
     async load() { return { entries: JSON.parse(JSON.stringify(data)) }; },
     async write(key, value) {
+      writeCalls += 1;
       deepSet(data, key, value);
       return { success: true };
     },
@@ -109,12 +112,98 @@ describe("createWeaverScompService", () => {
     const expected = [
       "resolveAll", "get", "getNamespace", "inspect", "set", "setMany",
       "remove", "listScopes", "listScopeValues", "fetchSchemas",
-      "registerSchema", "subscribe",
+      "registerSchema", "setRegisteredObject", "patchRegisteredPath",
+      "validateRegisteredEffective", "subscribe",
     ];
     for (const name of expected) {
       expect(routes.includes(route(name))).toBeTruthy();
     }
     expect(routes.length).toBe(expected.length);
+  });
+
+  test("registered handlers delegate once and preserve anchor objects", async () => {
+    const provider = createTestProvider("p1", "platform", {});
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "default" });
+    const service = createWeaverScompService(buildScompDeps(svc));
+    const schema = {
+      type: "object",
+      properties: {
+        db: {
+          type: "object",
+          properties: { host: { type: "string" }, port: { type: "integer" } },
+          required: ["host", "port"],
+        },
+      },
+      required: ["db"],
+    };
+    await service.router[route("registerSchema")].handler({
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema,
+      fragmentSlots: [],
+    });
+
+    const write = await service.router[route("setRegisteredObject")].handler({
+      anchorPath: "/checkout",
+      value: { db: { host: "localhost", port: 5432 } },
+      layer: "platform",
+    });
+    const patch = await service.router[route("patchRegisteredPath")].handler({
+      path: "/checkout/db/host",
+      value: "db.internal",
+      layer: "platform",
+    });
+    const validation = await service.router[route("validateRegisteredEffective")].handler({
+      anchorPath: "/checkout",
+    });
+
+    expect(write.success).toBe(true);
+    expect(patch.success).toBe(true);
+    expect(validation).toEqual({ valid: true, errors: [] });
+    expect(provider.writeCalls).toBe(2);
+    expect(await svc.get("checkout")).toEqual({
+      db: { host: "db.internal", port: 5432 },
+    });
+  });
+
+  test("missing anchors fail without provider effects", async () => {
+    const provider = createTestProvider("p1", "platform", {});
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "default" });
+    const service = createWeaverScompService(buildScompDeps(svc));
+
+    const result = await service.router[route("setRegisteredObject")].handler({
+      anchorPath: "/missing",
+      value: {},
+      layer: "platform",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(provider.writeCalls).toBe(0);
+  });
+
+  test("registered handlers reject malformed service responses", async () => {
+    const provider = createTestProvider("p1", "platform", {});
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "default" });
+    let calls = 0;
+    svc.setRegisteredObject = async () => {
+      calls += 1;
+      return { success: "yes" };
+    };
+    const service = createWeaverScompService(buildScompDeps(svc));
+
+    await expect(service.router[route("setRegisteredObject")].handler({
+      anchorPath: "checkout",
+      value: {},
+    })).rejects.toThrow();
+    expect(calls).toBe(0);
+
+    await expect(service.router[route("setRegisteredObject")].handler({
+      anchorPath: "/checkout",
+      value: {},
+    })).rejects.toThrow();
+    expect(calls).toBe(1);
   });
 
   test("resolveAll handler returns snapshot", async () => {

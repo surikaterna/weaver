@@ -1,15 +1,23 @@
 import type { IScompPeer } from "@scompr/core";
-import type {
-  ConfigDelta,
-  ConfigSnapshot,
-  ConfigurationPropertySchema,
-  SchemaRegistrationRequest,
-  SchemaRegistrationResponse,
-  ScopeDefinition,
-  ScopeInstance,
-  WriteResult,
+import {
+  type ConfigDelta,
+  type ConfigSnapshot,
+  type ConfigurationPropertySchema,
+  formatScopePath,
+  type RegisteredEffectiveValidationResponse,
+  registeredEffectiveValidationRequestSchema,
+  registeredEffectiveValidationResponseSchema,
+  registeredObjectWriteRequestSchema,
+  registeredObjectWriteResponseSchema,
+  registeredPathPatchRequestSchema,
+  registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
+  type SchemaRegistrationRequest,
+  type SchemaRegistrationResponse,
+  type ScopeDefinition,
+  type ScopeInstance,
+  type WriteResult,
 } from "@weaver-conf/config-types";
-import { formatScopePath } from "@weaver-conf/config-types";
 import { WeaverConfig } from "./contract";
 
 // --- Transport types (defined locally to avoid depending on weaver-client) ---
@@ -58,6 +66,21 @@ export interface WeaverTransport {
   registerSchema?(
     request: SchemaRegistrationRequest,
   ): Promise<SchemaRegistrationResponse>;
+  setRegisteredObject?(
+    anchorPath: string,
+    value: unknown,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  patchRegisteredPath?(
+    path: string,
+    value: unknown,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  validateRegisteredEffective?(options: {
+    anchorPath: string;
+    environment?: string;
+    scopePath?: ScopeInstance[];
+  }): Promise<RegisteredEffectiveValidationResponse>;
   close(): Promise<void>;
 }
 
@@ -189,12 +212,51 @@ export function createScompTransport(
     },
 
     async fetchSchemas() {
-      const result = await client.fetchSchemas({});
+      const result = registeredSchemasResponseSchema.parse(
+        await client.fetchSchemas({}),
+      );
       return result.schemas;
     },
 
     async registerSchema(request) {
       return client.registerSchema(request);
+    },
+
+    async setRegisteredObject(anchorPath, value, opts?) {
+      const request = registeredObjectWriteRequestSchema.parse({
+        anchorPath,
+        value,
+        ...(opts?.layer != null && { layer: opts.layer }),
+        ...(opts?.environment != null && { environment: opts.environment }),
+        ...(opts?.ifRevision != null && { ifRevision: opts.ifRevision }),
+      });
+      const response = await client.setRegisteredObject(request);
+      return registeredObjectWriteResponseSchema.parse(response);
+    },
+
+    async patchRegisteredPath(path, value, opts?) {
+      const request = registeredPathPatchRequestSchema.parse({
+        path,
+        value,
+        ...(opts?.layer != null && { layer: opts.layer }),
+        ...(opts?.environment != null && { environment: opts.environment }),
+        ...(opts?.ifRevision != null && { ifRevision: opts.ifRevision }),
+      });
+      const response = await client.patchRegisteredPath(request);
+      return registeredPathPatchResponseSchema.parse(response);
+    },
+
+    async validateRegisteredEffective(options) {
+      const scope = buildScopeString(options.scopePath);
+      const request = registeredEffectiveValidationRequestSchema.parse({
+        anchorPath: options.anchorPath,
+        ...(options.environment != null && {
+          environment: options.environment,
+        }),
+        ...(scope != null && { scope }),
+      });
+      const response = await client.validateRegisteredEffective(request);
+      return registeredEffectiveValidationResponseSchema.parse(response);
     },
 
     async close() {
