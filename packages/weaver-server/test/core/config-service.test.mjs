@@ -1,5 +1,6 @@
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { deepSet, deepRemove } from "@weaver-conf/config-engine";
+import { isProtectedConfigPath } from "../../src/core/protected-config-paths.ts";
 
 function createTestProvider(id, layer, entries, writable = true) {
   let data = JSON.parse(JSON.stringify(entries));
@@ -153,5 +154,49 @@ describe("WeaverConfigService read path", () => {
     expect(result.success).toBe(true);
     expect(await svc.get("db.host")).toBe("localhost");
     expect(await svc.get("db.port")).toBe(5432);
+  });
+
+  test("fails closed on malformed protected-root aliases without effects", async () => {
+    const protectedPaths = [
+      "_weaver", "/_weaver", "[_weaver]", "_weaver..registry.schemas",
+      "_weaver.__proto__.registry.schemas", "_weaver[constructor].registry.schemas",
+      "_weaver[prototype].registry.schemas",
+    ];
+    const calls = { writes: 0, removes: 0 };
+    const provider = {
+      id: "counting",
+      layer: "platform",
+      writable: true,
+      async load() {
+        return { entries: Object.fromEntries(protectedPaths.map((key) => [key, "private"])) };
+      },
+      async write() { calls.writes += 1; return { success: true }; },
+      async remove() { calls.removes += 1; return { success: true }; },
+    };
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+    const revision = svc.revision;
+    const deltas = [];
+    svc.onDelta((delta) => deltas.push(delta));
+
+    for (const path of protectedPaths) {
+      expect(isProtectedConfigPath(path)).toBe(true);
+      expect(await svc.get(path)).toBeUndefined();
+      expect(await svc.getNamespace(path)).toEqual({});
+      expect((await svc.inspect(path)).effectiveValue).toBeUndefined();
+      expect((await svc.set("platform", path, "blocked")).success).toBe(false);
+      expect((await svc.remove("platform", path)).success).toBe(false);
+      expect((await svc.setMany("platform", { safe: true, [path]: "blocked" })).success).toBe(false);
+    }
+
+    expect((await svc.resolveAll()).entries).toEqual({});
+    expect(calls).toEqual({ writes: 0, removes: 0 });
+    expect(svc.revision).toBe(revision);
+    expect(deltas).toEqual([]);
+  });
+
+  test("does not classify literal non-root bracket keys as protected", () => {
+    for (const path of ["[_weaver.registry]", "x._weaver", "_weaverish", "[x._weaver]"]) {
+      expect(isProtectedConfigPath(path)).toBe(false);
+    }
   });
 });

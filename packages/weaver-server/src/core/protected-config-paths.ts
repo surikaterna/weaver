@@ -15,6 +15,7 @@ export function protectedConfigMutationError(key: string): WriteResult | null {
 }
 
 export function isProtectedConfigPath(key: string): boolean {
+  if (getLexicalFirstRoot(key) === protectedRoot) return true;
   const firstSegment = getFirstLogicalPathSegment(key);
   return firstSegment === protectedRoot;
 }
@@ -47,4 +48,17 @@ function getFirstLogicalPathSegment(key: string): string | null {
   } catch {
     return null;
   }
+}
+
+function getLexicalFirstRoot(key: string): string {
+  const normalized = key.startsWith("/") ? key.slice(1) : key;
+  if (normalized.startsWith("[")) {
+    const closingBracket = normalized.indexOf("]");
+    return closingBracket < 0
+      ? normalized.slice(1)
+      : normalized.slice(1, closingBracket);
+  }
+
+  const delimiter = normalized.search(/[./[\]]/u);
+  return delimiter < 0 ? normalized : normalized.slice(0, delimiter);
 }
