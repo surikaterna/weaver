@@ -297,18 +297,25 @@ describe("registered HTTP response contracts", () => {
   });
 
   it.each(
-    operations,
-  )("accepts JSON media parameters for $name", async (operation) => {
-    const mock = sequenceFetch([
-      response(
-        operation.status,
-        operation.data,
+    operations.flatMap((operation) =>
+      [
         'Application/JSON; Charset="utf-8"',
-      ),
+        'application/json; profile="a;b"',
+        'application/json; profile="a\\"b"',
+        'Application/JSON \t;\t x \t= \t"" ; x=opaque',
+      ].map((contentType) => ({ contentType, operation })),
+    ),
+  )("accepts JSON media parameters for $operation.name", async ({
+    contentType,
+    operation,
+  }) => {
+    const mock = sequenceFetch([
+      response(operation.status, operation.data, contentType),
     ]);
     await expect(
       operation.run(transportFor(mock.fetch)),
     ).resolves.toBeDefined();
+    expect(mock.calls()).toBe(1);
   });
 
   it.each(
@@ -318,6 +325,18 @@ describe("registered HTTP response contracts", () => {
         "text/html",
         "application/problem+json",
         "application/json;",
+        'application/json; profile="unterminated',
+        'application/json; profile="dangling\\',
+        "application/json; =value",
+        "application/json; profile",
+        "application/json; profile=",
+        "application/json; profile=value;;next=value",
+        "application/json; profile=value value",
+        "application/json; profile=value/other",
+        "application/json; profile=value\\other",
+        'application/json; profile="value"garbage',
+        "application/json; profile=\u0001",
+        "application/json; profile=café",
       ].map((contentType) => ({ contentType, operation })),
     ),
   )("rejects invalid media $contentType for $operation.name", async ({
