@@ -1,5 +1,7 @@
 import { createScompService } from "@scompr/core";
+import { normalizeConfigPath } from "@weaver-conf/config-engine";
 import {
+  createWeaverError,
   registeredEffectiveValidationRequestSchema,
   registeredEffectiveValidationResponseSchema,
   registeredObjectWriteRequestSchema,
@@ -7,11 +9,13 @@ import {
   registeredPathPatchRequestSchema,
   registeredPathPatchResponseSchema,
   registeredSchemasResponseSchema,
+  schemaRegistrationResponseSchema,
 } from "@weaver-conf/config-types";
 import {
   WeaverConfig,
   type WeaverConfigContract,
 } from "@weaver-conf/transport-scomp";
+import type { AuditService } from "../audit/audit-service";
 import type {
   EffectiveValidationContext,
   WeaverConfigService,
@@ -21,14 +25,32 @@ import type { SchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
 import { parseScopeQuery } from "../core/scope-utils";
 import type { ConfigDelta } from "../types/index";
+import {
+  effectiveValidationAuditOutcome,
+  schemaRegistrationAuditContext,
+  schemaRegistrationAuditOutcome,
+  schemaWriteAuditContext,
+  schemaWriteAuditOutcome,
+  scompSchemaAuditIdentity,
+  scompSchemaRegistrationContext,
+} from "./schema-operation-audit";
+import { runSchemaOperation } from "./schema-operation-runner";
 
 export interface ScompServiceDeps {
   configService: WeaverConfigService;
   scopeManager: ScopeManager;
   schemaRegistry: SchemaRegistry;
+  auditService?: AuditService | undefined;
+  defaultEnvironment: string;
 }
 
 export function createWeaverScompService(deps: ScompServiceDeps) {
+  if (!deps.defaultEnvironment) {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "SCOMP defaultEnvironment must not be empty",
+    );
+  }
   return createScompService(WeaverConfig).implement({
     ...readHandlers(deps),
     ...writeHandlers(deps),
@@ -147,7 +169,17 @@ function schemaHandlers(
     },
 
     async registerSchema(input) {
-      return schemaRegistry.register(input);
+      return runSchemaOperation({
+        auditService: deps.auditService,
+        context: schemaRegistrationAuditContext(
+          input,
+          scompSchemaAuditIdentity(),
+        ),
+        execute: () =>
+          schemaRegistry.register(input, scompSchemaRegistrationContext()),
+        parse: (response) => schemaRegistrationResponseSchema.parse(response),
+        outcome: schemaRegistrationAuditOutcome,
+      });
     },
   };
 }
@@ -155,37 +187,92 @@ function schemaHandlers(
 function registeredWriteHandlers(
   deps: ScompServiceDeps,
 ): Pick<WeaverConfigContract, "setRegisteredObject" | "patchRegisteredPath"> {
+  return {
+    ...registeredObjectWriteHandler(deps),
+    ...registeredPathPatchHandler(deps),
+  };
+}
+
+function registeredObjectWriteHandler(
+  deps: ScompServiceDeps,
+): Pick<WeaverConfigContract, "setRegisteredObject"> {
   const { configService, schemaRegistry } = deps;
   return {
     async setRegisteredObject(input) {
-      const request = registeredObjectWriteRequestSchema.parse(input);
-      const writeOpts: WriteContext = {
-        ...(request.environment ? { environment: request.environment } : {}),
-        ...(request.ifRevision ? { expectedRevision: request.ifRevision } : {}),
+      const parsed = registeredObjectWriteRequestSchema.parse(input);
+      const request = {
+        ...parsed,
+        anchorPath: normalizeConfigPath(parsed.anchorPath),
+        environment: parsed.environment ?? deps.defaultEnvironment,
       };
-      const response = await configService.setRegisteredObject(
-        request.layer ?? "platform",
-        request.anchorPath,
-        request.value,
-        { ...writeOpts, schemaRegistry },
-      );
-      return registeredObjectWriteResponseSchema.parse(response);
+      const writeOpts = registeredWriteOptions(request);
+      return runSchemaOperation({
+        auditService: deps.auditService,
+        context: schemaWriteAuditContext(
+          "schema.write.object",
+          request.anchorPath,
+          request.environment,
+          scompSchemaAuditIdentity(),
+        ),
+        execute: () =>
+          configService.setRegisteredObject(
+            request.layer ?? "platform",
+            request.anchorPath,
+            request.value,
+            { ...writeOpts, schemaRegistry },
+          ),
+        parse: (response) =>
+          registeredObjectWriteResponseSchema.parse(response),
+        outcome: (result) =>
+          schemaWriteAuditOutcome(result, "Registered object write failed"),
+      });
     },
+  };
+}
 
+function registeredPathPatchHandler(
+  deps: ScompServiceDeps,
+): Pick<WeaverConfigContract, "patchRegisteredPath"> {
+  const { configService, schemaRegistry } = deps;
+  return {
     async patchRegisteredPath(input) {
-      const request = registeredPathPatchRequestSchema.parse(input);
-      const writeOpts: WriteContext = {
-        ...(request.environment ? { environment: request.environment } : {}),
-        ...(request.ifRevision ? { expectedRevision: request.ifRevision } : {}),
+      const parsed = registeredPathPatchRequestSchema.parse(input);
+      const request = {
+        ...parsed,
+        path: normalizeConfigPath(parsed.path),
+        environment: parsed.environment ?? deps.defaultEnvironment,
       };
-      const response = await configService.patchRegisteredPath(
-        request.layer ?? "platform",
-        request.path,
-        request.value,
-        { ...writeOpts, schemaRegistry },
-      );
-      return registeredPathPatchResponseSchema.parse(response);
+      const writeOpts = registeredWriteOptions(request);
+      return runSchemaOperation({
+        auditService: deps.auditService,
+        context: schemaWriteAuditContext(
+          "schema.patch.path",
+          request.path,
+          request.environment,
+          scompSchemaAuditIdentity(),
+        ),
+        execute: () =>
+          configService.patchRegisteredPath(
+            request.layer ?? "platform",
+            request.path,
+            request.value,
+            { ...writeOpts, schemaRegistry },
+          ),
+        parse: (response) => registeredPathPatchResponseSchema.parse(response),
+        outcome: (result) =>
+          schemaWriteAuditOutcome(result, "Registered path patch failed"),
+      });
     },
+  };
+}
+
+function registeredWriteOptions(request: {
+  readonly environment?: string | undefined;
+  readonly ifRevision?: string | undefined;
+}): WriteContext {
+  return {
+    ...(request.environment ? { environment: request.environment } : {}),
+    ...(request.ifRevision ? { expectedRevision: request.ifRevision } : {}),
   };
 }
 
@@ -195,7 +282,12 @@ function registeredValidationHandler(
   const { configService, schemaRegistry } = deps;
   return {
     async validateRegisteredEffective(input) {
-      const request = registeredEffectiveValidationRequestSchema.parse(input);
+      const parsed = registeredEffectiveValidationRequestSchema.parse(input);
+      const request = {
+        ...parsed,
+        anchorPath: normalizeConfigPath(parsed.anchorPath),
+        environment: parsed.environment ?? deps.defaultEnvironment,
+      };
       const scopePath = request.scope
         ? parseScopeQuery(request.scope)
         : undefined;
@@ -204,11 +296,23 @@ function registeredValidationHandler(
         ...(request.environment ? { environment: request.environment } : {}),
         ...(scopePath ? { scopePath } : {}),
       };
-      const response = await configService.validateRegisteredEffective(
-        request.anchorPath,
-        context,
-      );
-      return registeredEffectiveValidationResponseSchema.parse(response);
+      return runSchemaOperation({
+        auditService: deps.auditService,
+        context: schemaWriteAuditContext(
+          "schema.validate.effective",
+          request.anchorPath,
+          request.environment,
+          scompSchemaAuditIdentity(),
+        ),
+        execute: () =>
+          configService.validateRegisteredEffective(
+            request.anchorPath,
+            context,
+          ),
+        parse: (response) =>
+          registeredEffectiveValidationResponseSchema.parse(response),
+        outcome: effectiveValidationAuditOutcome,
+      });
     },
   };
 }

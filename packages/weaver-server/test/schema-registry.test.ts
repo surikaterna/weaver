@@ -75,7 +75,6 @@ describe("SchemaRegistry", () => {
       providerId: "lynx",
       owner: { name: "Lynx", contact: "lynx@example.com" },
       schemaVersion: "1.2.3",
-      audit: { subject: "svc:lynx", actor: "api" },
     });
     expect(await registry.getSchema("lynx", "default")).toEqual({
       type: "object",
@@ -219,62 +218,38 @@ describe("SchemaRegistry", () => {
   });
 
   it("persists and hydrates registry metadata under the protected internal root", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {},
+    });
     const persistentConfigService = await createWeaverConfigService({
-      providers: [
-        createInMemoryStorageProvider({
-          id: "platform",
-          layer: "platform",
-          initialEntries: {},
-        }),
-      ],
+      providers: [provider],
       environment: "default",
     });
 
     const registry = await createPersistentSchemaRegistry({
       configService: persistentConfigService,
     });
-    await registry.register(serviceRegistration(), { actor: "api" });
-
-    expect(
-      await persistentConfigService.get("_weaver.registry.schemas"),
-    ).toEqual({
-      environments: {
-        default: {
-          schemas: {
-            "/lynx": {
-              kind: "service",
-              schema: { type: "object" },
-              metadata: {
-                serviceId: "lynx",
-                servicePath: "/lynx",
-                environment: "default",
-                providerId: "lynx",
-                owner: { name: "Lynx", contact: "lynx@example.com" },
-                schemaVersion: "1.2.3",
-                audit: { actor: "api" },
-              },
-            },
-          },
-          slots: {
-            "/lynx/plugins": {
-              serviceId: "lynx",
-              servicePath: "/lynx",
-              slotPath: "/plugins",
-              canonicalSlotPath: "/lynx/plugins",
-              environment: "default",
-              providerId: "lynx",
-              owner: { name: "Lynx", contact: "lynx@example.com" },
-              accepts: "object",
-              schemaVersion: "1.2.3",
-              audit: { actor: "api" },
-            },
-          },
-        },
-      },
+    await registry.register(serviceRegistration(), {
+      actor: "api",
+      subject: "svc:lynx",
     });
 
+    expect(await persistentConfigService.get("_weaver.registry.schemas")).toBe(
+      undefined,
+    );
+    const persisted = JSON.stringify((await provider.load()).entries);
+    expect(persisted).toContain("lynx@example.com");
+    expect(persisted).not.toContain("subject");
+    expect(persisted).not.toContain('"audit"');
+
+    const restartedConfigService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+    });
     const hydrated = await createPersistentSchemaRegistry({
-      configService: persistentConfigService,
+      configService: restartedConfigService,
     });
     expect((await hydrated.register(fragmentRegistration())).success).toBe(
       true,
