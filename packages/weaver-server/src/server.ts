@@ -84,7 +84,12 @@ export async function startWeaverServerInternal(
   const bootstrapResult = await resolveBootstrap(config);
   const configService = await initializeConfigService(config, bootstrapResult);
   try {
-    const runtime = await createServerRuntime(config, configService, health);
+    const runtime = await createServerRuntime(
+      config,
+      configService,
+      health,
+      bootstrapResult.providers.length,
+    );
     registerShutdown(
       runtime,
       health,
@@ -119,6 +124,7 @@ async function createServerRuntime(
   config: ResolvedOptions,
   configService: ConfigService,
   health: ReturnType<typeof createHealthEndpoints>,
+  configuredProviderCount: number,
 ): Promise<ServerRuntime> {
   const auth = createServerAuth(config);
   const restAdapter = await createConfiguredRestAdapter(
@@ -141,7 +147,7 @@ async function createServerRuntime(
     });
     health.setDegradedInfo({
       degradedProviders: configService.degradedProviders,
-      totalProviders: configService.providers.length,
+      totalProviders: configuredProviderCount,
     });
     health.setReady(true);
     return { ...auth, server, sseAdapter };

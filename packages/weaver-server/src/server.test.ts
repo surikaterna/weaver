@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ConfigurationStorageProvider } from "@weaver-conf/config-types";
 import { createInMemoryStorageProvider } from "./providers/index";
 import { startWeaverServer, startWeaverServerInternal } from "./server";
 
@@ -55,6 +56,29 @@ function readEnvelopeValue(body: unknown): unknown {
   return data.value;
 }
 
+function createFailingProvider(id: string): ConfigurationStorageProvider {
+  return {
+    id,
+    layer: "platform",
+    writable: true,
+    load: async () => {
+      throw new Error(`${id} unavailable`);
+    },
+    write: async () => ({ success: true }),
+    remove: async () => ({ success: true }),
+  };
+}
+
+async function startWithProviders(
+  providers: ConfigurationStorageProvider[],
+  onDispose: () => void,
+) {
+  return startWeaverServerInternal({ port: 0 }, async () => ({
+    providers,
+    dispose: async () => onDispose(),
+  }));
+}
+
 describe("Weaver server auth gate", () => {
   it("rejects unauthenticated writes when JWT auth is enabled", async () => {
     const server = await startWeaverServer({
@@ -104,6 +128,19 @@ describe("Weaver server error handling", () => {
 
       expect(response.status).toBe(400);
       expect(body).toEqual({ error: "invalid request body" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("preserves hostile HTTP query keys for explicit route rejection", async () => {
+    const server = await startWeaverServer({ port: 0 });
+
+    try {
+      const response = await fetch(
+        `http://localhost:${server.port}/v1/admin/schemas?__proto__=value`,
+      );
+      expect(response.status).toBe(400);
     } finally {
       await server.close();
     }
@@ -382,5 +419,58 @@ describe("Weaver server bootstrap", () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+describe("Weaver server provider health", () => {
+  it.each([
+    {
+      name: "mixed providers",
+      providers: [
+        createInMemoryStorageProvider({ id: "healthy", layer: "platform" }),
+        createFailingProvider("failed"),
+      ],
+      status: 200,
+      body: { status: "degraded", degradedProviders: ["failed"] },
+    },
+    {
+      name: "all failed providers",
+      providers: [
+        createFailingProvider("first"),
+        createFailingProvider("second"),
+      ],
+      status: 503,
+      body: {
+        status: "unavailable",
+        degradedProviders: ["first", "second"],
+      },
+    },
+    {
+      name: "all healthy providers",
+      providers: [
+        createInMemoryStorageProvider({ id: "first", layer: "platform" }),
+        createInMemoryStorageProvider({ id: "second", layer: "tenant" }),
+      ],
+      status: 200,
+      body: { status: "ok" },
+    },
+  ])("reports $name from configured cardinality", async ({
+    providers,
+    status,
+    body,
+  }) => {
+    let disposeCalls = 0;
+    const server = await startWithProviders(providers, () => {
+      disposeCalls += 1;
+    });
+
+    try {
+      const response = await fetch(`http://localhost:${server.port}/readyz`);
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject(body);
+    } finally {
+      await server.close();
+    }
+    expect(disposeCalls).toBe(1);
   });
 });
