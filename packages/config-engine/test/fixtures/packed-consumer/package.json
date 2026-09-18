@@ -1,0 +1,10 @@
+{
+  "name": "config-engine-packed-consumer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check:cjs": "node ./consumer.cjs",
+    "check:esm": "node ./consumer.mjs",
+    "check:types": "tsc --noEmit"
+  }
+}

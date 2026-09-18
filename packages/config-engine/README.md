@@ -77,7 +77,7 @@ import { qualifyKey, validateKeyFormat, deriveNamespace } from "@weaver-conf/con
 
 qualifyKey("app.vesselView", "map.defaultZoom"); // "app.vesselView.map.defaultZoom"
 validateKeyFormat("app.vesselView.map.defaultZoom"); // { valid: true }
-deriveNamespace("@weaver-conf/vessel-view-plugin"); // "weaver.vesselView"
+deriveNamespace("@weaver-conf/vessel-view-plugin"); // "weaverConf.vesselView"
 ```
 
 ## API Reference
@@ -85,15 +85,16 @@ deriveNamespace("@weaver-conf/vessel-view-plugin"); // "weaver.vesselView"
 | Export | Description |
 |---|---|
 | `deepMerge(base, override)` | Deep merge two config objects |
+| `deriveContractFromPackageJson(packageJson)` | Derive plugin contract metadata from package metadata |
 | `resolveConfiguration(stack)` | Resolve a layer stack into merged entries + provenance |
 | `inspectKey(stack, key)` | Inspect a key's value across all layers |
 | `createSchemaRegistry()` | Create an incremental schema registry |
 | `composeConfigurationSchemas(declarations)` | One-shot schema composition |
 | `qualifyKey(namespace, relativeKey)` | Join namespace + key with dot separator |
-| `validateKeyFormat(key)` | Validate 3-5 segment camelCase key format |
+| `validateKeyFormat(key)` | Validate a bracket-aware key with one or more alphanumeric segments |
 | `deriveNamespace(pluginId)` | Derive namespace from package/plugin ID |
-| `extractNamespace(fqKey)` | Extract first two segments as namespace |
 | `generateJsonSchema(schemas)` | Generate a JSON Schema document from property schemas |
+| `generateZodSchemaSource(schemas)` | Generate TypeScript source containing Zod schemas |
 
 ## License
 
