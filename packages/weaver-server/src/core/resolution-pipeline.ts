@@ -14,11 +14,16 @@ import { isConfigMount, isSecretReference } from "@weaver-conf/config-types";
 
 export interface ResolutionPipeline {
   /** Resolve a single keyed value through mounts then secrets. */
-  resolveValue(key: string, rawValue: unknown): unknown;
+  resolveValue(
+    key: string,
+    rawValue: unknown,
+    resolutionState?: Record<string, unknown>,
+  ): unknown;
   /** Resolve all markers in an entries object recursively. */
   resolveEntries(
     entries: Record<string, unknown>,
     prefix?: string,
+    resolutionState?: Record<string, unknown>,
   ): Record<string, unknown>;
   /** Rebuild internal mount map after state changes. */
   rebuildMountMap(): void;
@@ -55,12 +60,18 @@ export async function createResolutionPipeline(
     mountMap = buildMountMap(getBaseEntries());
   }
 
-  function resolveValue(key: string, rawValue: unknown): unknown {
+  function resolveValue(
+    key: string,
+    rawValue: unknown,
+    resolutionState?: Record<string, unknown>,
+  ): unknown {
     let resolvedKey = key;
+    const state = resolutionState ?? getMergedState();
+    const activeMountMap = resolutionState ? buildMountMap(state) : mountMap;
 
     if (isConfigMount(rawValue)) {
-      const result = resolveMountedValue(key, mountMap, (k) =>
-        deepGet(getMergedState(), k),
+      const result = resolveMountedValue(key, activeMountMap, (k) =>
+        deepGet(state, k),
       );
       if (!result.ok) return undefined;
       rawValue = result.resolution.value;
@@ -78,13 +89,25 @@ export async function createResolutionPipeline(
   function resolveEntries(
     entries: Record<string, unknown>,
     prefix = "",
+    resolutionState?: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const state = resolutionState ?? getMergedState();
+    const activeMountMap = resolutionState ? buildMountMap(state) : mountMap;
+    return resolveEntryObject(entries, prefix, state, activeMountMap);
+  }
+
+  function resolveEntryObject(
+    entries: Record<string, unknown>,
+    prefix: string,
+    state: Record<string, unknown>,
+    activeMountMap: ReadonlyMap<string, string>,
   ): Record<string, unknown> {
     const result: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(entries)) {
       const fullKey = prefix ? `${prefix}.${k}` : k;
       if (isConfigMount(v)) {
-        const mountResult = resolveMountedValue(fullKey, mountMap, (mk) =>
-          deepGet(getMergedState(), mk),
+        const mountResult = resolveMountedValue(fullKey, activeMountMap, (mk) =>
+          deepGet(state, mk),
         );
         if (!mountResult.ok) {
           result[k] = undefined;
@@ -103,7 +126,12 @@ export async function createResolutionPipeline(
       } else if (isSecretReference(v)) {
         result[k] = secretResolver?.getResolved(fullKey) ?? v;
       } else if (v !== null && typeof v === "object" && !Array.isArray(v)) {
-        result[k] = resolveEntries(v as Record<string, unknown>, fullKey);
+        result[k] = resolveEntryObject(
+          v as Record<string, unknown>,
+          fullKey,
+          state,
+          activeMountMap,
+        );
       } else {
         result[k] = v;
       }

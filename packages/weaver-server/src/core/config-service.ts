@@ -23,12 +23,10 @@ import type {
   WriteContext,
 } from "./config-service-types";
 import {
-  filterProtectedConfigEntries,
-  filterProtectedConfigScopes,
   isProtectedConfigPath,
   protectedConfigMutationError,
 } from "./protected-config-paths";
-import { inspectPublicConfig } from "./public-config-inspection";
+import { publicConfigView } from "./public-config-inspection";
 import { createResolutionPipeline } from "./resolution-pipeline";
 import {
   buildScopePathString,
@@ -288,14 +286,14 @@ export async function createWeaverConfigService(
 
   updateRevision();
 
-  // --- Mount + Secret resolution pipeline ---
   const pipeline = await createResolutionPipeline({
-    getMergedState: () => getMergedState(),
-    getBaseEntries,
+    getMergedState: () => publicConfigView.entries(getMergedState()),
+    getBaseEntries: () => publicConfigView.entries(getBaseEntries()),
     secretBackend: options.secretBackend,
   });
 
   function fireDelta(delta: ConfigDelta): void {
+    if (!publicConfigView.includesDelta(delta)) return;
     for (const handler of deltaHandlers) {
       handler(delta);
     }
@@ -318,7 +316,7 @@ export async function createWeaverConfigService(
       scopePath?: ScopeInstance[];
     }): Promise<ConfigSnapshot> {
       await warmScopeLayers(opts?.scopePath);
-      const rawEntries = filterProtectedConfigEntries(getBaseEntries());
+      const rawEntries = publicConfigView.entries(getBaseEntries());
       const entries = pipeline.resolveEntries(rawEntries);
       const rawScopes = opts?.scopePath?.length
         ? {
@@ -327,7 +325,12 @@ export async function createWeaverConfigService(
             ),
           }
         : getAllScopes();
-      const scopes = filterProtectedConfigScopes(rawScopes);
+      const scopes = publicConfigView.resolveScopes(
+        rawScopes,
+        rawEntries,
+        (scopeEntries, state) =>
+          pipeline.resolveEntries(scopeEntries, "", state),
+      );
 
       return {
         entries,
@@ -343,11 +346,9 @@ export async function createWeaverConfigService(
     ): Promise<unknown> {
       if (isProtectedConfigPath(key)) return undefined;
       await warmScopeLayers(opts?.scopePath);
-      const state = filterProtectedConfigEntries(
-        getMergedState(opts?.scopePath),
-      );
+      const state = publicConfigView.entries(getMergedState(opts?.scopePath));
       const rawValue = deepGet(state, key);
-      return pipeline.resolveValue(key, rawValue);
+      return pipeline.resolveValue(key, rawValue, state);
     },
 
     async getNamespace(
@@ -356,9 +357,7 @@ export async function createWeaverConfigService(
     ): Promise<Record<string, unknown>> {
       if (isProtectedConfigPath(prefix)) return {};
       await warmScopeLayers(opts?.scopePath);
-      const state = filterProtectedConfigEntries(
-        getMergedState(opts?.scopePath),
-      );
+      const state = publicConfigView.entries(getMergedState(opts?.scopePath));
       const value = deepGet(state, prefix);
       if (
         value !== null &&
@@ -368,6 +367,7 @@ export async function createWeaverConfigService(
         return pipeline.resolveEntries(
           value as Record<string, unknown>,
           prefix,
+          state,
         );
       }
       return {};
@@ -382,7 +382,7 @@ export async function createWeaverConfigService(
         layer: normalizeScopeLayer(layer),
         entries,
       }));
-      return inspectPublicConfig(key, [...baseLayers, ...scopedLayers]);
+      return publicConfigView.inspect(key, [...baseLayers, ...scopedLayers]);
     },
 
     async reloadProvider(providerId: string): Promise<void> {
@@ -472,7 +472,7 @@ export async function createWeaverConfigService(
       pipeline.rebuildMountMap();
       if (pipeline.hasSecretResolver) {
         pipeline
-          .refreshSecrets(getBaseEntries())
+          .refreshSecrets(publicConfigView.entries(getBaseEntries()))
           .catch((err) => logger.error("[config] secret refresh failed:", err));
       }
 
@@ -562,7 +562,7 @@ export async function createWeaverConfigService(
       pipeline.rebuildMountMap();
       if (pipeline.hasSecretResolver) {
         pipeline
-          .refreshSecrets(getBaseEntries())
+          .refreshSecrets(publicConfigView.entries(getBaseEntries()))
           .catch((err) => logger.error("[config] secret refresh failed:", err));
       }
 

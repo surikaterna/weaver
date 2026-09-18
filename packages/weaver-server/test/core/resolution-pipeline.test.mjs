@@ -146,6 +146,61 @@ describe("Resolution pipeline", () => {
     expect(value).toBe(undefined);
   });
 
+  test("mounts cannot disclose protected registry metadata", async () => {
+    const mount = (source) => ({ _weaver: "mount", source });
+    const entries = {
+      _weaver: { registry: { schemas: { private: true } } },
+      direct: mount("_weaver.registry.schemas"),
+      nested: { leak: mount("_weaver.registry.schemas") },
+      chained: mount("direct"),
+      alias: mount("[_weaver].registry.schemas"),
+      ordinary: mount("public.value"),
+      public: { value: "visible" },
+    };
+    const provider = createTestProvider("p1", "platform", entries);
+    const svc = await createWeaverConfigService({
+      providers: [provider],
+      environment: "dev",
+    });
+
+    for (const key of ["direct", "nested.leak", "chained", "alias"]) {
+      expect(await svc.get(key)).toBeUndefined();
+    }
+    expect(await svc.getNamespace("nested")).toEqual({ leak: undefined });
+    expect(await svc.get("ordinary")).toBe("visible");
+    expect((await svc.resolveAll()).entries).toEqual({
+      direct: undefined,
+      nested: { leak: undefined },
+      chained: undefined,
+      alias: undefined,
+      ordinary: "visible",
+      public: { value: "visible" },
+    });
+  });
+
+  test("scoped mounts resolve only against the public merged view", async () => {
+    const platform = createTestProvider("p1", "platform", {
+      _weaver: { registry: { schemas: { private: true } } },
+      public: { value: "visible" },
+    });
+    const tenant = createTestProvider("t1", "tenant:acme", {
+      leak: { _weaver: "mount", source: "_weaver.registry.schemas" },
+      ordinary: { _weaver: "mount", source: "public.value" },
+    });
+    const svc = await createWeaverConfigService({
+      providers: [platform, tenant],
+      environment: "dev",
+    });
+    const scopePath = [{ scopeId: "tenant", value: "acme" }];
+
+    expect(await svc.get("leak", { scopePath })).toBeUndefined();
+    expect(await svc.get("ordinary", { scopePath })).toBe("visible");
+    expect((await svc.resolveAll()).scopes["tenant:acme"]).toEqual({
+      leak: undefined,
+      ordinary: "visible",
+    });
+  });
+
   test("mount map rebuilds after set", async () => {
     const entries = {
       shared: { value: "original" },
