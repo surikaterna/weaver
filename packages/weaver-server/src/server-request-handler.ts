@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import type { AuthContext, AuthMiddleware } from "./auth/auth-middleware";
 import type { HealthEndpoints } from "./health";
+import { parseRequestTarget } from "./request-target";
 import type { RestAdapter, RestRequest } from "./transport/rest-adapter";
 import { corsHeaders } from "./transport/rest-helpers";
 import type { SSEAdapter } from "./transport/sse-adapter";
@@ -18,24 +19,37 @@ export function createRequestHandler(
     res: Response,
   ): Promise<void> {
     const host = req.get("host") ?? "localhost";
-    const url = new URL(
+    const target = parseRequestTarget(
       req.originalUrl ?? req.url,
       `${req.protocol}://${host}`,
     );
+    if (!target.success) {
+      res.status(400).json({ error: "invalid request target" });
+      return;
+    }
+    const { pathname, query, url } = target;
     const method = req.method;
 
-    if (url.pathname === "/healthz" || url.pathname === "/readyz") {
+    if (pathname === "/healthz" || pathname === "/readyz") {
       const result =
-        url.pathname === "/healthz" ? health.healthz() : health.readyz();
+        pathname === "/healthz" ? health.healthz() : health.readyz();
       res.status(result.status).json(result.body);
       return;
     }
-    if (url.pathname === "/v1/events" && method === "GET") {
+    if (pathname === "/v1/events" && method === "GET") {
       await handleSSE(url, req, res, sseAdapter, corsOrigins);
       return;
     }
-    if (url.pathname.startsWith("/v1/")) {
-      await handleRest(req, res, url, method, restAdapter, authMiddleware);
+    if (pathname.startsWith("/v1/")) {
+      await handleRest(
+        req,
+        res,
+        pathname,
+        query,
+        method,
+        restAdapter,
+        authMiddleware,
+      );
       return;
     }
     res.status(404).json({ error: "not found" });
@@ -45,7 +59,8 @@ export function createRequestHandler(
 async function handleRest(
   req: Request,
   res: Response,
-  url: URL,
+  pathname: string,
+  query: Record<string, string>,
   method: string,
   restAdapter: RestAdapter,
   authMiddleware?: AuthMiddleware,
@@ -62,14 +77,14 @@ async function handleRest(
   }
   const restRequest: RestRequest = {
     params: {},
-    query: queryParameters(url),
+    query,
     body: method === "GET" || method === "HEAD" ? undefined : req.body,
     headers,
     ...(authResult ? { authContext: authResult } : {}),
   };
   const response = await restAdapter.handleRequest(
     method,
-    url.pathname,
+    pathname,
     restRequest,
   );
   applyResponse(res, {
@@ -77,10 +92,6 @@ async function handleRest(
     body: response.body,
     headers: response.headers ?? { "content-type": "application/json" },
   });
-}
-
-function queryParameters(url: URL): Record<string, string> {
-  return Object.fromEntries(url.searchParams.entries());
 }
 
 function requestHeaders(req: Request): Record<string, string> {
