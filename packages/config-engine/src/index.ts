@@ -20,8 +20,21 @@ export type { ResolvedConfiguration } from "./layers";
 export { deepMerge } from "./merge";
 // namespace.ts — Namespace utilities
 // path.ts — Bracket-aware path parsing
-export { buildPath } from "./path";
+export { buildPath, parsePath } from "./path";
 export { clearRegexCache, getCachedRegex, isSafePattern } from "./regex-cache";
+export type {
+  DerivedFragmentPath,
+  DerivedServicePath,
+} from "./registration-paths";
+export {
+  assertPublicConfigPath,
+  deriveCanonicalSlotPath,
+  deriveFragmentPath,
+  deriveServicePath,
+  isWeaverInternalPath,
+  normalizeConfigPath,
+  WEAVER_INTERNAL_ROOT,
+} from "./registration-paths";
 // schema-diff.ts — Schema comparison utilities
 export type { BreakingChange } from "./schema-diff";
 export {

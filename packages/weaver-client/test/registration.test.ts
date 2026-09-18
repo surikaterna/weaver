@@ -45,15 +45,108 @@ describe("zodShapeToJsonSchema", () => {
     expect(props.level.type).toBe("string");
     expect(props.level.enum).toEqual(["low", "medium", "high"]);
   });
+
+  it("preserves Zod 4 literal values", () => {
+    expect(zodShapeToJsonSchema({ mode: z.literal("compact") })).toEqual({
+      type: "object",
+      properties: {
+        mode: { type: "string", const: "compact" },
+      },
+      required: ["mode"],
+    });
+  });
+
+  it("keeps nullable fields required and allows null", () => {
+    expect(zodShapeToJsonSchema({ name: z.string().nullable() })).toEqual({
+      type: "object",
+      properties: {
+        name: { type: ["string", "null"] },
+      },
+      required: ["name"],
+    });
+  });
+
+  it("uses optional wrappers only for requiredness", () => {
+    expect(zodShapeToJsonSchema({ name: z.string().optional() })).toEqual({
+      type: "object",
+      properties: {
+        name: { type: "string" },
+      },
+    });
+  });
+
+  it("recursively unwraps nullable and optional wrappers in either order", () => {
+    const result = zodShapeToJsonSchema({
+      outerOptional: z.string().nullable().optional(),
+      outerNullable: z.string().optional().nullable(),
+      nested: z.string().nullable().optional().nullable(),
+    });
+
+    expect(result).toEqual({
+      type: "object",
+      properties: {
+        outerOptional: { type: ["string", "null"] },
+        outerNullable: { type: ["string", "null"] },
+        nested: { type: ["string", "null"] },
+      },
+    });
+  });
+
+  it("rejects unsupported Zod internals instead of weakening the schema", () => {
+    expect(() => zodShapeToJsonSchema({ createdAt: z.date() })).toThrow(
+      'Unsupported Zod schema type "date"',
+    );
+  });
+
+  it("rejects malformed wrapper internals explicitly", () => {
+    const malformed = z.string().optional();
+    Reflect.deleteProperty(malformed._zod.def, "innerType");
+
+    expect(() => zodShapeToJsonSchema({ malformed })).toThrow(
+      "Malformed Zod optional wrapper",
+    );
+  });
+
+  it("rejects excessively deep nested objects before stack exhaustion", () => {
+    let nested: z.ZodType = z.string();
+    for (let depth = 0; depth < 5_000; depth++) {
+      nested = z.object({ next: nested });
+    }
+
+    expect(() => zodShapeToJsonSchema({ nested })).toThrow(
+      "Zod schema traversal depth exceeds 100",
+    );
+  });
+
+  it("rejects cyclic object shapes explicitly", () => {
+    const cyclicShape: Record<string, z.ZodType> = {};
+    const cyclic = z.object(cyclicShape);
+    cyclicShape.self = cyclic;
+
+    expect(() => zodShapeToJsonSchema({ cyclic })).toThrow(
+      "Cyclic Zod schema traversal",
+    );
+  });
+
+  it("rejects obsolete _def-only schema internals", () => {
+    const invokeWithLegacyInternals = () =>
+      Reflect.apply(zodShapeToJsonSchema, undefined, [
+        { legacyOnly: { _def: { type: "string" } } },
+      ]);
+
+    expect(invokeWithLegacyInternals).toThrow(
+      "Unsupported Zod 4 schema internals",
+    );
+  });
 });
 
 describe("registerNamespaces", () => {
   it("calls transport.registerSchema for each definition", async () => {
-    const registered: Array<{ ns: string; schema: Record<string, unknown> }> =
-      [];
+    const registered: string[] = [];
     const transport = {
-      registerSchema: async (ns: string, schema: Record<string, unknown>) => {
-        registered.push({ ns, schema });
+      registerSchema: async (request: { serviceId: string }) => {
+        registered.push(request.serviceId);
+        return { success: true, isNewSchema: true, hasBreakingChanges: false };
       },
     } as unknown as WeaverTransport;
 
@@ -66,7 +159,7 @@ describe("registerNamespaces", () => {
     expect(result.registered).toEqual(["editor", "theme"]);
     expect(result.skipped.length).toBe(0);
     expect(result.errors.length).toBe(0);
-    expect(registered.length).toBe(2);
+    expect(registered).toEqual(["editor", "theme"]);
   });
 
   it("gracefully handles transport without registerSchema", async () => {
@@ -81,9 +174,10 @@ describe("registerNamespaces", () => {
   it("reports errors per-namespace without aborting", async () => {
     let callCount = 0;
     const transport = {
-      registerSchema: async (ns: string) => {
+      registerSchema: async (request: { serviceId: string }) => {
         callCount++;
-        if (ns === "bad") throw new Error("Server rejected");
+        if (request.serviceId === "bad") throw new Error("Server rejected");
+        return { success: true, isNewSchema: true, hasBreakingChanges: false };
       },
     } as unknown as WeaverTransport;
 
@@ -98,5 +192,35 @@ describe("registerNamespaces", () => {
     expect(result.errors.length).toBe(1);
     expect(result.errors[0].namespace).toBe("bad");
     expect(callCount).toBe(3);
+  });
+
+  it("reports non-throwing failed registration responses", async () => {
+    const transport = {
+      registerSchema: async (request: { serviceId: string }) => {
+        if (request.serviceId === "bad") {
+          return {
+            success: false,
+            isNewSchema: false,
+            hasBreakingChanges: false,
+            error: {
+              code: "SCHEMA_CONFLICT" as const,
+              message: "Schema conflict",
+            },
+          };
+        }
+        return { success: true, isNewSchema: true, hasBreakingChanges: false };
+      },
+    } as unknown as WeaverTransport;
+
+    const defs = [
+      defineNamespace("good", { x: z.string() }),
+      defineNamespace("bad", { y: z.number() }),
+    ];
+
+    const result = await registerNamespaces(defs, transport);
+    expect(result.registered).toEqual(["good"]);
+    expect(result.errors).toEqual([
+      { namespace: "bad", error: "Schema conflict" },
+    ]);
   });
 });

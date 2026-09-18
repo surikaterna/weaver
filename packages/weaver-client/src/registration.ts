@@ -1,3 +1,8 @@
+import type {
+  ConfigurationJsonSchemaType,
+  ConfigurationPropertySchema,
+  WeaverError,
+} from "@weaver-conf/config-types";
 import type { ZodRawShape } from "zod";
 import type { NamespaceDefinition } from "./namespace";
 import type { WeaverTransport } from "./transport";
@@ -9,18 +14,37 @@ export interface SchemaRegistrationResult {
   errors: Array<{ namespace: string; error: string }>;
 }
 
+interface ZodTraversalContext {
+  readonly activeSchemas: Set<unknown>;
+  depth: number;
+}
+
+interface InferredZodType {
+  readonly jsonType: ConfigurationPropertySchema;
+  readonly isOptional: boolean;
+}
+
+const MAX_ZOD_TRAVERSAL_DEPTH = 100;
+
 /**
  * Convert a Zod schema shape to a simplified JSON Schema representation.
  * Handles common types via duck-typing on Zod 4 internals.
  */
 export function zodShapeToJsonSchema(
   shape: ZodRawShape,
-): Record<string, unknown> {
-  const properties: Record<string, unknown> = {};
+): ConfigurationPropertySchema {
+  return shapeToJsonSchema(shape, { activeSchemas: new Set(), depth: 0 });
+}
+
+function shapeToJsonSchema(
+  shape: Readonly<Record<string, unknown>>,
+  context: ZodTraversalContext,
+): ConfigurationPropertySchema {
+  const properties: Record<string, ConfigurationPropertySchema> = {};
   const required: string[] = [];
 
   for (const [key, fieldSchema] of Object.entries(shape)) {
-    const { jsonType, isOptional } = inferZodType(fieldSchema);
+    const { jsonType, isOptional } = inferZodType(fieldSchema, context);
     properties[key] = jsonType;
     if (!isOptional) {
       required.push(key);
@@ -34,73 +58,158 @@ export function zodShapeToJsonSchema(
   };
 }
 
-function inferZodType(schema: unknown): {
-  jsonType: Record<string, unknown>;
-  isOptional: boolean;
-} {
-  // SAFETY: duck-typing Zod internals — schema is an opaque Zod type object
-  const s = schema as Record<string, unknown>;
-  let isOptional = false;
-  let current = s;
-
-  // Unwrap optional/nullable wrappers
-  const def = getZodDef(current);
-  if (def && (def.type === "optional" || def.type === "nullable")) {
-    isOptional = true;
-    const inner = def.innerType;
-    if (inner) current = inner as Record<string, unknown>; // SAFETY: Zod innerType is a schema object
-  }
-
-  const innerDef = getZodDef(current);
-  const typeName = innerDef?.type as string | undefined; // SAFETY: Zod def.type is always string if present
-
-  if (typeName === "string")
-    return { jsonType: { type: "string" }, isOptional };
-  if (typeName === "number" || typeName === "float")
-    return { jsonType: { type: "number" }, isOptional };
-  if (typeName === "int") return { jsonType: { type: "integer" }, isOptional };
-  if (typeName === "boolean")
-    return { jsonType: { type: "boolean" }, isOptional };
-  if (typeName === "array") return { jsonType: { type: "array" }, isOptional };
-  if (typeName === "object") {
-    const shape = innerDef?.shape;
-    if (shape && typeof shape === "object") {
-      return {
-        jsonType: zodShapeToJsonSchema(shape as ZodRawShape),
-        isOptional,
-      }; // SAFETY: confirmed shape is object
+function inferZodType(
+  schema: unknown,
+  context: ZodTraversalContext,
+): InferredZodType {
+  return visitZodSchema(schema, context, (def) => {
+    const typeName = getDefinitionType(def);
+    if (typeName === "optional" || typeName === "nullable") {
+      return inferWrappedType(def, typeName, context);
     }
-    return { jsonType: { type: "object" }, isOptional };
-  }
-  if (typeName === "enum") {
-    const entries = innerDef?.entries;
-    if (entries && typeof entries === "object") {
-      return {
-        jsonType: { type: "string", enum: Object.keys(entries as object) },
-        isOptional,
-      }; // SAFETY: entries confirmed as object
-    }
-    return { jsonType: { type: "string" }, isOptional };
-  }
-  if (typeName === "literal") {
-    const value = innerDef?.value;
-    return { jsonType: { type: typeof value, const: value }, isOptional };
-  }
-
-  // Fallback
-  return { jsonType: {}, isOptional };
+    return { jsonType: inferJsonType(def, context), isOptional: false };
+  });
 }
 
-function getZodDef(
-  schema: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  // SAFETY: accessing Zod 4 internal structure
-  const _zod = schema._zod as Record<string, unknown> | undefined;
-  if (_zod?.def) return _zod.def as Record<string, unknown>; // SAFETY: Zod def is always an object
-  // Zod 3 fallback: schema._def
-  const _def = schema._def as Record<string, unknown> | undefined; // SAFETY: Zod 3 internal structure
-  if (_def?.type) return _def;
-  return undefined;
+function inferJsonType(
+  def: Record<string, unknown>,
+  context: ZodTraversalContext,
+): ConfigurationPropertySchema {
+  const typeName = getDefinitionType(def);
+  if (typeName === "string") return { type: "string" };
+  if (typeName === "number" || typeName === "float") return { type: "number" };
+  if (typeName === "int") return { type: "integer" };
+  if (typeName === "boolean") return { type: "boolean" };
+  if (typeName === "array") return { type: "array" };
+  if (typeName === "object") return inferObjectType(def, context);
+  if (typeName === "enum") return inferEnumType(def);
+  if (typeName === "literal") return inferLiteralType(def);
+
+  throw new Error(`Unsupported Zod schema type "${typeName}"`);
+}
+
+function visitZodSchema<T>(
+  schema: unknown,
+  context: ZodTraversalContext,
+  visit: (def: Record<string, unknown>) => T,
+): T {
+  if (context.depth >= MAX_ZOD_TRAVERSAL_DEPTH) {
+    throw new Error("Zod schema traversal depth exceeds 100");
+  }
+  if (context.activeSchemas.has(schema)) {
+    throw new Error("Cyclic Zod schema traversal");
+  }
+  context.activeSchemas.add(schema);
+  context.depth++;
+  try {
+    return visit(getZodDef(schema));
+  } finally {
+    context.depth--;
+    context.activeSchemas.delete(schema);
+  }
+}
+
+function inferWrappedType(
+  def: Record<string, unknown>,
+  typeName: "optional" | "nullable",
+  context: ZodTraversalContext,
+): InferredZodType {
+  if (!("innerType" in def)) {
+    throw new Error(`Malformed Zod ${typeName} wrapper`);
+  }
+  const inner = inferZodType(def.innerType, context);
+  if (typeName === "optional") return { ...inner, isOptional: true };
+  return { ...inner, jsonType: makeNullable(inner.jsonType) };
+}
+
+function inferObjectType(
+  def: Record<string, unknown>,
+  context: ZodTraversalContext,
+): ConfigurationPropertySchema {
+  const shape = def.shape;
+  if (!isRecord(shape)) throw new Error("Malformed Zod object shape");
+  return shapeToJsonSchema(shape, context);
+}
+
+function inferEnumType(
+  def: Record<string, unknown>,
+): ConfigurationPropertySchema {
+  const entries = def.entries;
+  if (!isRecord(entries)) throw new Error("Malformed Zod enum entries");
+  const values = Object.values(entries);
+  if (values.length === 0) throw new Error("Zod enum must not be empty");
+  return { type: literalSchemaType(values), enum: values };
+}
+
+function inferLiteralType(
+  def: Record<string, unknown>,
+): ConfigurationPropertySchema {
+  const values = def.values;
+  if (!Array.isArray(values) || values.length === 0) {
+    throw new Error("Malformed Zod literal values");
+  }
+  const type = literalSchemaType(values);
+  if (values.length === 1) return { type, const: values[0] };
+  return { type, enum: values };
+}
+
+function literalSchemaType(
+  values: ReadonlyArray<unknown>,
+): ConfigurationPropertySchema["type"] {
+  const types = [...new Set(values.map(jsonSchemaTypeForLiteral))];
+  const [first] = types;
+  if (!first) throw new Error("Zod literal values must not be empty");
+  return types.length === 1 ? first : types;
+}
+
+function jsonSchemaTypeForLiteral(value: unknown): ConfigurationJsonSchemaType {
+  if (value === null) return "null";
+  if (typeof value === "string") return "string";
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Number.isInteger(value) ? "integer" : "number";
+  }
+  throw new Error("Unsupported Zod literal value");
+}
+
+function makeNullable(
+  schema: ConfigurationPropertySchema,
+): ConfigurationPropertySchema {
+  const currentTypes = Array.isArray(schema.type) ? schema.type : [schema.type];
+  if (currentTypes.includes("null")) return schema;
+  const type: ReadonlyArray<ConfigurationJsonSchemaType> = [
+    ...currentTypes,
+    "null",
+  ];
+  if (Object.hasOwn(schema, "const")) {
+    const { const: literalValue, ...withoutConst } = schema;
+    return { ...withoutConst, type, enum: [literalValue, null] };
+  }
+  if (schema.enum) return { ...schema, type, enum: [...schema.enum, null] };
+  return { ...schema, type };
+}
+
+function getZodDef(schema: unknown): Record<string, unknown> {
+  if (!isRecord(schema)) throw new Error("Malformed Zod schema object");
+  const zodInternals = schema._zod;
+  if (!isRecord(zodInternals)) {
+    throw new Error("Unsupported Zod 4 schema internals");
+  }
+  if (!isRecord(zodInternals.def)) {
+    throw new Error("Malformed Zod 4 schema definition");
+  }
+  return zodInternals.def;
+}
+
+function getDefinitionType(def: Record<string, unknown>): string {
+  if (typeof def.type !== "string") {
+    throw new Error("Malformed Zod schema type");
+  }
+  return def.type;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 export async function registerNamespaces(
@@ -121,7 +230,20 @@ export async function registerNamespaces(
   for (const def of definitions) {
     try {
       const jsonSchema = zodShapeToJsonSchema(def.schema.shape);
-      await transport.registerSchema(def.prefix, jsonSchema);
+      const response = await transport.registerSchema({
+        serviceId: def.prefix,
+        environment: "default",
+        owner: { name: def.prefix, contact: "unknown" },
+        schema: jsonSchema,
+        fragmentSlots: [],
+      });
+      if (response.success === false) {
+        result.errors.push({
+          namespace: def.prefix,
+          error: schemaRegistrationErrorMessage(response.error),
+        });
+        continue;
+      }
       result.registered.push(def.prefix);
     } catch (e) {
       result.errors.push({
@@ -132,4 +254,10 @@ export async function registerNamespaces(
   }
 
   return result;
+}
+
+function schemaRegistrationErrorMessage(
+  error: WeaverError | undefined,
+): string {
+  return error?.message ?? "Schema registration failed";
 }
