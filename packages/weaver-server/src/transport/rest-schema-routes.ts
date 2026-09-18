@@ -1,3 +1,4 @@
+import { parseCanonicalConfigPath } from "@weaver-conf/config-engine";
 import {
   registeredEffectiveValidationResponseSchema,
   registeredObjectWriteResponseSchema,
@@ -5,7 +6,6 @@ import {
   registeredSchemasResponseSchema,
   type SchemaRegistrationResponse,
   schemaRegistrationResponseSchema,
-  type WriteResult,
 } from "@weaver-conf/config-types";
 import type { z } from "zod";
 import type {
@@ -15,16 +15,23 @@ import type {
 } from "../core/config-service";
 import type { SchemaRegistry } from "../core/schema-registry";
 import { parseScopeQuery } from "../core/scope-utils";
-import type { WeaverErrorCode } from "../types/index";
-import { createWeaverError, httpStatusForError } from "../types/index";
+import { createWeaverError } from "../types/index";
 import type { AuthGate } from "./auth-gate";
 import type { RestRequest, RestResponse, RestRoute } from "./rest-adapter";
-import { envelope, errorEnvelope, v1Headers } from "./rest-helpers";
+import {
+  extractExpectedRevision,
+  v1Error,
+  v1Response,
+  writeFailureResponse,
+} from "./rest-route-boundary";
 import {
   fragmentSchemaRegistrationBodySchema,
-  registeredEffectiveValidationQuerySchema,
-  registeredObjectWriteBodySchema,
-  registeredPathPatchBodySchema,
+  parseAdminQuery,
+  parseRegisteredEffectiveMetadata,
+  parseRegisteredEffectiveRequest,
+  parseRegisteredObjectRequest,
+  parseRegisteredPathRequest,
+  parseRegisteredWriteMetadata,
   serviceSchemaRegistrationBodySchema,
 } from "./rest-schemas";
 
@@ -53,30 +60,6 @@ function parseResponse<T>(
   return result.data;
 }
 
-function v1Response<T>(
-  configService: WeaverConfigService,
-  status: number,
-  data: T,
-): RestResponse {
-  const rev = configService.revision;
-  return { status, body: envelope(data, rev), headers: v1Headers(rev) };
-}
-
-function v1Error(
-  configService: WeaverConfigService,
-  code: WeaverErrorCode,
-  message: string,
-  details?: Record<string, unknown>,
-): RestResponse {
-  const rev = configService.revision;
-  const err = createWeaverError(code, message, details);
-  return {
-    status: httpStatusForError(code),
-    body: errorEnvelope(err, rev),
-    headers: v1Headers(rev),
-  };
-}
-
 function unavailable(configService: WeaverConfigService): RestResponse {
   return v1Error(
     configService,
@@ -99,42 +82,71 @@ function canonicalRoutePath(
   return `/${value}`;
 }
 
-function extractExpectedRevision(req: RestRequest): string | undefined {
-  const ifMatch = req.headers["if-match"];
-  if (ifMatch === undefined) return undefined;
-  return ifMatch.replace(/^"|"$/g, "");
-}
-
-function writeContext(req: RestRequest): WriteContext {
-  const expectedRevision = extractExpectedRevision(req);
-  const environment = req.query.env;
+function writeContext(request: {
+  environment?: string | undefined;
+  ifRevision?: string | undefined;
+}): WriteContext {
   return {
-    ...(expectedRevision ? { expectedRevision } : {}),
-    ...(environment ? { environment } : {}),
+    ...(request.ifRevision ? { expectedRevision: request.ifRevision } : {}),
+    ...(request.environment ? { environment: request.environment } : {}),
   };
 }
 
-function writeFailureResponse(
-  configService: WeaverConfigService,
-  fallback: string,
-  result: WriteResult,
-): RestResponse {
-  const error = result.error;
-  const code: WeaverErrorCode =
-    error?.code === "REVISION_CONFLICT"
-      ? "REVISION_CONFLICT"
-      : "VALIDATION_ERROR";
-  const status = code === "REVISION_CONFLICT" ? 409 : httpStatusForError(code);
-  const rev = configService.revision;
-  const details = isRecord(error?.details) ? error.details : undefined;
-  return {
-    status,
-    body: errorEnvelope(
-      createWeaverError(code, error?.message ?? fallback, details),
-      rev,
-    ),
-    headers: v1Headers(rev),
-  };
+const schemaRegistryAdminKey = "_weaver.registry.schemas";
+
+function adminDenied(
+  request: RestRequest,
+  deps: SchemaRouteDeps,
+  operation: "read" | "write",
+): RestResponse | null {
+  const gate = deps.authGate;
+  if (!gate) return null;
+  if (!request.authContext) return authContextRequired(deps.configService);
+  if (!request.authContext.isAdmin) {
+    return v1Error(deps.configService, "FORBIDDEN", "Admin access required");
+  }
+  const context = gate.toAccessContext(request.authContext);
+  if (operation === "read") {
+    return gate.gateRead(context, schemaRegistryAdminKey);
+  }
+  return gate.gateWrite(context, "admin", schemaRegistryAdminKey);
+}
+
+function registeredWriteDenied(
+  request: RestRequest,
+  deps: SchemaRouteDeps,
+  metadata: { readonly layer: string; readonly path: string },
+): RestResponse | null {
+  const gate = deps.authGate;
+  if (!gate) return null;
+  if (!request.authContext) return authContextRequired(deps.configService);
+  const key = parseCanonicalConfigPath(metadata.path).storageKey;
+  return gate.gateWrite(
+    gate.toAccessContext(request.authContext),
+    metadata.layer,
+    key,
+    request.schemaMap?.get(key),
+  );
+}
+
+function registeredReadDenied(
+  request: RestRequest,
+  deps: SchemaRouteDeps,
+  path: string,
+): RestResponse | null {
+  const gate = deps.authGate;
+  if (!gate) return null;
+  if (!request.authContext) return authContextRequired(deps.configService);
+  const key = parseCanonicalConfigPath(path).storageKey;
+  return gate.gateRead(
+    gate.toAccessContext(request.authContext),
+    key,
+    request.schemaMap?.get(key),
+  );
+}
+
+function authContextRequired(configService: WeaverConfigService): RestResponse {
+  return v1Error(configService, "UNAUTHORIZED", "Authentication required");
 }
 
 export function buildSchemaRoutes(deps: SchemaRouteDeps): RestRoute[] {
@@ -153,7 +165,10 @@ function listSchemasRoute(deps: SchemaRouteDeps): RestRoute {
   return {
     method: "GET",
     path: "/v1/admin/schemas",
-    async handler() {
+    async handler(req) {
+      const denied = adminDenied(req, deps, "read");
+      if (denied) return denied;
+      parseAdminQuery(req.query);
       if (!schemaRegistry) return unavailable(configService);
       const response = parseResponse(
         "registered schemas",
@@ -171,6 +186,9 @@ function registerServiceRoute(deps: SchemaRouteDeps): RestRoute {
     method: "POST",
     path: "/v1/admin/schemas/services",
     async handler(req) {
+      const denied = adminDenied(req, deps, "write");
+      if (denied) return denied;
+      parseAdminQuery(req.query);
       if (!schemaRegistry) return unavailable(configService);
       const body = serviceSchemaRegistrationBodySchema.parse(req.body);
       const result = parseResponse(
@@ -190,6 +208,9 @@ function registerFragmentRoute(deps: SchemaRouteDeps): RestRoute {
     method: "POST",
     path: "/v1/admin/schemas/fragments",
     async handler(req) {
+      const denied = adminDenied(req, deps, "write");
+      if (denied) return denied;
+      parseAdminQuery(req.query);
       if (!schemaRegistry) return unavailable(configService);
       const body = fragmentSchemaRegistrationBodySchema.parse(req.body);
       const result = parseResponse(
@@ -209,23 +230,31 @@ function setRegisteredObjectRoute(deps: SchemaRouteDeps): RestRoute {
     method: "PUT",
     path: "/v1/registered/objects/*anchorPath",
     async handler(req) {
+      const metadata = parseRegisteredWriteMetadata(
+        canonicalRoutePath(req.params, "anchorPath"),
+        req.query,
+        extractExpectedRevision(req, { strictQuotes: true }),
+      );
+      const denied = registeredWriteDenied(req, deps, metadata);
+      if (denied) return denied;
       if (!schemaRegistry) return unavailable(configService);
-      const body = registeredObjectWriteBodySchema.parse(req.body);
+      const request = parseRegisteredObjectRequest(metadata, req.body);
       const result = parseResponse(
         "registered object write",
         registeredObjectWriteResponseSchema,
         await configService.setRegisteredObject(
-          req.query.layer ?? "platform",
-          canonicalRoutePath(req.params, "anchorPath"),
-          body.value,
-          { ...writeContext(req), schemaRegistry },
+          request.layer ?? "platform",
+          request.anchorPath,
+          request.value,
+          { ...writeContext(request), schemaRegistry },
         ),
       );
       if (!result.success) {
         return writeFailureResponse(
           configService,
-          "Registered object write failed",
           result,
+          "Registered object write failed",
+          { includeDetails: true },
         );
       }
       return v1Response(configService, 200, result);
@@ -239,23 +268,31 @@ function patchRegisteredPathRoute(deps: SchemaRouteDeps): RestRoute {
     method: "PATCH",
     path: "/v1/registered/paths/*path",
     async handler(req) {
+      const metadata = parseRegisteredWriteMetadata(
+        canonicalRoutePath(req.params, "path"),
+        req.query,
+        extractExpectedRevision(req, { strictQuotes: true }),
+      );
+      const denied = registeredWriteDenied(req, deps, metadata);
+      if (denied) return denied;
       if (!schemaRegistry) return unavailable(configService);
-      const body = registeredPathPatchBodySchema.parse(req.body);
+      const request = parseRegisteredPathRequest(metadata, req.body);
       const result = parseResponse(
         "registered path patch",
         registeredPathPatchResponseSchema,
         await configService.patchRegisteredPath(
-          req.query.layer ?? "platform",
-          canonicalRoutePath(req.params, "path"),
-          body.value,
-          { ...writeContext(req), schemaRegistry },
+          request.layer ?? "platform",
+          request.path,
+          request.value,
+          { ...writeContext(request), schemaRegistry },
         ),
       );
       if (!result.success) {
         return writeFailureResponse(
           configService,
-          "Registered path patch failed",
           result,
+          "Registered path patch failed",
+          { includeDetails: true },
         );
       }
       return v1Response(configService, 200, result);
@@ -269,13 +306,20 @@ function validateRegisteredEffectiveRoute(deps: SchemaRouteDeps): RestRoute {
     method: "GET",
     path: "/v1/registered/effective/*anchorPath",
     async handler(req) {
+      const metadata = parseRegisteredEffectiveMetadata(
+        canonicalRoutePath(req.params, "anchorPath"),
+        req.query,
+      );
+      const denied = registeredReadDenied(req, deps, metadata.anchorPath);
+      if (denied) return denied;
       if (!schemaRegistry) return unavailable(configService);
+      const request = parseRegisteredEffectiveRequest(metadata);
       const validation = parseResponse(
         "registered effective validation",
         registeredEffectiveValidationResponseSchema,
         await configService.validateRegisteredEffective(
-          canonicalRoutePath(req.params, "anchorPath"),
-          effectiveValidationContext(req, schemaRegistry),
+          request.anchorPath,
+          effectiveValidationContext(request, schemaRegistry),
         ),
       );
       return v1Response(
@@ -295,14 +339,16 @@ function registrationContext(req: RestRequest) {
 }
 
 function effectiveValidationContext(
-  req: RestRequest,
+  request: {
+    environment?: string | undefined;
+    scope?: string | undefined;
+  },
   schemaRegistry: SchemaRegistry,
 ): EffectiveValidationContext {
-  const query = registeredEffectiveValidationQuerySchema.parse(req.query);
-  const scopePath = query.scope ? parseScopeQuery(query.scope) : undefined;
+  const scopePath = request.scope ? parseScopeQuery(request.scope) : undefined;
   return {
     schemaRegistry,
-    ...(query.environment ? { environment: query.environment } : {}),
+    ...(request.environment ? { environment: request.environment } : {}),
     ...(scopePath ? { scopePath } : {}),
   };
 }
@@ -317,8 +363,4 @@ function registrationFailure(
     result.error?.message ?? "Schema registration failed",
     result.error?.details,
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
