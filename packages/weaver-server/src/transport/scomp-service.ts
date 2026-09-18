@@ -1,5 +1,7 @@
 import { createScompService } from "@scompr/core";
+import { normalizeConfigPath } from "@weaver-conf/config-engine";
 import {
+  createWeaverError,
   registeredEffectiveValidationRequestSchema,
   registeredEffectiveValidationResponseSchema,
   registeredObjectWriteRequestSchema,
@@ -35,10 +37,16 @@ export interface ScompServiceDeps {
   scopeManager: ScopeManager;
   schemaRegistry: SchemaRegistry;
   auditService?: AuditService | undefined;
-  defaultEnvironment?: string | undefined;
+  defaultEnvironment: string;
 }
 
 export function createWeaverScompService(deps: ScompServiceDeps) {
+  if (!deps.defaultEnvironment) {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "SCOMP defaultEnvironment must not be empty",
+    );
+  }
   return createScompService(WeaverConfig).implement({
     ...readHandlers(deps),
     ...writeHandlers(deps),
@@ -173,7 +181,12 @@ function registeredWriteHandlers(
   const { configService, schemaRegistry } = deps;
   return {
     async setRegisteredObject(input) {
-      const request = registeredObjectWriteRequestSchema.parse(input);
+      const parsed = registeredObjectWriteRequestSchema.parse(input);
+      const request = {
+        ...parsed,
+        anchorPath: normalizeConfigPath(parsed.anchorPath),
+        environment: parsed.environment ?? deps.defaultEnvironment,
+      };
       const writeOpts = registeredWriteOptions(request);
       const response = await configService.setRegisteredObject(
         request.layer ?? "platform",
@@ -186,13 +199,18 @@ function registeredWriteHandlers(
         deps.auditService,
         request,
         result,
-        deps.defaultEnvironment ?? "default",
+        deps.defaultEnvironment,
       );
       return result;
     },
 
     async patchRegisteredPath(input) {
-      const request = registeredPathPatchRequestSchema.parse(input);
+      const parsed = registeredPathPatchRequestSchema.parse(input);
+      const request = {
+        ...parsed,
+        path: normalizeConfigPath(parsed.path),
+        environment: parsed.environment ?? deps.defaultEnvironment,
+      };
       const writeOpts = registeredWriteOptions(request);
       const response = await configService.patchRegisteredPath(
         request.layer ?? "platform",
@@ -205,7 +223,7 @@ function registeredWriteHandlers(
         deps.auditService,
         request,
         result,
-        deps.defaultEnvironment ?? "default",
+        deps.defaultEnvironment,
       );
       return result;
     },
@@ -228,7 +246,12 @@ function registeredValidationHandler(
   const { configService, schemaRegistry } = deps;
   return {
     async validateRegisteredEffective(input) {
-      const request = registeredEffectiveValidationRequestSchema.parse(input);
+      const parsed = registeredEffectiveValidationRequestSchema.parse(input);
+      const request = {
+        ...parsed,
+        anchorPath: normalizeConfigPath(parsed.anchorPath),
+        environment: parsed.environment ?? deps.defaultEnvironment,
+      };
       const scopePath = request.scope
         ? parseScopeQuery(request.scope)
         : undefined;
@@ -247,7 +270,7 @@ function registeredValidationHandler(
         deps.auditService,
         request,
         result,
-        deps.defaultEnvironment ?? "default",
+        deps.defaultEnvironment,
       );
       return result;
     },

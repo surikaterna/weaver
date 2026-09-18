@@ -75,6 +75,46 @@ describe("SCOMP schema operation audit", () => {
     ]);
   });
 
+  test("uses one canonical path and trusted default environment", async () => {
+    const audit = auditCapture();
+    const deps = mockDeps();
+    const calls = [];
+    deps.configService.setRegisteredObject = async (_layer, path, _value, options) => {
+      calls.push(["object", path, options.environment]);
+      return { success: true, revision: "object-rev" };
+    };
+    deps.configService.patchRegisteredPath = async (_layer, path, _value, options) => {
+      calls.push(["patch", path, options.environment]);
+      return { success: true, revision: "patch-rev" };
+    };
+    deps.configService.validateRegisteredEffective = async (path, context) => {
+      calls.push(["validate", path, context.environment]);
+      return { valid: true, errors: [] };
+    };
+    const service = createWeaverScompService({
+      ...deps,
+      auditService: audit.service,
+      defaultEnvironment: "prod",
+    });
+
+    await invoke(service, "setRegisteredObject", { anchorPath: "/checkout/", value: {} });
+    await invoke(service, "patchRegisteredPath", { path: "/checkout/enabled/", value: true });
+    await invoke(service, "validateRegisteredEffective", { anchorPath: "/checkout/" });
+
+    expect(calls).toEqual([
+      ["object", "/checkout", "prod"],
+      ["patch", "/checkout/enabled", "prod"],
+      ["validate", "/checkout", "prod"],
+    ]);
+    expect(audit.entries.map(({ key, environment, metadata }) => [
+      key, environment, metadata.writePath,
+    ])).toEqual([
+      ["/checkout", "prod", "/checkout"],
+      ["/checkout/enabled", "prod", "/checkout/enabled"],
+      ["/checkout", "prod", "/checkout"],
+    ]);
+  });
+
   test("ignores caller-supplied actor context", async () => {
     const audit = auditCapture();
     const service = createWeaverScompService({
@@ -132,6 +172,7 @@ function auditCapture() {
 function mockDeps() {
   const success = async () => ({ success: true, revision: "test-rev" });
   return {
+    defaultEnvironment: "prod",
     configService: {
       providers: [],
       degradedProviders: [],

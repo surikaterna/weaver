@@ -31,10 +31,10 @@ function createTestProvider(id, layer, entries, writable = true) {
   };
 }
 
-function buildScompDeps(configService) {
+function buildScompDeps(configService, defaultEnvironment = "dev") {
   const schemaRegistry = createSchemaRegistry({ configService });
   const scopeManager = createScopeManager({ configService, schemaRegistry });
-  return { configService, scopeManager, schemaRegistry };
+  return { configService, scopeManager, schemaRegistry, defaultEnvironment };
 }
 
 describe("createWeaverScompService", () => {
@@ -67,7 +67,7 @@ describe("createWeaverScompService", () => {
   test("registered handlers delegate once and preserve anchor objects", async () => {
     const provider = createTestProvider("p1", "platform", {});
     const svc = await createWeaverConfigService({ providers: [provider], environment: "default" });
-    const service = createWeaverScompService(buildScompDeps(svc));
+    const service = createWeaverScompService(buildScompDeps(svc, "default"));
     const schema = {
       type: "object",
       properties: {
