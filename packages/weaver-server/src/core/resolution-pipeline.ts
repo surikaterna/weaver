@@ -120,7 +120,11 @@ function resolveEntryObject(
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(entries)) {
     const fullKey = prefix ? `${prefix}.${key}` : key;
-    result[key] = resolveEntryValue(pipeline, value, fullKey, state, mountMap);
+    defineOwnData(
+      result,
+      key,
+      resolveEntryValue(pipeline, value, fullKey, state, mountMap),
+    );
   }
   return result;
 }
@@ -169,4 +173,17 @@ async function refreshSecrets(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function defineOwnData(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  Reflect.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
 }

@@ -4,6 +4,125 @@ import { isProtectedConfigPath } from "../src/core/protected-config-paths.js";
 import { createSSEAdapter } from "../src/transport/sse-adapter.js";
 
 describe("WeaverConfigService", () => {
+  const reservedKeys = ["__proto__", "constructor", "prototype"] as const;
+  const inheritedTrapKey = "inheritedProjectionSetter";
+  function defineOwnData(
+    target: Record<string, unknown>,
+    key: string,
+    value: unknown,
+  ): void {
+    Reflect.defineProperty(target, key, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  function reservedRecord(label: string): Record<string, unknown> {
+    return Object.fromEntries(
+      [...reservedKeys, inheritedTrapKey].map((key): [string, string] => [
+        key,
+        `${label}:${key}`,
+      ]),
+    );
+  }
+
+  function expectReservedRecord(value: unknown, label: string): void {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`Expected ${label} record`);
+    }
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+    for (const key of reservedKeys) {
+      expect(Object.getOwnPropertyDescriptor(value, key)).toEqual({
+        value: `${label}:${key}`,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
+    expect(Object.getOwnPropertyDescriptor(value, inheritedTrapKey)).toEqual({
+      value: `${label}:${inheritedTrapKey}`,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  async function makeReservedService(
+    layer: string,
+    initial: Record<string, unknown>,
+  ) {
+    const provider = {
+      id: `reserved-${layer}`,
+      layer,
+      writable: true as const,
+      async load() {
+        return { entries: { payload: initial } };
+      },
+      async write() {
+        return { success: true } as const;
+      },
+      async remove() {
+        return { success: true } as const;
+      },
+    };
+    return createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+  }
+
+  async function expectReservedLayer(
+    layer: string,
+    initial: Record<string, unknown>,
+  ): Promise<void> {
+    const svc = await makeReservedService(layer, initial);
+    const deltas: Array<{ value?: unknown }> = [];
+    svc.onDelta((delta) => deltas.push(delta));
+
+    const namespace = await svc.getNamespace("payload");
+    const snapshot = await svc.resolveAll();
+    const inspection = await svc.inspect("payload");
+    expectReservedRecord(namespace, "initial");
+    expectReservedRecord(Reflect.get(namespace, "nested"), "nested");
+    expectReservedRecord(Reflect.get(snapshot.entries, "payload"), "initial");
+    expectReservedRecord(inspection.effectiveValue, "initial");
+    expect(
+      Object.getOwnPropertyDescriptor(inspection.layerValues, layer),
+    ).toEqual({
+      value: inspection.effectiveValue,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    expect(Object.getPrototypeOf(inspection.layerValues)).toBe(
+      Object.prototype,
+    );
+
+    const replacement = reservedRecord("delta");
+    defineOwnData(replacement, "nested", reservedRecord("delta-nested"));
+    expect((await svc.set(layer, "payload", replacement)).success).toBe(true);
+    expectReservedRecord(deltas.at(-1)?.value, "delta");
+    expectReservedRecord(
+      Reflect.get(deltas.at(-1)?.value, "nested"),
+      "delta-nested",
+    );
+  }
+
+  function mountGraph(
+    size: number,
+    sourceAt: (index: number) => string,
+  ): Record<string, unknown> {
+    const entries: Record<string, unknown> = {};
+    for (let index = 0; index < size; index++) {
+      defineOwnData(entries, `node${index}`, {
+        _weaver: "mount",
+        source: sourceAt(index),
+      });
+    }
+    return entries;
+  }
+
   async function makeService(entries: Record<string, unknown> = {}) {
     const provider = createInMemoryStorageProvider({
       id: "mem-app",
@@ -322,6 +441,62 @@ describe("WeaverConfigService", () => {
       }),
     );
     sseClient.close();
+  });
+
+  it("preserves reserved own keys without invoking inherited accessors", async () => {
+    let getterCalls = 0;
+    let setterCalls = 0;
+    Reflect.defineProperty(Object.prototype, inheritedTrapKey, {
+      get: () => {
+        getterCalls += 1;
+        return "inherited";
+      },
+      set: () => {
+        setterCalls += 1;
+      },
+      configurable: true,
+    });
+    try {
+      const nested = reservedRecord("nested");
+      const initial = reservedRecord("initial");
+      defineOwnData(initial, "nested", nested);
+
+      for (const layer of reservedKeys) {
+        await expectReservedLayer(layer, initial);
+      }
+      expect(getterCalls).toBe(0);
+      expect(setterCalls).toBe(0);
+    } finally {
+      Reflect.deleteProperty(Object.prototype, inheritedTrapKey);
+    }
+  });
+
+  it("classifies long mount graphs iteratively without disclosure", async () => {
+    const size = 20_000;
+    const protectedChain = mountGraph(size, (index) =>
+      index === size - 1 ? "_weaver.registry.schemas" : `node${index + 1}`,
+    );
+    defineOwnData(protectedChain, "protectedCycle", {
+      _weaver: "mount",
+      source: "_weaver.loop",
+    });
+    defineOwnData(protectedChain, "_weaver", {
+      loop: { _weaver: "mount", source: "protectedCycle" },
+    });
+    const protectedService = await makeService(protectedChain);
+    const protectedSnapshot = await protectedService.resolveAll();
+    expect(Object.keys(protectedSnapshot.entries)).toEqual([]);
+    expect(await protectedService.get("node0")).toBeUndefined();
+    expect(await protectedService.get("protectedCycle")).toBeUndefined();
+
+    const cycle = mountGraph(size, (index) => `node${(index + 1) % size}`);
+    const cycleService = await makeService(cycle);
+    const cycleSnapshot = await cycleService.resolveAll();
+    expect(Object.keys(cycleSnapshot.entries)).toHaveLength(size);
+    expect(Reflect.get(cycleSnapshot.entries, "node0")).toBeUndefined();
+    expect(
+      Reflect.get(cycleSnapshot.entries, `node${size - 1}`),
+    ).toBeUndefined();
   });
 
   it("removes a value", async () => {

@@ -32,19 +32,31 @@ function createMountTaintClassifier(
   state: Record<string, unknown>,
 ): MountTaintClassifier {
   const memo = new Map<string, boolean>();
-  const visiting = new Set<string>();
 
   function sourceIsTainted(source: string): boolean {
-    if (isProtectedConfigPath(source)) return true;
-    const cached = memo.get(source);
-    if (cached !== undefined) return cached;
-    if (visiting.has(source)) return false;
-    visiting.add(source);
-    const target = safeDeepGet(state, source);
-    const tainted = isConfigMount(target) && sourceIsTainted(target.source);
-    visiting.delete(source);
-    memo.set(source, tainted);
-    return tainted;
+    const visited: string[] = [];
+    const local = new Set<string>();
+    let current = source;
+    let terminal = false;
+    while (true) {
+      if (isProtectedConfigPath(current)) {
+        terminal = true;
+        break;
+      }
+      const cached = memo.get(current);
+      if (cached !== undefined) {
+        terminal = cached;
+        break;
+      }
+      if (local.has(current)) break;
+      local.add(current);
+      visited.push(current);
+      const target = safeDeepGet(state, current);
+      if (!isConfigMount(target)) break;
+      current = target.source;
+    }
+    for (const path of visited) memo.set(path, terminal);
+    return terminal;
   }
 
   return { isTainted: (mount) => sourceIsTainted(mount.source) };
@@ -70,7 +82,7 @@ function projectRecord(
   for (const [key, child] of Object.entries(value)) {
     const path = prefix ? `${prefix}.${key}` : key;
     const publicChild = projectValue(child, path, classifier);
-    if (publicChild !== omitted) projected[key] = publicChild;
+    if (publicChild !== omitted) defineOwnData(projected, key, publicChild);
   }
   return projected;
 }
@@ -150,7 +162,7 @@ export function inspectPublicConfig(
     );
     const value = deepGet(entries, key);
     if (value === undefined) continue;
-    layerValues[layer.layer] = value;
+    defineOwnData(layerValues, layer.layer, value);
     effectiveValue = value;
     effectiveLayer = layer.layer;
   }
@@ -176,4 +188,17 @@ function safeDeepGet(state: Record<string, unknown>, path: string): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function defineOwnData(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  Reflect.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
 }
