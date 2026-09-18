@@ -1,6 +1,7 @@
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import { createWeaverConfigService } from "../src/core/config-service.js";
 import { isProtectedConfigPath } from "../src/core/protected-config-paths.js";
+import { createSSEAdapter } from "../src/transport/sse-adapter.js";
 
 describe("WeaverConfigService", () => {
   async function makeService(entries: Record<string, unknown> = {}) {
@@ -185,7 +186,7 @@ describe("WeaverConfigService", () => {
     }
   });
 
-  it("resolves mounts only through the public config view", async () => {
+  it("omits tainted mounts from every public config view", async () => {
     const mount = (source: string) => ({ _weaver: "mount", source });
     const svc = await makeService({
       _weaver: { registry: { schemas: { private: true } } },
@@ -193,23 +194,40 @@ describe("WeaverConfigService", () => {
       nested: { leak: mount("_weaver.registry.schemas") },
       chained: mount("direct"),
       alias: mount("[_weaver].registry.schemas"),
+      cycleA: mount("cycleB"),
+      cycleB: mount("cycleA"),
       ordinary: mount("public.value"),
+      secret: { _weaver: "secret-ref", provider: "vault", uri: "secret/app" },
       public: { value: "visible" },
     });
 
     for (const key of ["direct", "nested.leak", "chained", "alias"]) {
       expect(await svc.get(key)).toBeUndefined();
+      expect(await svc.getNamespace(key)).toEqual({});
+      expect(await svc.inspect(key)).toEqual({
+        key,
+        effectiveValue: undefined,
+        effectiveLayer: undefined,
+        layerValues: {},
+      });
     }
-    expect(await svc.getNamespace("nested")).toEqual({ leak: undefined });
+    expect(await svc.getNamespace("nested")).toEqual({});
+    expect((await svc.inspect("nested")).effectiveValue).toEqual({});
     expect(await svc.get("ordinary")).toBe("visible");
-    expect((await svc.resolveAll()).entries).toEqual({
-      direct: undefined,
-      nested: { leak: undefined },
-      chained: undefined,
-      alias: undefined,
+    const snapshot = await svc.resolveAll();
+    expect(snapshot.entries).toEqual({
+      nested: {},
+      cycleA: undefined,
+      cycleB: undefined,
       ordinary: "visible",
+      secret: {
+        _weaver: "secret-ref",
+        provider: "vault",
+        uri: "secret/app",
+      },
       public: { value: "visible" },
     });
+    expect(JSON.stringify(snapshot)).not.toContain("_weaver.registry.schemas");
   });
 
   it("resolves scoped mounts only through the public merged view", async () => {
@@ -236,11 +254,74 @@ describe("WeaverConfigService", () => {
     const scopePath = [{ scopeId: "tenant", value: "acme" }];
 
     expect(await svc.get("leak", { scopePath })).toBeUndefined();
+    expect(await svc.getNamespace("leak", { scopePath })).toEqual({});
     expect(await svc.get("ordinary", { scopePath })).toBe("visible");
     expect((await svc.resolveAll()).scopes["tenant:acme"]).toEqual({
-      leak: undefined,
       ordinary: "visible",
     });
+    expect((await svc.inspect("leak")).layerValues).toEqual({});
+  });
+
+  it("projects tainted mount writes through deltas and SSE", async () => {
+    const mount = (source: string) => ({ _weaver: "mount", source });
+    const platform = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {
+        _weaver: { registry: { schemas: { private: true } } },
+        public: { value: "visible" },
+      },
+    });
+    const tenant = createInMemoryStorageProvider({
+      id: "tenant-acme",
+      layer: "tenant:acme",
+      initialEntries: {},
+    });
+    const svc = await createWeaverConfigService({
+      providers: [platform, tenant],
+      environment: "test",
+    });
+    const deltas: Array<{ key: string; value?: unknown; action: string }> = [];
+    svc.onDelta((delta) => deltas.push(delta));
+    const sseClient = await createSSEAdapter({
+      configService: svc,
+    }).createClient();
+
+    await svc.set("platform", "direct", mount("_weaver.registry.schemas"));
+    await svc.set("platform", "nested", {
+      visible: true,
+      leak: mount("_weaver.registry.schemas"),
+    });
+    await svc.set("platform", "chained", mount("direct"));
+    await svc.set("platform", "alias", mount("[_weaver].registry.schemas"));
+    await svc.set("tenant:acme", "scoped", mount("direct"));
+
+    expect(deltas.slice(0, 5).map(({ key, value }) => [key, value])).toEqual([
+      ["direct", undefined],
+      ["nested", { visible: true }],
+      ["chained", undefined],
+      ["alias", undefined],
+      ["scoped", undefined],
+    ]);
+    const protectedEvents = JSON.stringify({
+      deltas: deltas.slice(0, 5),
+      sse: sseClient.messages.slice(0, 6),
+    });
+    expect(protectedEvents).not.toContain("_weaver");
+    expect(protectedEvents).not.toContain("mount");
+    expect(protectedEvents).not.toContain("_weaver.registry.schemas");
+
+    await svc.set("platform", "ordinary", mount("public.value"));
+    await svc.remove("platform", "ordinary");
+    expect(deltas.at(-2)?.value).toEqual(mount("public.value"));
+    expect(deltas.at(-1)).toEqual(
+      expect.objectContaining({
+        action: "remove",
+        key: "ordinary",
+        value: null,
+      }),
+    );
+    sseClient.close();
   });
 
   it("removes a value", async () => {

@@ -1,5 +1,3 @@
-// WeaverConfigService — server-side config service wrapping storage providers
-
 import {
   consoleLogger,
   deepGet,
@@ -47,11 +45,9 @@ export type {
 
 const SIZE_WARNING = 1_048_576; // 1MB
 const internalWriteToken: unique symbol = Symbol("weaver.internalWrite");
-
 type InternalWriteContext = WriteContext & {
   readonly [internalWriteToken]?: true;
 };
-
 interface ScopedLayerProvider {
   loadLayer(layer: string): Promise<{ entries: Record<string, unknown> }>;
   writeLayer(layer: string, key: string, value: unknown): Promise<WriteResult>;
@@ -247,8 +243,7 @@ export async function createWeaverConfigService(
     scopePath?: ScopeInstance[],
   ): Record<string, unknown> {
     const base = getBaseEntries();
-    if (!scopePath?.length) return base;
-    return deepMerge(base, getScopeState(scopePath));
+    return scopePath?.length ? deepMerge(base, getScopeState(scopePath)) : base;
   }
 
   async function getLayerValue(layer: string, key: string): Promise<unknown> {
@@ -293,9 +288,12 @@ export async function createWeaverConfigService(
   });
 
   function fireDelta(delta: ConfigDelta): void {
-    if (!publicConfigView.includesDelta(delta)) return;
+    const scope = parseScopeLayer(delta.layer);
+    const state = scope ? getMergedState([scope]) : getBaseEntries();
+    const publicDelta = publicConfigView.delta(delta, state);
+    if (!publicDelta) return;
     for (const handler of deltaHandlers) {
-      handler(delta);
+      handler(publicDelta);
     }
   }
 
@@ -316,8 +314,10 @@ export async function createWeaverConfigService(
       scopePath?: ScopeInstance[];
     }): Promise<ConfigSnapshot> {
       await warmScopeLayers(opts?.scopePath);
-      const rawEntries = publicConfigView.entries(getBaseEntries());
-      const entries = pipeline.resolveEntries(rawEntries);
+      const rawEntries = getBaseEntries();
+      const entries = pipeline.resolveEntries(
+        publicConfigView.entries(rawEntries),
+      );
       const rawScopes = opts?.scopePath?.length
         ? {
             [buildScopePathString(opts.scopePath)]: getScopeState(

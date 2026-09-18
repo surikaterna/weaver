@@ -204,6 +204,53 @@ describe("createWeaverScompService", () => {
     await iterator.return();
   });
 
+  test("read and subscription handlers omit tainted mount markers", async () => {
+    const mount = (source) => ({ _weaver: "mount", source });
+    const provider = createTestProvider("p1", "platform", {
+      _weaver: { registry: { schemas: { private: true } } },
+      direct: mount("_weaver.registry.schemas"),
+      nested: { leak: mount("_weaver.registry.schemas") },
+      chained: mount("direct"),
+      alias: mount("[_weaver].registry.schemas"),
+    });
+    const svc = await createWeaverConfigService({
+      providers: [provider],
+      environment: "dev",
+    });
+    const service = createWeaverScompService(buildScompDeps(svc));
+
+    const snapshot = await service.router[route("resolveAll")].handler({});
+    const namespace = await service.router[route("getNamespace")].handler({
+      prefix: "nested",
+    });
+    const inspection = await service.router[route("inspect")].handler({
+      key: "direct",
+    });
+    expect(namespace).toEqual({ entries: {} });
+    expect(inspection.layerValues).toEqual({});
+    expect(JSON.stringify({ snapshot, namespace, inspection })).not.toContain(
+      "_weaver.registry.schemas",
+    );
+
+    const feed = service.router[route("subscribe")].handler({});
+    const iterator = feed[Symbol.asyncIterator]();
+    for (const [key, value] of [
+      ["liveDirect", mount("_weaver.registry.schemas")],
+      ["liveNested", { leak: mount("_weaver.registry.schemas") }],
+      ["liveChained", mount("liveDirect")],
+      ["liveAlias", mount("[_weaver].registry.schemas")],
+    ]) {
+      const next = iterator.next();
+      await Promise.resolve();
+      await svc.set("platform", key, value);
+      const event = await next;
+      expect(event.done).toBe(false);
+      expect(JSON.stringify(event.value)).not.toContain("_weaver");
+      expect(JSON.stringify(event.value)).not.toContain("mount");
+    }
+    await iterator.return();
+  });
+
   test("route kinds are classified correctly", async () => {
     const provider = createTestProvider("p1", "platform", {});
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
