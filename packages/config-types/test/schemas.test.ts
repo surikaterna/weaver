@@ -6,6 +6,12 @@ import {
   scopeInstanceSchema,
 } from "../src/schemas-layers.js";
 import {
+  registeredEffectiveValidationResponseSchema,
+  registeredObjectWriteRequestSchema,
+  registeredObjectWriteResponseSchema,
+  registeredSchemasResponseSchema,
+} from "../src/schemas-registered-operations.js";
+import {
   providerIdSchema,
   publicConfigPathSchema,
   registrationEnvironmentSchema,
@@ -18,6 +24,57 @@ import {
   schemaRegistrationMetadataSchema,
   serviceSchemaRegistrationRequestSchema,
 } from "../src/schemas-schema-registration.js";
+
+describe("registered operation schemas", () => {
+  it("validates canonical requests and rejects malformed paths", () => {
+    expect(
+      registeredObjectWriteRequestSchema.safeParse({
+        anchorPath: "/checkout",
+        value: { enabled: true },
+      }).success,
+    ).toBe(true);
+    expect(
+      registeredObjectWriteRequestSchema.safeParse({
+        anchorPath: "checkout",
+        value: {},
+      }).success,
+    ).toBe(false);
+  });
+
+  it("validates success and non-success responses strictly", () => {
+    expect(
+      registeredObjectWriteResponseSchema.safeParse({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message: "invalid value" },
+      }).success,
+    ).toBe(true);
+    expect(
+      registeredObjectWriteResponseSchema.safeParse({
+        success: false,
+        error: "invalid value",
+      }).success,
+    ).toBe(false);
+    expect(
+      registeredEffectiveValidationResponseSchema.safeParse({
+        valid: false,
+        errors: [{ code: "unknown", path: "/x", segments: [], message: "x" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("validates registered schema maps", () => {
+    expect(
+      registeredSchemasResponseSchema.safeParse({
+        schemas: { "/checkout": { type: "object" } },
+      }).success,
+    ).toBe(true);
+    expect(
+      registeredSchemasResponseSchema.safeParse({
+        schemas: { "/checkout": { type: "unsupported" } },
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe("scopeDefinitionSchema", () => {
   it("accepts valid scope definition", () => {

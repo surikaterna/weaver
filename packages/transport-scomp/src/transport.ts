@@ -1,16 +1,24 @@
 import type { IScompPeer } from "@scompr/core";
-import type {
-  ConfigDelta,
-  ConfigSnapshot,
-  ConfigurationPropertySchema,
-  SchemaRegistrationRequest,
-  SchemaRegistrationResponse,
-  ScopeDefinition,
-  ScopeInstance,
-  WriteResult,
+import {
+  type ConfigDelta,
+  type ConfigSnapshot,
+  type ConfigurationPropertySchema,
+  formatScopePath,
+  type RegisteredEffectiveValidationResponse,
+  registeredEffectiveValidationRequestSchema,
+  registeredEffectiveValidationResponseSchema,
+  registeredObjectWriteRequestSchema,
+  registeredObjectWriteResponseSchema,
+  registeredPathPatchRequestSchema,
+  registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
+  type SchemaRegistrationRequest,
+  type SchemaRegistrationResponse,
+  type ScopeDefinition,
+  type ScopeInstance,
+  type WriteResult,
 } from "@weaver-conf/config-types";
-import { formatScopePath } from "@weaver-conf/config-types";
-import { WeaverConfig } from "./contract";
+import { WeaverConfig, type WeaverConfigContract } from "./contract";
 
 // --- Transport types (defined locally to avoid depending on weaver-client) ---
 
@@ -58,6 +66,21 @@ export interface WeaverTransport {
   registerSchema?(
     request: SchemaRegistrationRequest,
   ): Promise<SchemaRegistrationResponse>;
+  setRegisteredObject?(
+    anchorPath: string,
+    value: unknown,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  patchRegisteredPath?(
+    path: string,
+    value: unknown,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  validateRegisteredEffective?(options: {
+    anchorPath: string;
+    environment?: string;
+    scopePath?: ScopeInstance[];
+  }): Promise<RegisteredEffectiveValidationResponse>;
   close(): Promise<void>;
 }
 
@@ -76,11 +99,25 @@ function buildScopeString(scopePath?: ScopeInstance[]): string | undefined {
 export function createScompTransport(
   options: ScompTransportOptions,
 ): WeaverTransport {
-  const { peer } = options;
-  const client = peer.consumes(WeaverConfig);
-
+  const client = options.peer.consumes(WeaverConfig);
   const activeFeeds: Array<{ abort: () => void }> = [];
+  return {
+    ...readMethods(client),
+    ...subscriptionMethod(client, activeFeeds),
+    ...writeMethods(client),
+    ...scopeMethods(client),
+    ...schemaMethods(client),
+    ...registeredMethods(client),
+    async close() {
+      for (const feed of activeFeeds) feed.abort();
+      activeFeeds.length = 0;
+    },
+  };
+}
 
+function readMethods(
+  client: WeaverConfigContract,
+): Pick<WeaverTransport, "resolveAll" | "get" | "getNamespace" | "inspect"> {
   return {
     async resolveAll(opts?) {
       const scope = buildScopeString(opts?.scopePath);
@@ -111,7 +148,14 @@ export function createScompTransport(
     async inspect(key) {
       return client.inspect({ key });
     },
+  };
+}
 
+function subscriptionMethod(
+  client: WeaverConfigContract,
+  activeFeeds: Array<{ abort: () => void }>,
+): Pick<WeaverTransport, "subscribe"> {
+  return {
     subscribe(handler) {
       const feed = client.subscribe({});
       let aborted = false;
@@ -142,7 +186,13 @@ export function createScompTransport(
         if (idx >= 0) activeFeeds.splice(idx, 1);
       };
     },
+  };
+}
 
+function writeMethods(
+  client: WeaverConfigContract,
+): Pick<WeaverTransport, "set" | "setMany" | "remove"> {
+  return {
     async set(key, value, opts?) {
       return client.set({
         key,
@@ -169,7 +219,13 @@ export function createScompTransport(
         ...(opts?.environment != null && { environment: opts.environment }),
       });
     },
+  };
+}
 
+function scopeMethods(
+  client: WeaverConfigContract,
+): Pick<WeaverTransport, "listScopes" | "listScopeValues"> {
+  return {
     async listScopes() {
       const result = await client.listScopes({});
       return result.scopes;
@@ -187,19 +243,68 @@ export function createScompTransport(
       });
       return result.values;
     },
+  };
+}
 
+function schemaMethods(
+  client: WeaverConfigContract,
+): Pick<WeaverTransport, "fetchSchemas" | "registerSchema"> {
+  return {
     async fetchSchemas() {
-      const result = await client.fetchSchemas({});
+      const result = registeredSchemasResponseSchema.parse(
+        await client.fetchSchemas({}),
+      );
       return result.schemas;
     },
 
     async registerSchema(request) {
       return client.registerSchema(request);
     },
+  };
+}
 
-    async close() {
-      for (const feed of activeFeeds) feed.abort();
-      activeFeeds.length = 0;
+function registeredMethods(
+  client: WeaverConfigContract,
+): Pick<
+  WeaverTransport,
+  "setRegisteredObject" | "patchRegisteredPath" | "validateRegisteredEffective"
+> {
+  return {
+    async setRegisteredObject(anchorPath, value, opts?) {
+      const request = registeredObjectWriteRequestSchema.parse({
+        anchorPath,
+        value,
+        ...(opts?.layer != null && { layer: opts.layer }),
+        ...(opts?.environment != null && { environment: opts.environment }),
+        ...(opts?.ifRevision != null && { ifRevision: opts.ifRevision }),
+      });
+      const response = await client.setRegisteredObject(request);
+      return registeredObjectWriteResponseSchema.parse(response);
+    },
+
+    async patchRegisteredPath(path, value, opts?) {
+      const request = registeredPathPatchRequestSchema.parse({
+        path,
+        value,
+        ...(opts?.layer != null && { layer: opts.layer }),
+        ...(opts?.environment != null && { environment: opts.environment }),
+        ...(opts?.ifRevision != null && { ifRevision: opts.ifRevision }),
+      });
+      const response = await client.patchRegisteredPath(request);
+      return registeredPathPatchResponseSchema.parse(response);
+    },
+
+    async validateRegisteredEffective(options) {
+      const scope = buildScopeString(options.scopePath);
+      const request = registeredEffectiveValidationRequestSchema.parse({
+        anchorPath: options.anchorPath,
+        ...(options.environment != null && {
+          environment: options.environment,
+        }),
+        ...(scope != null && { scope }),
+      });
+      const response = await client.validateRegisteredEffective(request);
+      return registeredEffectiveValidationResponseSchema.parse(response);
     },
   };
 }

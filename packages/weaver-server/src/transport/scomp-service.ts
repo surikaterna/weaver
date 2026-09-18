@@ -1,6 +1,19 @@
 import { createScompService } from "@scompr/core";
-import { WeaverConfig } from "@weaver-conf/transport-scomp";
+import {
+  registeredEffectiveValidationRequestSchema,
+  registeredEffectiveValidationResponseSchema,
+  registeredObjectWriteRequestSchema,
+  registeredObjectWriteResponseSchema,
+  registeredPathPatchRequestSchema,
+  registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
+} from "@weaver-conf/config-types";
+import {
+  WeaverConfig,
+  type WeaverConfigContract,
+} from "@weaver-conf/transport-scomp";
 import type {
+  EffectiveValidationContext,
   WeaverConfigService,
   WriteContext,
 } from "../core/config-service-types";
@@ -16,8 +29,25 @@ export interface ScompServiceDeps {
 }
 
 export function createWeaverScompService(deps: ScompServiceDeps) {
-  const { configService, scopeManager, schemaRegistry } = deps;
   return createScompService(WeaverConfig).implement({
+    ...readHandlers(deps),
+    ...writeHandlers(deps),
+    ...scopeHandlers(deps),
+    ...schemaHandlers(deps),
+    ...registeredWriteHandlers(deps),
+    ...registeredValidationHandler(deps),
+    ...subscriptionHandler(deps),
+  });
+}
+
+function readHandlers(
+  deps: ScompServiceDeps,
+): Pick<
+  WeaverConfigContract,
+  "resolveAll" | "get" | "getNamespace" | "inspect"
+> {
+  const { configService } = deps;
+  return {
     async resolveAll(input) {
       const scopePath = input.scope ? parseScopeQuery(input.scope) : undefined;
       return configService.resolveAll(scopePath ? { scopePath } : undefined);
@@ -44,7 +74,14 @@ export function createWeaverScompService(deps: ScompServiceDeps) {
     async inspect(input) {
       return configService.inspect(input.key);
     },
+  };
+}
 
+function writeHandlers(
+  deps: ScompServiceDeps,
+): Pick<WeaverConfigContract, "set" | "setMany" | "remove"> {
+  const { configService } = deps;
+  return {
     async set(input) {
       const writeOpts: WriteContext = {
         ...(input.environment ? { environment: input.environment } : {}),
@@ -80,7 +117,14 @@ export function createWeaverScompService(deps: ScompServiceDeps) {
         writeOpts,
       );
     },
+  };
+}
 
+function scopeHandlers(
+  deps: ScompServiceDeps,
+): Pick<WeaverConfigContract, "listScopes" | "listScopeValues"> {
+  const { scopeManager } = deps;
+  return {
     async listScopes(_input) {
       return { scopes: scopeManager.listScopes() };
     },
@@ -88,15 +132,92 @@ export function createWeaverScompService(deps: ScompServiceDeps) {
     async listScopeValues(input) {
       return { values: scopeManager.listScopeValues(input.scopeId) };
     },
+  };
+}
 
+function schemaHandlers(
+  deps: ScompServiceDeps,
+): Pick<WeaverConfigContract, "fetchSchemas" | "registerSchema"> {
+  const { schemaRegistry } = deps;
+  return {
     async fetchSchemas(_input) {
-      return { schemas: schemaRegistry.listAll() };
+      return registeredSchemasResponseSchema.parse({
+        schemas: schemaRegistry.listAll(),
+      });
     },
 
     async registerSchema(input) {
       return schemaRegistry.register(input);
     },
+  };
+}
 
+function registeredWriteHandlers(
+  deps: ScompServiceDeps,
+): Pick<WeaverConfigContract, "setRegisteredObject" | "patchRegisteredPath"> {
+  const { configService, schemaRegistry } = deps;
+  return {
+    async setRegisteredObject(input) {
+      const request = registeredObjectWriteRequestSchema.parse(input);
+      const writeOpts: WriteContext = {
+        ...(request.environment ? { environment: request.environment } : {}),
+        ...(request.ifRevision ? { expectedRevision: request.ifRevision } : {}),
+      };
+      const response = await configService.setRegisteredObject(
+        request.layer ?? "platform",
+        request.anchorPath,
+        request.value,
+        { ...writeOpts, schemaRegistry },
+      );
+      return registeredObjectWriteResponseSchema.parse(response);
+    },
+
+    async patchRegisteredPath(input) {
+      const request = registeredPathPatchRequestSchema.parse(input);
+      const writeOpts: WriteContext = {
+        ...(request.environment ? { environment: request.environment } : {}),
+        ...(request.ifRevision ? { expectedRevision: request.ifRevision } : {}),
+      };
+      const response = await configService.patchRegisteredPath(
+        request.layer ?? "platform",
+        request.path,
+        request.value,
+        { ...writeOpts, schemaRegistry },
+      );
+      return registeredPathPatchResponseSchema.parse(response);
+    },
+  };
+}
+
+function registeredValidationHandler(
+  deps: ScompServiceDeps,
+): Pick<WeaverConfigContract, "validateRegisteredEffective"> {
+  const { configService, schemaRegistry } = deps;
+  return {
+    async validateRegisteredEffective(input) {
+      const request = registeredEffectiveValidationRequestSchema.parse(input);
+      const scopePath = request.scope
+        ? parseScopeQuery(request.scope)
+        : undefined;
+      const context: EffectiveValidationContext = {
+        schemaRegistry,
+        ...(request.environment ? { environment: request.environment } : {}),
+        ...(scopePath ? { scopePath } : {}),
+      };
+      const response = await configService.validateRegisteredEffective(
+        request.anchorPath,
+        context,
+      );
+      return registeredEffectiveValidationResponseSchema.parse(response);
+    },
+  };
+}
+
+function subscriptionHandler(
+  deps: ScompServiceDeps,
+): Pick<WeaverConfigContract, "subscribe"> {
+  const { configService } = deps;
+  return {
     async *subscribe(_input) {
       const queue: ConfigDelta[] = [];
       let resolve: (() => void) | null = null;
@@ -111,19 +232,18 @@ export function createWeaverScompService(deps: ScompServiceDeps) {
 
       try {
         while (true) {
-          if (queue.length > 0) {
-            const next = queue.shift();
-            if (next === undefined) continue;
+          const next = queue.shift();
+          if (next !== undefined) {
             yield next;
-          } else {
-            await new Promise<void>((r) => {
-              resolve = r;
-            });
+            continue;
           }
+          await new Promise<void>((r) => {
+            resolve = r;
+          });
         }
       } finally {
         unsub();
       }
     },
-  });
+  };
 }

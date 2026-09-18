@@ -68,6 +68,15 @@ export {
   writeResultSchema,
 } from "../schemas-providers";
 export {
+  registeredEffectiveValidationRequestSchema,
+  registeredEffectiveValidationResponseSchema,
+  registeredObjectWriteRequestSchema,
+  registeredObjectWriteResponseSchema,
+  registeredPathPatchRequestSchema,
+  registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
+} from "../schemas-registered-operations";
+export {
   isReservedPathSegment,
   providerIdPattern,
   providerIdSchema,
@@ -77,6 +86,22 @@ export {
   serviceIdSchema,
   slotPathSchema,
 } from "../schemas-registration-paths";
+export {
+  fragmentSchemaRegistrationRequestSchema,
+  fragmentSlotDeclarationSchema,
+  fragmentSlotRegistrationMetadataSchema,
+  registrationOwnerSchema,
+  schemaRegistrationAuditMetadataSchema,
+  schemaRegistrationMetadataSchema,
+  schemaRegistrationResponseSchema,
+  serviceSchemaRegistrationRequestSchema,
+} from "../schemas-schema-registration";
+export {
+  schemaValidationErrorCodeSchema,
+  schemaValidationErrorSchema,
+  schemaValidationPathSegmentSchema,
+  schemaValidationResultSchema,
+} from "../schemas-schema-validation";
 export {
   godModeSessionSchema,
   overrideSessionSchema,
