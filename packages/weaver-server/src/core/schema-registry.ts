@@ -86,7 +86,7 @@ export interface SchemaRegistry {
   ): Promise<ObjectConfigurationPropertySchema | null>;
   resolveAnchor(
     path: string,
-    environment: string,
+    environment?: string,
   ): Promise<RegisteredSchemaAnchor | null>;
   listAll(): Record<string, ConfigurationPropertySchema>;
 }
@@ -162,7 +162,11 @@ export function createSchemaRegistry(
     },
 
     async resolveAnchor(path, environment) {
-      return findRegisteredAnchor(state.schemas.values(), path, environment);
+      return findRegisteredAnchor(
+        state.schemas.values(),
+        path,
+        environment ?? "",
+      );
     },
 
     listAll() {
@@ -211,7 +215,11 @@ export async function createPersistentSchemaRegistry(
     },
 
     async resolveAnchor(path, environment) {
-      return findRegisteredAnchor(state.schemas.values(), path, environment);
+      return findRegisteredAnchor(
+        state.schemas.values(),
+        path,
+        environment ?? defaultEnvironment ?? "",
+      );
     },
 
     listAll() {

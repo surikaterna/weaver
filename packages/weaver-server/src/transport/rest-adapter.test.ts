@@ -1,3 +1,9 @@
+import { withAuth } from "@weaver-conf/config-auth";
+import type {
+  ConfigurationPropertySchema,
+  ObjectConfigurationPropertySchema,
+  WeaverConfig,
+} from "@weaver-conf/config-types";
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import type { AuthContext } from "../auth/auth-middleware";
 import type { WeaverConfigService } from "../core/config-service";
@@ -6,6 +12,7 @@ import type { SchemaRegistry } from "../core/schema-registry";
 import { createSchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
 import type { AuthGate } from "./auth-gate";
+import { createAuthGate } from "./auth-gate";
 import type { RestAdapter, RestRequest, RestResponse } from "./rest-adapter";
 import { createRestAdapter } from "./rest-adapter";
 
@@ -81,6 +88,13 @@ const nonAdminContext: AuthContext = {
 const adminContext: AuthContext = {
   identity: { userId: "operator", roles: ["admin"], claims: {} },
   isAdmin: true,
+  isService: false,
+  isUser: true,
+};
+
+const platformContext: AuthContext = {
+  identity: { userId: "platform", roles: ["platform"], claims: {} },
+  isAdmin: false,
   isService: false,
   isUser: true,
 };
@@ -523,6 +537,96 @@ describe("registered REST authorization", () => {
     expect(gateCount(calls)).toBe(1);
     expect(effectCount(calls)).toBe(0);
   });
+
+  it.each([
+    ["public", nonAdminContext, 200],
+    ["platform", nonAdminContext, 403],
+    ["platform", platformContext, 200],
+    ["admin", nonAdminContext, 403],
+    ["admin", adminContext, 200],
+    ["internal", adminContext, 403],
+  ] as const)("uses the exact %s anchor schema with production authorization", async (visibility, context, status) => {
+    const harness = createProductionReadHarness({ visibility });
+    const response = await send(
+      harness.adapter,
+      routeCase(registeredRouteCases, 2),
+      context,
+    );
+
+    expect(response.status).toBe(status);
+    expect(harness.calls.registryResolutions).toEqual([
+      { path: "/checkout", environment: "prod" },
+    ]);
+    expect(harness.calls.gateReads).toEqual(["checkout"]);
+    expect(harness.calls.gateReadSchemas).toHaveLength(1);
+    expect(harness.calls.gateReadSchemas[0]).toEqual(
+      schemaWithVisibility(visibility),
+    );
+    expect(harness.calls.effectiveReads).toHaveLength(status === 200 ? 1 : 0);
+  });
+
+  it.each([
+    "missing",
+    "parent",
+  ] as const)("fails closed for a non-admin when the exact anchor is %s", async (anchorMode) => {
+    const route = {
+      ...routeCase(registeredRouteCases, 2),
+      path:
+        anchorMode === "parent"
+          ? "/v1/registered/effective/checkout/db"
+          : "/v1/registered/effective/checkout",
+    };
+    const reader = createProductionReadHarness({ anchorMode });
+    const readerResponse = await send(reader.adapter, route, nonAdminContext);
+    expect(readerResponse.status).toBe(403);
+    expect(reader.calls.registryResolutions).toHaveLength(1);
+    expect(reader.calls.gateReads).toHaveLength(0);
+    expect(reader.calls.effectiveReads).toHaveLength(0);
+
+    const admin = createProductionReadHarness({
+      anchorMode,
+      validationValid: false,
+    });
+    const adminResponse = await send(admin.adapter, route, adminContext);
+    expect(adminResponse.status).toBe(422);
+    expect(admin.calls.gateReads).toHaveLength(0);
+    expect(admin.calls.effectiveReads).toHaveLength(1);
+  });
+
+  it("requires context before anchor lookup and fails closed without a registry", async () => {
+    const missingContext = createProductionReadHarness({});
+    expect(
+      (await send(missingContext.adapter, routeCase(registeredRouteCases, 2)))
+        .status,
+    ).toBe(401);
+    expect(missingContext.calls.registryResolutions).toHaveLength(0);
+
+    const calls = createRouteCalls();
+    const adapter = createRestAdapter({
+      configService: mockConfigService(),
+      authGate: createProductionGate(calls),
+    });
+    expect(
+      (await send(adapter, routeCase(registeredRouteCases, 2), nonAdminContext))
+        .status,
+    ).toBe(403);
+    expect(gateCount(calls)).toBe(0);
+    expect(effectCount(calls)).toBe(0);
+    expect(
+      (await send(adapter, routeCase(registeredRouteCases, 2), adminContext))
+        .status,
+    ).toBe(422);
+  });
+
+  it("uses the registry-owned environment when effective metadata omits env", async () => {
+    const harness = createProductionReadHarness({});
+    const route = { ...routeCase(registeredRouteCases, 2), query: {} };
+
+    expect((await send(harness.adapter, route, adminContext)).status).toBe(200);
+    expect(harness.calls.registryResolutions).toEqual([
+      { path: "/checkout", environment: undefined },
+    ]);
+  });
 });
 
 describe("registered REST canonical requests", () => {
@@ -721,7 +825,12 @@ interface CapturedEffectiveRead {
 
 interface RouteCalls {
   readonly gateReads: string[];
+  readonly gateReadSchemas: Array<ConfigurationPropertySchema | undefined>;
   readonly gateWrites: Array<{ layer: string; key: string }>;
+  readonly registryResolutions: Array<{
+    path: string;
+    environment: string | undefined;
+  }>;
   lists: number;
   registrations: number;
   readonly objectWrites: CapturedWrite[];
@@ -773,10 +882,114 @@ function createRouteHarness(policy: "allow" | "deny"): RouteHarness {
   return { adapter, calls };
 }
 
+type Visibility = "public" | "platform" | "admin" | "internal";
+
+function createProductionReadHarness(options: {
+  readonly visibility?: Visibility;
+  readonly anchorMode?: "exact" | "missing" | "parent";
+  readonly validationValid?: boolean;
+}): RouteHarness {
+  const calls = createRouteCalls();
+  const configService = mockConfigService();
+  configService.validateRegisteredEffective = async (path, context) => {
+    calls.effectiveReads.push({
+      path,
+      ...(context.environment ? { environment: context.environment } : {}),
+    });
+    return { valid: options.validationValid ?? true, errors: [] };
+  };
+  const registry = createCountingRegistry(calls);
+  registry.resolveAnchor = async (path, environment) => {
+    calls.registryResolutions.push({ path, environment });
+    if (options.anchorMode === "missing") return null;
+    const anchorPath = options.anchorMode === "parent" ? "/checkout" : path;
+    return registeredAnchor(
+      anchorPath,
+      environment ?? "default",
+      schemaWithVisibility(options.visibility ?? "public"),
+    );
+  };
+  const adapter = createRestAdapter({
+    configService,
+    schemaRegistry: registry,
+    authGate: createProductionGate(calls),
+  });
+  return { adapter, calls };
+}
+
+function createProductionGate(calls: RouteCalls): AuthGate {
+  const base = createAuthGate({
+    authFunctions: withAuth({
+      weaverConfig: testWeaverConfig(),
+      visibilityRoles: {
+        admin: new Set(["admin"]),
+        platform: new Set(["admin", "platform"]),
+      },
+      layerWritePolicies: [],
+      dynamicScopeRoles: new Set(["admin"]),
+    }),
+    mapContext: (context) => ({
+      userId: context.identity.userId ?? "anonymous",
+      roles: context.identity.roles ?? [],
+    }),
+  });
+  return {
+    ...base,
+    gateRead(context, key, schema) {
+      calls.gateReads.push(key);
+      calls.gateReadSchemas.push(schema);
+      return base.gateRead(context, key, schema);
+    },
+  };
+}
+
+function testWeaverConfig(): WeaverConfig {
+  const rankMap = new Map<string, number>();
+  return {
+    layers: [],
+    layerNames: [],
+    rankMap,
+    getRank: (layer) => rankMap.get(layer) ?? -1,
+    getLayer: () => undefined,
+    getLayersByType: () => [],
+  };
+}
+
+function schemaWithVisibility(
+  visibility: Visibility,
+): ObjectConfigurationPropertySchema {
+  return {
+    ...settingsSchema,
+    "x-weaver": { visibility },
+  };
+}
+
+function registeredAnchor(
+  path: string,
+  environment: string,
+  schema: ObjectConfigurationPropertySchema,
+) {
+  return {
+    kind: "service" as const,
+    path,
+    schema,
+    environment,
+    metadata: {
+      serviceId: "checkout",
+      servicePath: "/checkout",
+      environment,
+      providerId: "checkout",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+    },
+  };
+}
+
 function createRouteCalls(): RouteCalls {
   return {
     gateReads: [],
+    gateReadSchemas: [],
     gateWrites: [],
+    registryResolutions: [],
     lists: 0,
     registrations: 0,
     objectWrites: [],
@@ -796,7 +1009,10 @@ function createCountingRegistry(calls: RouteCalls): SchemaRegistry {
       };
     },
     getSchema: async () => null,
-    resolveAnchor: async () => null,
+    resolveAnchor: async (path, environment) => {
+      calls.registryResolutions.push({ path, environment });
+      return registeredAnchor(path, environment ?? "default", settingsSchema);
+    },
     listAll: () => {
       calls.lists += 1;
       return {};
@@ -815,8 +1031,9 @@ function createCountingGate(
         context.identity.userId ?? context.identity.serviceId ?? "anonymous",
       roles: context.identity.roles ?? [],
     }),
-    gateRead: (_context, key) => {
+    gateRead: (_context, key, schema) => {
       calls.gateReads.push(key);
+      calls.gateReadSchemas.push(schema);
       return policyResponse;
     },
     gateWrite: (_context, layer, key) => {

@@ -68,6 +68,12 @@ function unavailable(configService: WeaverConfigService): RestResponse {
   );
 }
 
+function effectiveUnavailable(
+  configService: WeaverConfigService,
+): RestResponse {
+  return { ...unavailable(configService), status: 422 };
+}
+
 function canonicalRoutePath(
   params: Record<string, string>,
   name: string,
@@ -129,19 +135,43 @@ function registeredWriteDenied(
   );
 }
 
-function registeredReadDenied(
+async function registeredReadDenied(
   request: RestRequest,
   deps: SchemaRouteDeps,
-  path: string,
-): RestResponse | null {
+  metadata: {
+    readonly anchorPath: string;
+    readonly environment?: string | undefined;
+  },
+): Promise<RestResponse | null> {
   const gate = deps.authGate;
   if (!gate) return null;
   if (!request.authContext) return authContextRequired(deps.configService);
-  const key = parseCanonicalConfigPath(path).storageKey;
+  const registry = deps.schemaRegistry;
+  if (!registry) return inaccessibleAnchor(request, deps);
+  const anchor = await registry.resolveAnchor(
+    metadata.anchorPath,
+    metadata.environment,
+  );
+  if (!anchor || anchor.path !== metadata.anchorPath) {
+    return inaccessibleAnchor(request, deps);
+  }
+  const key = parseCanonicalConfigPath(metadata.anchorPath).storageKey;
   return gate.gateRead(
     gate.toAccessContext(request.authContext),
     key,
-    request.schemaMap?.get(key),
+    anchor.schema,
+  );
+}
+
+function inaccessibleAnchor(
+  request: RestRequest,
+  deps: SchemaRouteDeps,
+): RestResponse | null {
+  if (request.authContext?.isAdmin) return null;
+  return v1Error(
+    deps.configService,
+    "FORBIDDEN",
+    "Registered schema is not accessible",
   );
 }
 
@@ -310,9 +340,9 @@ function validateRegisteredEffectiveRoute(deps: SchemaRouteDeps): RestRoute {
         canonicalRoutePath(req.params, "anchorPath"),
         req.query,
       );
-      const denied = registeredReadDenied(req, deps, metadata.anchorPath);
+      const denied = await registeredReadDenied(req, deps, metadata);
       if (denied) return denied;
-      if (!schemaRegistry) return unavailable(configService);
+      if (!schemaRegistry) return effectiveUnavailable(configService);
       const request = parseRegisteredEffectiveRequest(metadata);
       const validation = parseResponse(
         "registered effective validation",
