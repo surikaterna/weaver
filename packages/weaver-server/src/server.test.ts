@@ -297,6 +297,8 @@ describe("Weaver server error handling", () => {
     "/v1/registered/effective/a%C2%80b",
     "/v1/registered/effective/a%252Fb",
     "/v1/registered/effective/a%255Cb",
+    "/v1/registered/effective/x#fragment",
+    "/v1/registered/effective/x?env=development#&env=other",
   ])("rejects non-canonical request paths before auth: %s", async (path) => {
     const server = await startWeaverServer({
       port: 0,

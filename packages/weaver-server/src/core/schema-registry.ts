@@ -175,6 +175,19 @@ export function createSchemaRegistry(
   };
 }
 
+function getRegisteredServiceSchema(
+  schemas: ReadonlyMap<string, SchemaEntry>,
+  serviceId: string,
+  environment: string,
+): ObjectConfigurationPropertySchema | null {
+  try {
+    const { servicePath } = deriveServicePath(serviceId);
+    return schemas.get(schemaKey(servicePath, environment))?.schema ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function createPersistentSchemaRegistry(
   options: PersistentSchemaRegistryOptions,
 ): Promise<SchemaRegistry> {
@@ -204,14 +217,7 @@ export async function createPersistentSchemaRegistry(
     },
 
     async getSchema(serviceId, environment) {
-      try {
-        const { servicePath } = deriveServicePath(serviceId);
-        return (
-          state.schemas.get(schemaKey(servicePath, environment))?.schema ?? null
-        );
-      } catch {
-        return null;
-      }
+      return getRegisteredServiceSchema(state.schemas, serviceId, environment);
     },
 
     async resolveAnchor(path, environment) {

@@ -16,6 +16,7 @@ export function parseRequestTarget(
   requestTarget: string,
   baseUrl: string,
 ): ParsedRequestTarget {
+  if (requestTarget.includes("#")) return { success: false };
   const pathname = canonicalPathname(requestTarget);
   if (pathname === null) return { success: false };
 
