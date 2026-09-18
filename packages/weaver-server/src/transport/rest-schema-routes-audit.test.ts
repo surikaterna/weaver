@@ -3,14 +3,17 @@ import type {
   SchemaRegistrationRequest,
   WriteResult,
 } from "@weaver-conf/config-types";
+import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import type { AuditService } from "../audit/audit-service";
 import { createAuditService } from "../audit/audit-service";
 import type { AuthContext } from "../auth/auth-middleware";
 import type { WeaverConfigService } from "../core/config-service";
+import { createWeaverConfigService } from "../core/config-service";
 import type {
   SchemaRegistrationResult,
   SchemaRegistry,
 } from "../core/schema-registry";
+import { createSchemaRegistry } from "../core/schema-registry";
 import type { AuthGate } from "./auth-gate";
 import { createRestAdapter } from "./rest-adapter";
 
@@ -83,6 +86,124 @@ describe("REST schema operation audit", () => {
         }),
       ]),
     );
+  });
+
+  it("uses one trusted environment for audited REST execution and events", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {},
+    });
+    const configService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "prod",
+    });
+    const schemaRegistry = createSchemaRegistry({ configService });
+    const audit = createAuditCapture();
+    const executionEnvironments: Array<string | undefined> = [];
+    const setRegisteredObject = configService.setRegisteredObject;
+    const patchRegisteredPath = configService.patchRegisteredPath;
+    const validateRegisteredEffective =
+      configService.validateRegisteredEffective;
+    configService.setRegisteredObject = async (...args) => {
+      executionEnvironments.push(args[3].environment);
+      return setRegisteredObject(...args);
+    };
+    configService.patchRegisteredPath = async (...args) => {
+      executionEnvironments.push(args[3].environment);
+      return patchRegisteredPath(...args);
+    };
+    configService.validateRegisteredEffective = async (...args) => {
+      executionEnvironments.push(args[1].environment);
+      return validateRegisteredEffective(...args);
+    };
+    const adapter = createRestAdapter({
+      configService,
+      schemaRegistry,
+      auditService: audit.service,
+      defaultEnvironment: "prod",
+    });
+    const registration: SchemaRegistrationRequest = {
+      ...serviceRegistration(),
+      schema: {
+        type: "object",
+        properties: { enabled: { type: "boolean" } },
+      },
+    };
+
+    for (const environment of ["prod", "staging"]) {
+      const response = await send(
+        adapter,
+        "POST",
+        "/v1/admin/schemas/services",
+        { body: { ...registration, environment } },
+      );
+      expect(response.status).toBe(201);
+    }
+    expect(
+      (
+        await send(adapter, "PUT", "/v1/registered/objects/checkout", {
+          body: { value: { enabled: true } },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await send(adapter, "PATCH", "/v1/registered/paths/checkout/enabled", {
+          body: { value: false },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await send(adapter, "GET", "/v1/registered/effective/checkout", {}))
+        .status,
+    ).toBe(200);
+    expect(
+      (
+        await send(adapter, "PUT", "/v1/registered/objects/checkout", {
+          query: { env: "staging" },
+          body: { value: { enabled: true } },
+        })
+      ).status,
+    ).toBe(200);
+
+    expect(executionEnvironments).toEqual(["prod", "prod", "prod", "staging"]);
+    const operationEntries = audit.entries
+      .filter((entry) => entry.domain === "schema")
+      .slice(2);
+    expect(operationEntries).toHaveLength(4);
+    expect(
+      operationEntries.map((entry) => [
+        entry.environment,
+        entry.metadata.environment,
+      ]),
+    ).toEqual([
+      ["prod", "prod"],
+      ["prod", "prod"],
+      ["prod", "prod"],
+      ["staging", "staging"],
+    ]);
+  });
+
+  it("rejects missing or blank audited adapter defaults before routing", () => {
+    const audit = createAuditCapture();
+    const configService = createMockConfigService();
+    const schemaRegistry = createMockSchemaRegistry();
+    for (const defaultEnvironment of [undefined, "", "   "]) {
+      expect(() =>
+        Reflect.apply(createRestAdapter, undefined, [
+          {
+            configService,
+            schemaRegistry,
+            auditService: audit.service,
+            ...(defaultEnvironment === undefined ? {} : { defaultEnvironment }),
+          },
+        ]),
+      ).toThrow(/defaultEnvironment/u);
+    }
+    expect(() =>
+      createRestAdapter({ configService, schemaRegistry }),
+    ).not.toThrow();
   });
 
   it("emits one failure event for a typed service failure", async () => {

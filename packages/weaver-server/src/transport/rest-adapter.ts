@@ -1,7 +1,7 @@
 // REST transport adapter — maps HTTP routes to WeaverConfigService
 
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { ZodError } from "zod";
+import { ZodError, type z } from "zod";
 import type { AuditService } from "../audit/audit-service";
 import type { AuthContext } from "../auth/auth-middleware";
 import type { WeaverConfigService } from "../core/config-service";
@@ -15,7 +15,14 @@ import {
   matchPath,
   v1Headers,
 } from "./rest-helpers";
+import { parseRestResponse } from "./rest-route-boundary";
 import { buildRoutes } from "./rest-routes";
+import {
+  restSchemaAuditIdentity,
+  type SchemaAuditOutcome,
+  schemaWriteAuditContext,
+} from "./schema-operation-audit";
+import { runRestSchemaOperation } from "./schema-operation-runner";
 
 export type { ApiErrorResponse, ApiResponse } from "./rest-helpers";
 
@@ -40,15 +47,19 @@ export interface RestResponse {
   headers?: Record<string, string>;
 }
 
-export interface RestAdapterOptions {
+interface RestAdapterBaseOptions {
   configService: WeaverConfigService;
   schemaRegistry?: SchemaRegistry;
   scopeManager?: ScopeManager;
   corsOrigins?: string[];
   authGate?: AuthGate;
-  auditService?: AuditService;
-  defaultEnvironment?: string;
 }
+
+export type RestAdapterOptions = RestAdapterBaseOptions &
+  (
+    | { auditService?: undefined; defaultEnvironment?: string }
+    | { auditService: AuditService | undefined; defaultEnvironment: string }
+  );
 
 export interface RestAdapter {
   readonly routes: ReadonlyArray<RestRoute>;
@@ -65,13 +76,13 @@ interface RouteMatch {
 }
 
 export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
+  const defaultEnvironment = validatedDefaultEnvironment(options);
   const {
     configService,
     schemaRegistry,
     scopeManager,
     authGate,
     auditService,
-    defaultEnvironment,
   } = options;
   const routes: RestRoute[] = buildRoutes({
     configService,
@@ -80,6 +91,7 @@ export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
     authGate,
     auditService,
     defaultEnvironment,
+    runRegisteredOperation: runRegisteredRestOperation,
   });
   return {
     routes,
@@ -87,6 +99,57 @@ export function createRestAdapter(options: RestAdapterOptions): RestAdapter {
       handleRequest(options, routes, method, path, req),
   };
 }
+
+function validatedDefaultEnvironment(
+  options: RestAdapterOptions,
+): string | undefined {
+  if (!options.auditService) return options.defaultEnvironment;
+  const environment = options.defaultEnvironment;
+  if (typeof environment === "string" && environment.trim().length > 0) {
+    return environment;
+  }
+  throw createWeaverError(
+    "VALIDATION_ERROR",
+    "REST defaultEnvironment must not be empty when auditService is configured",
+  );
+}
+
+export async function runRegisteredRestOperation<Schema extends z.ZodType>(
+  auditService: AuditService | undefined,
+  authContext: AuthContext | undefined,
+  action: Parameters<typeof schemaWriteAuditContext>[0],
+  path: string,
+  environment: string | undefined,
+  execute: () => Promise<unknown>,
+  operation: string,
+  schema: Schema,
+  outcome: (result: z.output<Schema>) => SchemaAuditOutcome,
+): Promise<z.output<Schema>> {
+  if (!auditService) {
+    return parseRestResponse(operation, schema, await execute());
+  }
+  if (environment === undefined) {
+    throw createWeaverError(
+      "INTERNAL_ERROR",
+      "Audited REST schema operation requires a default environment",
+    );
+  }
+  return runRestSchemaOperation(
+    auditService,
+    schemaWriteAuditContext(
+      action,
+      path,
+      environment,
+      restSchemaAuditIdentity(authContext),
+    ),
+    execute,
+    operation,
+    schema,
+    outcome,
+  );
+}
+
+export type RegisteredRestOperationRunner = typeof runRegisteredRestOperation;
 
 function findRoute(
   routes: readonly RestRoute[],

@@ -8,7 +8,12 @@ import type { ScopeManager } from "../core/scope-manager";
 import { parseScopeQuery } from "../core/scope-utils";
 import { createWeaverError } from "../types/index";
 import type { AuthGate } from "./auth-gate";
-import type { RestRequest, RestResponse, RestRoute } from "./rest-adapter";
+import type {
+  RegisteredRestOperationRunner,
+  RestRequest,
+  RestResponse,
+  RestRoute,
+} from "./rest-adapter";
 import {
   extractExpectedRevision,
   v1Error,
@@ -29,6 +34,7 @@ export interface RouteFactoryDeps {
   authGate?: AuthGate | undefined;
   auditService?: AuditService | undefined;
   defaultEnvironment?: string | undefined;
+  runRegisteredOperation: RegisteredRestOperationRunner;
 }
 
 function param(params: Record<string, string>, name: string): string {
@@ -58,7 +64,8 @@ export function buildRoutes(deps: RouteFactoryDeps): RestRoute[] {
       schemaRegistry,
       authGate,
       auditService,
-      defaultEnvironment: deps.defaultEnvironment ?? "default",
+      defaultEnvironment: deps.defaultEnvironment,
+      runRegisteredOperation: deps.runRegisteredOperation,
     }),
     configListRoute(deps),
     configGetRoute(deps),

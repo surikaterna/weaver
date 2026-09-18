@@ -15,7 +15,12 @@ import type { SchemaRegistry } from "../core/schema-registry";
 import { parseScopeQuery } from "../core/scope-utils";
 import { createWeaverError } from "../types/index";
 import type { AuthGate } from "./auth-gate";
-import type { RestRequest, RestResponse, RestRoute } from "./rest-adapter";
+import type {
+  RegisteredRestOperationRunner,
+  RestRequest,
+  RestResponse,
+  RestRoute,
+} from "./rest-adapter";
 import {
   extractExpectedRevision,
   registeredSchemasResponse,
@@ -41,7 +46,6 @@ import {
   schemaRegistrationAuditContext,
   schemaRegistrationAuditOutcome,
   schemaRegistrationPersistenceContext,
-  schemaWriteAuditContext,
   schemaWriteAuditOutcome,
 } from "./schema-operation-audit";
 import { runRestSchemaOperation } from "./schema-operation-runner";
@@ -51,7 +55,8 @@ export interface SchemaRouteDeps {
   schemaRegistry?: SchemaRegistry | undefined;
   authGate?: AuthGate | undefined;
   auditService?: AuditService | undefined;
-  defaultEnvironment: string;
+  defaultEnvironment?: string | undefined;
+  runRegisteredOperation: RegisteredRestOperationRunner;
 }
 
 function canonicalRoutePath(
@@ -67,7 +72,6 @@ function canonicalRoutePath(
   }
   return `/${value}`;
 }
-
 function writeContext(request: {
   environment?: string | undefined;
   ifRevision?: string | undefined;
@@ -77,9 +81,7 @@ function writeContext(request: {
     ...(request.environment ? { environment: request.environment } : {}),
   };
 }
-
 const schemaRegistryAdminKey = "_weaver.registry.schemas";
-
 function adminDenied(
   request: RestRequest,
   deps: SchemaRouteDeps,
@@ -97,7 +99,6 @@ function adminDenied(
   }
   return gate.gateWrite(context, "admin", schemaRegistryAdminKey);
 }
-
 function registeredWriteDenied(
   request: RestRequest,
   deps: SchemaRouteDeps,
@@ -114,7 +115,6 @@ function registeredWriteDenied(
     request.schemaMap?.get(key),
   );
 }
-
 async function registeredReadDenied(
   request: RestRequest,
   deps: SchemaRouteDeps,
@@ -260,20 +260,19 @@ function setRegisteredObjectRoute(deps: SchemaRouteDeps): RestRoute {
       if (denied) return denied;
       if (!schemaRegistry) return unavailable(configService);
       const request = parseRegisteredObjectRequest(metadata, req.body);
-      const result = await runRestSchemaOperation(
+      const environment = request.environment ?? deps.defaultEnvironment;
+      const result = await deps.runRegisteredOperation(
         deps.auditService,
-        schemaWriteAuditContext(
-          "schema.write.object",
-          request.anchorPath,
-          request.environment ?? deps.defaultEnvironment,
-          restSchemaAuditIdentity(req.authContext),
-        ),
+        req.authContext,
+        "schema.write.object",
+        request.anchorPath,
+        environment,
         () =>
           configService.setRegisteredObject(
             request.layer ?? "platform",
             request.anchorPath,
             request.value,
-            { ...writeContext(request), schemaRegistry },
+            { ...writeContext({ ...request, environment }), schemaRegistry },
           ),
         "registered object write",
         registeredObjectWriteResponseSchema,
@@ -308,20 +307,19 @@ function patchRegisteredPathRoute(deps: SchemaRouteDeps): RestRoute {
       if (denied) return denied;
       if (!schemaRegistry) return unavailable(configService);
       const request = parseRegisteredPathRequest(metadata, req.body);
-      const result = await runRestSchemaOperation(
+      const environment = request.environment ?? deps.defaultEnvironment;
+      const result = await deps.runRegisteredOperation(
         deps.auditService,
-        schemaWriteAuditContext(
-          "schema.patch.path",
-          request.path,
-          request.environment ?? deps.defaultEnvironment,
-          restSchemaAuditIdentity(req.authContext),
-        ),
+        req.authContext,
+        "schema.patch.path",
+        request.path,
+        environment,
         () =>
           configService.patchRegisteredPath(
             request.layer ?? "platform",
             request.path,
             request.value,
-            { ...writeContext(request), schemaRegistry },
+            { ...writeContext({ ...request, environment }), schemaRegistry },
           ),
         "registered path patch",
         registeredPathPatchResponseSchema,
@@ -357,18 +355,20 @@ function validateRegisteredEffectiveRoute(deps: SchemaRouteDeps): RestRoute {
         return { ...unavailable(configService), status: 422 };
       }
       const request = parseRegisteredEffectiveRequest(metadata);
-      const validation = await runRestSchemaOperation(
+      const environment = request.environment ?? deps.defaultEnvironment;
+      const validation = await deps.runRegisteredOperation(
         deps.auditService,
-        schemaWriteAuditContext(
-          "schema.validate.effective",
-          request.anchorPath,
-          request.environment ?? deps.defaultEnvironment,
-          restSchemaAuditIdentity(req.authContext),
-        ),
+        req.authContext,
+        "schema.validate.effective",
+        request.anchorPath,
+        environment,
         () =>
           configService.validateRegisteredEffective(
             request.anchorPath,
-            effectiveValidationContext(request, schemaRegistry),
+            effectiveValidationContext(
+              { ...request, environment },
+              schemaRegistry,
+            ),
           ),
         "registered effective validation",
         registeredEffectiveValidationResponseSchema,
