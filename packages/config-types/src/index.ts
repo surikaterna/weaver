@@ -106,6 +106,16 @@ export type {
   WriteError,
   WriteResult,
 } from "./providers";
+export type {
+  RegisteredEffectiveValidationRequest,
+  RegisteredEffectiveValidationResponse,
+  RegisteredObjectWriteRequest,
+  RegisteredObjectWriteResponse,
+  RegisteredPathPatchRequest,
+  RegisteredPathPatchResponse,
+  RegisteredSchemasResponse,
+  RegisteredWriteOptions,
+} from "./registered-operations";
 // result.ts — Discriminated Result<T,E> union for fallible operations
 export type { Result } from "./result";
 export { err, isErr, isOk, ok } from "./result";
@@ -121,6 +131,12 @@ export type {
   SchemaRegistrationResponse,
   ServiceSchemaRegistrationRequest,
 } from "./schema-registration";
+export type {
+  SchemaValidationError,
+  SchemaValidationErrorCode,
+  SchemaValidationPathSegment,
+  SchemaValidationResult,
+} from "./schema-validation";
 // schemas-access.ts — Zod schemas for access context and write policy types
 export {
   configurationAccessContextSchema,
@@ -204,6 +220,15 @@ export {
   writeResultSchema,
 } from "./schemas-providers";
 export {
+  registeredEffectiveValidationRequestSchema,
+  registeredEffectiveValidationResponseSchema,
+  registeredObjectWriteRequestSchema,
+  registeredObjectWriteResponseSchema,
+  registeredPathPatchRequestSchema,
+  registeredPathPatchResponseSchema,
+  registeredSchemasResponseSchema,
+} from "./schemas-registered-operations";
+export {
   isReservedPathSegment,
   providerIdPattern,
   providerIdSchema,
@@ -224,6 +249,12 @@ export {
   schemaRegistrationResponseSchema,
   serviceSchemaRegistrationRequestSchema,
 } from "./schemas-schema-registration";
+export {
+  schemaValidationErrorCodeSchema,
+  schemaValidationErrorSchema,
+  schemaValidationPathSegmentSchema,
+  schemaValidationResultSchema,
+} from "./schemas-schema-validation";
 // schemas-session.ts — Zod schemas for session types
 export {
   godModeSessionSchema,
