@@ -15,7 +15,10 @@ import type {
 } from "@weaver-conf/config-types";
 import type { ConfigDelta, ConfigSnapshot } from "../types/index";
 import { registerInternalConfigAccess } from "./config-service-internal";
+import { createRegisteredWriteOperations } from "./config-service-schema-writes";
 import type {
+  EffectiveValidationContext,
+  SchemaWriteContext,
   WeaverConfigService,
   WeaverConfigServiceOptions,
   WriteContext,
@@ -31,7 +34,13 @@ import {
 } from "./scope-utils";
 
 export type { Unsubscribe } from "./config-service-types";
-export type { WeaverConfigService, WeaverConfigServiceOptions, WriteContext };
+export type {
+  EffectiveValidationContext,
+  SchemaWriteContext,
+  WeaverConfigService,
+  WeaverConfigServiceOptions,
+  WriteContext,
+};
 
 const SIZE_WARNING = 1_048_576; // 1MB
 const internalWriteToken: unique symbol = Symbol("weaver.internalWrite");
@@ -237,6 +246,28 @@ export async function createWeaverConfigService(
     const base = getBaseEntries();
     if (!scopePath?.length) return base;
     return deepMerge(base, getScopeState(scopePath));
+  }
+
+  async function getLayerValue(layer: string, key: string): Promise<unknown> {
+    const provider = resolveProvider(layer);
+    if (!provider) return undefined;
+
+    const parsedLayer = parseScopeLayer(layer);
+    const isDynamicScopedLayer =
+      parsedLayer !== null && provider.layer === parsedLayer.scopeId;
+    const canonicalLayer = normalizeScopeLayer(layer);
+    if (
+      isDynamicScopedLayer &&
+      hasScopedLayerIo(provider) &&
+      !dynamicScopeEntries.has(canonicalLayer)
+    ) {
+      const data = await provider.loadLayer(canonicalLayer);
+      dynamicScopeEntries.set(canonicalLayer, data.entries);
+    }
+    const entries = isDynamicScopedLayer
+      ? dynamicScopeEntries.get(canonicalLayer)
+      : layerData.get(provider.id);
+    return deepGet(entries ?? {}, key);
   }
 
   function getRevisionState(): Record<string, unknown> {
@@ -612,6 +643,16 @@ export async function createWeaverConfigService(
         return { success: true, revision };
       });
     },
+
+    ...createRegisteredWriteOperations({
+      defaultEnvironment: environment,
+      getLayerValue,
+      get: (key, getOptions) => service.get(key, getOptions),
+      set: (layer, key, value, writeOptions) =>
+        service.set(layer, key, value, writeOptions),
+      isInternalWrite,
+      checkRevision,
+    }),
   };
 
   registerInternalConfigAccess(service, {
