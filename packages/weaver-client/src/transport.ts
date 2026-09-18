@@ -1,5 +1,6 @@
 import type {
   ConfigurationPropertySchema,
+  RegisteredEffectiveValidationResponse,
   SchemaRegistrationRequest,
   SchemaRegistrationResponse,
   ScopeDefinition,
@@ -22,6 +23,12 @@ export interface WriteOptions {
 }
 
 export type { WriteResult };
+
+export interface EffectiveValidationOptions {
+  readonly anchorPath: string;
+  readonly environment?: string | undefined;
+  readonly scopePath?: ScopeInstance[] | undefined;
+}
 
 /**
  * Transport interface for communicating with a Weaver configuration backend.
@@ -62,6 +69,19 @@ export interface WeaverTransport {
   registerSchema?(
     request: SchemaRegistrationRequest,
   ): Promise<SchemaRegistrationResponse>;
+  setRegisteredObject?(
+    anchorPath: string,
+    value: unknown,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  patchRegisteredPath?(
+    path: string,
+    value: unknown,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  validateRegisteredEffective?(
+    options: EffectiveValidationOptions,
+  ): Promise<RegisteredEffectiveValidationResponse>;
 
   // Lifecycle
   close(): Promise<void>;
