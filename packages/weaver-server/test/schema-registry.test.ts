@@ -283,4 +283,27 @@ describe("SchemaRegistry", () => {
       "/lynx/plugins/ghost.settings.panel:default",
     );
   });
+
+  it("resolves omitted environments through the persistent registry default", async () => {
+    const persistentConfigService = await createWeaverConfigService({
+      providers: [
+        createInMemoryStorageProvider({
+          id: "platform",
+          layer: "platform",
+          initialEntries: {},
+        }),
+      ],
+      environment: "default",
+    });
+    const registry = await createPersistentSchemaRegistry({
+      configService: persistentConfigService,
+      environment: "default",
+    });
+    await registry.register(serviceRegistration());
+
+    expect((await registry.resolveAnchor("/lynx"))?.environment).toBe(
+      "default",
+    );
+    expect(await registry.resolveAnchor("/lynx", "other")).toBeNull();
+  });
 });
