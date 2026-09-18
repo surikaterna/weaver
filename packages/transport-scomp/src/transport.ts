@@ -18,7 +18,7 @@ import {
   type ScopeInstance,
   type WriteResult,
 } from "@weaver-conf/config-types";
-import { WeaverConfig } from "./contract";
+import { WeaverConfig, type WeaverConfigContract } from "./contract";
 
 // --- Transport types (defined locally to avoid depending on weaver-client) ---
 
@@ -99,11 +99,25 @@ function buildScopeString(scopePath?: ScopeInstance[]): string | undefined {
 export function createScompTransport(
   options: ScompTransportOptions,
 ): WeaverTransport {
-  const { peer } = options;
-  const client = peer.consumes(WeaverConfig);
-
+  const client = options.peer.consumes(WeaverConfig);
   const activeFeeds: Array<{ abort: () => void }> = [];
+  return {
+    ...readMethods(client),
+    ...subscriptionMethod(client, activeFeeds),
+    ...writeMethods(client),
+    ...scopeMethods(client),
+    ...schemaMethods(client),
+    ...registeredMethods(client),
+    async close() {
+      for (const feed of activeFeeds) feed.abort();
+      activeFeeds.length = 0;
+    },
+  };
+}
 
+function readMethods(
+  client: WeaverConfigContract,
+): Pick<WeaverTransport, "resolveAll" | "get" | "getNamespace" | "inspect"> {
   return {
     async resolveAll(opts?) {
       const scope = buildScopeString(opts?.scopePath);
@@ -134,7 +148,14 @@ export function createScompTransport(
     async inspect(key) {
       return client.inspect({ key });
     },
+  };
+}
 
+function subscriptionMethod(
+  client: WeaverConfigContract,
+  activeFeeds: Array<{ abort: () => void }>,
+): Pick<WeaverTransport, "subscribe"> {
+  return {
     subscribe(handler) {
       const feed = client.subscribe({});
       let aborted = false;
@@ -165,7 +186,13 @@ export function createScompTransport(
         if (idx >= 0) activeFeeds.splice(idx, 1);
       };
     },
+  };
+}
 
+function writeMethods(
+  client: WeaverConfigContract,
+): Pick<WeaverTransport, "set" | "setMany" | "remove"> {
+  return {
     async set(key, value, opts?) {
       return client.set({
         key,
@@ -192,7 +219,13 @@ export function createScompTransport(
         ...(opts?.environment != null && { environment: opts.environment }),
       });
     },
+  };
+}
 
+function scopeMethods(
+  client: WeaverConfigContract,
+): Pick<WeaverTransport, "listScopes" | "listScopeValues"> {
+  return {
     async listScopes() {
       const result = await client.listScopes({});
       return result.scopes;
@@ -210,7 +243,13 @@ export function createScompTransport(
       });
       return result.values;
     },
+  };
+}
 
+function schemaMethods(
+  client: WeaverConfigContract,
+): Pick<WeaverTransport, "fetchSchemas" | "registerSchema"> {
+  return {
     async fetchSchemas() {
       const result = registeredSchemasResponseSchema.parse(
         await client.fetchSchemas({}),
@@ -221,7 +260,16 @@ export function createScompTransport(
     async registerSchema(request) {
       return client.registerSchema(request);
     },
+  };
+}
 
+function registeredMethods(
+  client: WeaverConfigContract,
+): Pick<
+  WeaverTransport,
+  "setRegisteredObject" | "patchRegisteredPath" | "validateRegisteredEffective"
+> {
+  return {
     async setRegisteredObject(anchorPath, value, opts?) {
       const request = registeredObjectWriteRequestSchema.parse({
         anchorPath,
@@ -257,11 +305,6 @@ export function createScompTransport(
       });
       const response = await client.validateRegisteredEffective(request);
       return registeredEffectiveValidationResponseSchema.parse(response);
-    },
-
-    async close() {
-      for (const feed of activeFeeds) feed.abort();
-      activeFeeds.length = 0;
     },
   };
 }
