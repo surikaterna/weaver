@@ -32,7 +32,7 @@ All transports implement the same contract: bootstrap snapshot, push deltas, acc
 
 ### Schema management
 
-Schemas are stored server-side at the `_weaver.schemas` namespace (config about config). Clients subscribe to this namespace when `schemas: true` is set. Validation behavior:
+Services and fragment providers register explicit path-first schema requests through `registerSchema()`. The server persists registration metadata behind protected internal paths, while clients with `schemas: true` fetch the registered property schemas through the schema administration API. Ordinary `defineNamespace()` declarations remain local typed config accessors and are not registration requests. Validation behavior:
 
 - **Server-schema validation** = soft gate (warn on mismatch, return value)
 - **Explicit Zod schema** = hard gate (return `undefined` on parse failure)
@@ -145,7 +145,7 @@ export interface WeaverClient {
   withScope(scope: ScopeInstance[]): ScopedClient;
   instance(basePath: string, instanceId: string): InstanceClient;
 
-  registerNamespaces(defs: NamespaceDefinition<z.ZodRawShape>[]): Promise<void>;
+  registerSchema(request: SchemaRegistrationRequest): Promise<SchemaRegistrationResponse>;
   isSensitive(key: string): boolean;
 
   onMode(handler: (mode: "live" | "cached" | "degraded") => void): () => void;
@@ -352,7 +352,7 @@ await client.set("app.ui.theme", "light");
 - One package to learn, same patterns in browser and service
 - Type safety via `defineNamespace` without codegen
 - Graceful degradation — schemas, persistence, and sync are all optional
-- Namespace declarations are the single source of truth (compile-time types + server registration)
+- Explicit service and fragment requests are the single source of truth for server schema registration; namespace declarations provide local typed config access only
 
 ### Negative
 
@@ -363,7 +363,7 @@ await client.set("app.ui.theme", "light");
 ### Risks
 
 - Zod version coupling between client and server packages
-- Schema drift between local `defineNamespace` and server-persisted schemas (mitigated by `registerNamespaces()` + server-side validation)
+- Schema drift between local `defineNamespace` validation and server-persisted schemas (mitigated by explicit path-first service/fragment registration and server-side validation)
 
 ## Related
 
