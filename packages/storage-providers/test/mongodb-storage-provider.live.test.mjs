@@ -26,6 +26,10 @@ function registerTopologySuite(topology, uri) {
         assertConcurrentMutations(state.collection));
       test("preserves recreated fields across a stale writer retry", () =>
         assertDeleteRecreateABA(state.collection));
+      test("removes every legacy duplicate of an exact canonical root", () =>
+        assertDuplicateRootRemoval(state.collection));
+      test("preserves a fresh root recreated after duplicate observation", () =>
+        assertDuplicateRemovalRecreation(state.collection));
       test("preserves literal dotted root identity during concurrent writes", () =>
         assertConcurrentLiteralRoot(state.collection));
       test("removes only exact path aliases and descendants", () =>
@@ -104,6 +108,39 @@ async function assertDeleteRecreateABA(collection) {
   expect((await setup.load()).entries.billing).toEqual({ c: 3, a: 1 });
 }
 
+async function assertDuplicateRootRemoval(collection) {
+  await seedDuplicateRoots(collection);
+  const remover = createProvider(collection, "mongo-duplicate-remover");
+
+  expect((await remover.remove("billing")).success).toBe(true);
+
+  const remaining = await collection.find({
+    layer: "platform",
+    environment: "test",
+    key: "billing",
+  }).toArray();
+  expect(remaining).toEqual([]);
+  expect((await createProvider(collection).load()).entries.billing).toBeUndefined();
+}
+
+async function assertDuplicateRemovalRecreation(collection) {
+  await seedDuplicateRoots(collection);
+  const gate = delayedFirstDelete(collection);
+  const remover = createProvider(gate.collection, "mongo-duplicate-remover");
+  const recreator = createProvider(collection, "mongo-duplicate-recreator");
+
+  const removal = remover.remove("billing");
+  await gate.reached;
+  expect((await recreator.remove("billing")).success).toBe(true);
+  expect((await recreator.write("billing", { fresh: true })).success).toBe(true);
+  gate.release();
+
+  expect((await removal).success).toBe(true);
+  const reloaded = await createProvider(collection).load();
+  expect(reloaded.entries.billing).toEqual({ fresh: true });
+  expect(await collection.countDocuments({ key: "billing" })).toBe(1);
+}
+
 async function assertConcurrentLiteralRoot(collection) {
   const first = createProvider(collection, "mongo-literal-first");
   const second = createProvider(collection, "mongo-literal-second");
@@ -151,7 +188,13 @@ async function assertBoundedDiscovery(collection, commands) {
     environment: "test",
     key: { $regex: expect.stringMatching(/^\^.*billing/) },
   });
-  expect(find.command.projection).toEqual({ _id: 0, key: 1 });
+  expect(find.command.projection).toEqual({
+    _id: 1,
+    key: 1,
+    updatedAt: 1,
+    _weaverMutationToken: 1,
+    _weaverMutationVersion: 1,
+  });
 }
 
 function createProvider(collection, id = "mongo-platform") {
@@ -171,6 +214,15 @@ function stored(key, value) {
     value,
     updatedAt: new Date().toISOString(),
   };
+}
+
+async function seedDuplicateRoots(collection) {
+  const provider = createProvider(collection, "mongo-duplicate-setup");
+  expect((await provider.write("billing", { current: true })).success).toBe(true);
+  await collection.insertOne({
+    ...stored("billing", { old: true }),
+    updatedAt: "2024-01-01T00:00:00.000Z",
+  });
 }
 
 function delayedFirstUpdate(collection) {
@@ -196,4 +248,33 @@ function delayedFirstUpdate(collection) {
     },
   });
   return { collection: wrapped, reached, release: releaseUpdate };
+}
+
+function delayedFirstDelete(collection) {
+  return delayedFirstOperation(collection, "deleteOne");
+}
+
+function delayedFirstOperation(collection, operation) {
+  let signalReached;
+  let releaseOperation;
+  let delayed = false;
+  const reached = new Promise((resolve) => { signalReached = resolve; });
+  const released = new Promise((resolve) => { releaseOperation = resolve; });
+  const wrapped = new Proxy(collection, {
+    get(target, property) {
+      if (property !== operation) {
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return async (...args) => {
+        if (!delayed) {
+          delayed = true;
+          signalReached();
+          await released;
+        }
+        return target[operation](...args);
+      };
+    },
+  });
+  return { collection: wrapped, reached, release: releaseOperation };
 }

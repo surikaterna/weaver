@@ -16,6 +16,11 @@ import type {
 import type { ChangeStream, Collection } from "mongodb";
 import { z } from "zod";
 import {
+  deleteObservedMongoDocuments,
+  type ObservedMongoDocument,
+  observedMongoDocumentSchema,
+} from "./mongodb-observed-cleanup.js";
+import {
   isSameMongoPathOrDescendant,
   mongoPathCandidatePattern,
 } from "./mongodb-path-identity.js";
@@ -39,8 +44,6 @@ export interface MongoDBStorageProviderOptions {
   /** Timeout in milliseconds for MongoDB operations. Defaults to 30000 (30s). */
   timeoutMs?: number | undefined;
 }
-
-const storedKeyDocumentSchema = z.object({ key: z.string() });
 
 class MongoDBStorageProvider implements ConfigurationStorageProvider {
   readonly id: string;
@@ -251,8 +254,8 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
     key: string,
   ): Promise<void> {
     try {
-      const storedKeys = await this.findStoredKeys(layer, key, false);
-      await this.deleteStoredKeys(layer, storedKeys);
+      const documents = await this.findStoredDocuments(layer, key, false);
+      await this.deleteObservedDocuments(layer, documents);
     } catch (err) {
       const message = extractErrorMessage(err);
       try {
@@ -269,23 +272,23 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
     layer: string,
     key: string,
   ): Promise<void> {
-    const storedKeys = await this.findStoredKeys(layer, key, false);
-    await this.deleteStoredKeys(layer, storedKeys);
+    const documents = await this.findStoredDocuments(layer, key, false);
+    await this.deleteObservedDocuments(layer, documents);
   }
 
   private async deletePathAndDescendants(
     layer: string,
     key: string,
   ): Promise<void> {
-    const storedKeys = await this.findStoredKeys(layer, key, true);
-    await this.deleteStoredKeys(layer, storedKeys);
+    const documents = await this.findStoredDocuments(layer, key, true);
+    await this.deleteObservedDocuments(layer, documents);
   }
 
-  private async findStoredKeys(
+  private async findStoredDocuments(
     layer: string,
     key: string,
     includeCanonicalPath: boolean,
-  ): Promise<string[]> {
+  ): Promise<ObservedMongoDocument[]> {
     const rawDocs = await this.collection
       .find(
         {
@@ -293,35 +296,40 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
           environment: this.environment,
           key: { $regex: mongoPathCandidatePattern(key) },
         },
-        { projection: { _id: 0, key: 1 } },
+        {
+          projection: {
+            _id: 1,
+            key: 1,
+            updatedAt: 1,
+            _weaverMutationToken: 1,
+            _weaverMutationVersion: 1,
+          },
+        },
       )
       .maxTimeMS(this.timeoutMs)
       .toArray();
     const targetSegments = parsePath(key);
-    const docs = z.array(storedKeyDocumentSchema).parse(rawDocs);
-    return docs
-      .filter((doc) => {
-        if (!isSameMongoPathOrDescendant(parsePath(doc.key), targetSegments)) {
-          return false;
-        }
-        return includeCanonicalPath || doc.key !== key;
-      })
-      .map((doc) => doc.key);
+    const docs = z.array(observedMongoDocumentSchema).parse(rawDocs);
+    return docs.filter((doc) => {
+      if (!isSameMongoPathOrDescendant(parsePath(doc.key), targetSegments)) {
+        return false;
+      }
+      return includeCanonicalPath || doc.key !== key;
+    });
   }
 
-  private async deleteStoredKeys(
+  private async deleteObservedDocuments(
     layer: string,
-    storedKeys: readonly string[],
+    documents: readonly ObservedMongoDocument[],
   ): Promise<void> {
-    if (storedKeys.length === 0) return;
-    await this.collection.deleteMany(
-      {
-        layer,
-        environment: this.environment,
-        $or: storedKeys.map((storedKey) => ({ key: storedKey })),
-      },
-      { maxTimeMS: this.timeoutMs },
-    );
+    await deleteObservedMongoDocuments({
+      collection: this.collection,
+      layer,
+      environment: this.environment,
+      documents,
+      compareValue: false,
+      timeoutMs: this.timeoutMs,
+    });
   }
 }
 

@@ -9,6 +9,7 @@ import {
 } from "@weaver-conf/config-engine";
 import type { Collection, Document, Filter } from "mongodb";
 import { z } from "zod";
+import { deleteObservedMongoDocuments } from "./mongodb-observed-cleanup.js";
 import { canonicalMongoPath } from "./mongodb-path-identity.js";
 
 const MAX_MUTATION_ATTEMPTS = 5;
@@ -72,6 +73,10 @@ export async function mutateMongoRoot(
       options.environment,
       options.timeoutMs,
     );
+    if (isWholeRootRemoval(options)) {
+      await deleteObservedExactRoots(options, docs);
+      return true;
+    }
     const nextMutation = buildNextRootMutation(options, docs);
     if (nextMutation.kind === "none") return false;
     if (await commitRootMutation(options, docs, nextMutation)) return true;
@@ -81,7 +86,6 @@ export async function mutateMongoRoot(
 
 type NextRootMutation =
   | { readonly kind: "write"; readonly value: unknown }
-  | { readonly kind: "delete" }
   | { readonly kind: "none" };
 
 function buildNextRootMutation(
@@ -90,9 +94,6 @@ function buildNextRootMutation(
 ): NextRootMutation {
   if (options.tail.length === 0 && options.mutation.kind === "write") {
     return { kind: "write", value: options.mutation.value };
-  }
-  if (options.tail.length === 0) {
-    return { kind: "delete" };
   }
   const entries = hydrateEntries(docs);
   const existingRoot = deepGet(entries, options.rootKey);
@@ -111,19 +112,15 @@ function buildNextRootMutation(
 async function commitRootMutation(
   options: RootMutationOptions,
   docs: readonly StoredConfigDocument[],
-  mutation: Exclude<NextRootMutation, { readonly kind: "none" }>,
+  mutation: { readonly kind: "write"; readonly value: unknown },
 ): Promise<boolean> {
   const canonical = sortConfigDocuments(
     docs.filter((doc) => doc.key === options.rootKey),
   ).at(-1);
   if (canonical !== undefined) {
-    return mutation.kind === "delete"
-      ? deleteCanonicalRoot(options, canonical)
-      : updateCanonicalRoot(options, canonical, mutation.value);
+    return updateCanonicalRoot(options, canonical, mutation.value);
   }
-  return mutation.kind === "delete"
-    ? true
-    : insertCanonicalRoot(options, mutation.value);
+  return insertCanonicalRoot(options, mutation.value);
 }
 
 async function updateCanonicalRoot(
@@ -150,18 +147,22 @@ async function updateCanonicalRoot(
   return result.matchedCount === 1;
 }
 
-async function deleteCanonicalRoot(
+function isWholeRootRemoval(options: RootMutationOptions): boolean {
+  return options.tail.length === 0 && options.mutation.kind === "remove";
+}
+
+async function deleteObservedExactRoots(
   options: RootMutationOptions,
-  canonical: StoredConfigDocument,
-): Promise<boolean> {
-  const result = await options.collection.deleteOne(
-    {
-      ...canonicalIdentity(options, canonical),
-      ...observedMutationState(canonical),
-    },
-    { maxTimeMS: options.timeoutMs },
-  );
-  return result.deletedCount === 1;
+  documents: readonly StoredConfigDocument[],
+): Promise<void> {
+  await deleteObservedMongoDocuments({
+    collection: options.collection,
+    layer: options.layer,
+    environment: options.environment,
+    documents: documents.filter((document) => document.key === options.rootKey),
+    compareValue: true,
+    timeoutMs: options.timeoutMs,
+  });
 }
 
 async function insertCanonicalRoot(

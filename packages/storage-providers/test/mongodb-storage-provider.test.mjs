@@ -13,7 +13,9 @@ function createMockCollection() {
             d.environment === filter.environment &&
             (filter.key === undefined || new RegExp(filter.key.$regex).test(d.key)),
         )
-        .map((doc) => options?.projection ? { key: doc.key } : doc);
+        .map((doc) => options?.projection
+          ? projectDocument(doc, options.projection)
+          : doc);
       return {
         maxTimeMS() { return this; },
         toArray: () => Promise.resolve(results),
@@ -66,15 +68,15 @@ function matchesDocument(doc, filter) {
     const expectedId = filter.$expr.$eq[1];
     if (String(doc._id) !== String(expectedId)) return false;
   }
-  if (filter._id !== undefined && String(doc._id) !== String(filter._id)) {
-    return false;
-  }
+  if (!matchesField(doc, filter, "_id")) return false;
   if (filter.layer !== undefined && doc.layer !== filter.layer) return false;
   if (filter.environment !== undefined && doc.environment !== filter.environment) {
     return false;
   }
   if (filter.key !== undefined && doc.key !== filter.key) return false;
-  return matchesField(doc, filter, "_weaverMutationVersion") &&
+  return matchesField(doc, filter, "updatedAt") &&
+    matchesField(doc, filter, "value") &&
+    matchesField(doc, filter, "_weaverMutationVersion") &&
     matchesField(doc, filter, "_weaverMutationToken");
 }
 
@@ -82,7 +84,9 @@ function matchesField(doc, filter, key) {
   const condition = filter[key];
   if (condition === undefined) return true;
   if (condition?.$exists === false) return !Object.hasOwn(doc, key);
-  if (condition?.$eq !== undefined) return doc[key] === condition.$eq;
+  if (condition !== null && typeof condition === "object" && "$eq" in condition) {
+    return JSON.stringify(doc[key]) === JSON.stringify(condition.$eq);
+  }
   return doc[key] === condition;
 }
 
@@ -325,7 +329,7 @@ test("write() succeeds when stale descendant cleanup fails", async () => {
     value: "stale",
     updatedAt: "9999-01-01",
   });
-  col.deleteMany = () => Promise.reject(new Error("cleanup timeout"));
+  col.deleteOne = () => Promise.reject(new Error("cleanup timeout"));
   const provider = createMongoDBStorageProvider({
     id: "mongo-user",
     layer: "user",
@@ -364,7 +368,15 @@ test("cleanup discovers candidates with a narrowed key-only query", async () => 
   const cleanupQuery = cleanupQueries[0];
   expect(cleanupQuery.filter.key.$regex).toMatch(/^\^/);
   expect(cleanupQuery.filter.key.$regex).toContain("billing");
-  expect(cleanupQuery.options).toEqual({ projection: { _id: 0, key: 1 } });
+  expect(cleanupQuery.options).toEqual({
+    projection: {
+      _id: 1,
+      key: 1,
+      updatedAt: 1,
+      _weaverMutationToken: 1,
+      _weaverMutationVersion: 1,
+    },
+  });
   expect(cleanupQuery.filter).not.toEqual({ layer: "user", environment: "prod" });
 });
 
@@ -440,7 +452,7 @@ test("nested remove succeeds without resurrecting stale descendants when cleanup
       updatedAt: "9999-01-01",
     },
   );
-  col.deleteMany = () => Promise.reject(new Error("cleanup timeout"));
+  col.deleteOne = () => Promise.reject(new Error("cleanup timeout"));
   const provider = createMongoDBStorageProvider({
     id: "mongo-user",
     layer: "user",
@@ -557,4 +569,12 @@ function deferred() {
     resolve = complete;
   });
   return { promise, resolve };
+}
+
+function projectDocument(document, projection) {
+  return Object.fromEntries(
+    Object.keys(projection)
+      .filter((key) => projection[key] === 1 && Object.hasOwn(document, key))
+      .map((key) => [key, document[key]]),
+  );
 }

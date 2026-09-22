@@ -1,3 +1,4 @@
+import { ObjectId } from "mongodb";
 import { createMongoDBStorageProvider } from "../src/mongodb-storage-provider.ts";
 
 test("stale writers retry after delete and recreation without overwriting recreated fields", async () => {
@@ -73,6 +74,75 @@ test("overflowing legacy versions migrate without reset or token reuse", async (
   expect(collection.docs[0]).not.toHaveProperty("_weaverMutationVersion");
 });
 
+test("whole-root removal deletes legacy and deterministic exact duplicates", async () => {
+  const collection = createCollection();
+  const provider = createProvider(collection, "duplicate-remover");
+  expect((await provider.write("billing", { current: true })).success).toBe(true);
+  collection.docs.unshift(stored({ old: true }, {}, new ObjectId()));
+
+  expect((await provider.remove("billing")).success).toBe(true);
+
+  expect(collection.docs.filter((doc) => doc.key === "billing")).toEqual([]);
+  expect((await provider.load()).entries.billing).toBeUndefined();
+});
+
+test.each([
+  ["absent", {}],
+  ["malformed", { _weaverMutationToken: 42 }],
+  ["numeric", { _weaverMutationVersion: 7 }],
+])("whole-root removal compares %s mutation metadata", async (_name, metadata) => {
+  const collection = createCollection();
+  collection.docs.push(stored({ old: true }, metadata));
+
+  expect((await createProvider(collection, "legacy-remover").remove("billing")).success)
+    .toBe(true);
+  expect(collection.docs).toEqual([]);
+});
+
+test("whole-root removal preserves a fresh generation after observing duplicates", async () => {
+  const collection = createCollection();
+  const setup = createProvider(collection, "duplicate-setup");
+  expect((await setup.write("billing", { current: true })).success).toBe(true);
+  collection.docs.unshift(stored({ old: true }, {}, new ObjectId()));
+  const gate = delayedFirstDelete(collection);
+  const remover = createProvider(gate.collection, "duplicate-remover");
+  const recreator = createProvider(collection, "duplicate-recreator");
+
+  const removal = remover.remove("billing");
+  await gate.reached;
+  expect((await recreator.remove("billing")).success).toBe(true);
+  expect((await recreator.write("billing", { fresh: true })).success).toBe(true);
+  gate.release();
+
+  expect((await removal).success).toBe(true);
+  expect((await setup.load()).entries.billing).toEqual({ fresh: true });
+  expect(collection.docs.filter((doc) => doc.key === "billing")).toHaveLength(1);
+});
+
+test("alias cleanup preserves a descendant recreated after discovery", async () => {
+  const collection = createCollection();
+  collection.docs.push({
+    ...stored("old", {}, "legacy-descendant"),
+    key: "billing.plan",
+  });
+  const gate = delayedFirstDelete(collection);
+  const remover = createProvider(gate.collection, "alias-remover");
+
+  const removal = remover.remove("billing");
+  await gate.reached;
+  await collection.deleteOne({ _id: "legacy-descendant" });
+  collection.docs.push({
+    ...stored("fresh", { _weaverMutationToken: "fresh-token" }, "legacy-descendant"),
+    key: "billing.plan",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  });
+  gate.release();
+
+  expect((await removal).success).toBe(true);
+  expect((await createProvider(collection, "alias-reload").load()).entries.billing)
+    .toEqual({ plan: "fresh" });
+});
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function createCollection() {
@@ -84,7 +154,7 @@ function createCollection() {
         doc.layer === filter.layer && doc.environment === filter.environment &&
         matchesKey(doc, filter.key));
       const results = matches.map((doc) =>
-        options?.projection ? { key: doc.key } : doc);
+        options?.projection ? projectDocument(doc, options.projection) : doc);
       return { maxTimeMS() { return this; }, toArray: async () => results };
     },
     async updateOne(filter, update) {
@@ -119,18 +189,25 @@ function createCollection() {
 }
 
 function matchesDocument(doc, filter) {
-  if (filter._id !== undefined && doc._id !== filter._id) return false;
+  if (!matchesField(doc, filter, "_id")) return false;
   const expectedId = filter.$expr?.$eq?.[1];
   if (expectedId !== undefined && doc._id !== expectedId) return false;
-  return matchesField(doc, filter, "_weaverMutationToken") &&
+  return matchesField(doc, filter, "updatedAt") &&
+    matchesField(doc, filter, "value") &&
+    matchesField(doc, filter, "_weaverMutationToken") &&
     matchesField(doc, filter, "_weaverMutationVersion");
 }
 
 function matchesField(doc, filter, key) {
   const condition = filter[key];
   if (condition === undefined) return true;
-  if (condition.$exists === false) return !Object.hasOwn(doc, key);
-  return doc[key] === condition.$eq;
+  if (condition !== null && typeof condition === "object") {
+    if (condition.$exists === false) return !Object.hasOwn(doc, key);
+    if ("$eq" in condition) {
+      return JSON.stringify(doc[key]) === JSON.stringify(condition.$eq);
+    }
+  }
+  return JSON.stringify(doc[key]) === JSON.stringify(condition);
 }
 
 function matchesKey(doc, condition) {
@@ -138,9 +215,9 @@ function matchesKey(doc, condition) {
   return new RegExp(condition.$regex).test(doc.key);
 }
 
-function stored(value, metadata) {
+function stored(value, metadata, id = `legacy-${JSON.stringify(metadata)}`) {
   return {
-    _id: `legacy-${JSON.stringify(metadata)}`,
+    _id: id,
     layer: "user",
     environment: "prod",
     key: "billing",
@@ -148,6 +225,14 @@ function stored(value, metadata) {
     updatedAt: "2024-01-01T00:00:00.000Z",
     ...metadata,
   };
+}
+
+function projectDocument(document, projection) {
+  return Object.fromEntries(
+    Object.keys(projection)
+      .filter((key) => projection[key] === 1 && Object.hasOwn(document, key))
+      .map((key) => [key, document[key]]),
+  );
 }
 
 function createProvider(collection, id) {
@@ -163,4 +248,28 @@ function deferred() {
   let resolve;
   const promise = new Promise((complete) => { resolve = complete; });
   return { promise, resolve };
+}
+
+function delayedFirstDelete(collection) {
+  const reached = deferred();
+  const released = deferred();
+  let delayed = false;
+  const wrapped = new Proxy(collection, {
+    get(target, property) {
+      if (property !== "deleteOne") return Reflect.get(target, property, target);
+      return async (...args) => {
+        if (!delayed) {
+          delayed = true;
+          reached.resolve();
+          await released.promise;
+        }
+        return target.deleteOne(...args);
+      };
+    },
+  });
+  return {
+    collection: wrapped,
+    reached: reached.promise,
+    release: released.resolve,
+  };
 }

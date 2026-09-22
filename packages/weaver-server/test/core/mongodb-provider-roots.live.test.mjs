@@ -24,6 +24,10 @@ function registerTopologySuite(topology, uri) {
         assertConcurrentReconstruction(state.collection));
       test("delete/recreate survives a stale service writer and reconstruction", () =>
         assertDeleteRecreateReconstruction(state.collection));
+      test("removed duplicate roots do not reappear after reconstruction", () =>
+        assertDuplicateRemovalReconstruction(state.collection));
+      test("concurrent fresh roots survive duplicate cleanup and reconstruction", () =>
+        assertDuplicateRecreationReconstruction(state.collection));
     },
   );
 }
@@ -80,6 +84,36 @@ async function assertDeleteRecreateReconstruction(collection) {
   expect(await restarted.getNamespace("billing")).toEqual({ c: 3, a: 1 });
 }
 
+async function assertDuplicateRemovalReconstruction(collection) {
+  await seedDuplicateRoots(collection);
+  const remover = await createService(collection, "mongo-duplicate-remover");
+
+  expect((await remover.remove("platform", "billing")).success).toBe(true);
+
+  const restarted = await createService(collection, "mongo-duplicate-restarted");
+  expect(await restarted.getNamespace("billing")).toEqual({});
+  expect(await collection.countDocuments({ key: "billing" })).toBe(0);
+}
+
+async function assertDuplicateRecreationReconstruction(collection) {
+  await seedDuplicateRoots(collection);
+  const gate = delayedFirstOperation(collection, "deleteOne");
+  const remover = await createService(gate.collection, "mongo-duplicate-remover");
+  const recreator = await createService(collection, "mongo-duplicate-recreator");
+
+  const removal = remover.remove("platform", "billing");
+  await gate.reached;
+  expect((await recreator.remove("platform", "billing")).success).toBe(true);
+  expect((await recreator.set("platform", "billing", { fresh: true })).success)
+    .toBe(true);
+  gate.release();
+  expect((await removal).success).toBe(true);
+
+  const restarted = await createService(collection, "mongo-fresh-restarted");
+  expect(await restarted.getNamespace("billing")).toEqual({ fresh: true });
+  expect(await collection.countDocuments({ key: "billing" })).toBe(1);
+}
+
 function createService(collection, id) {
   const provider = createMongoDBStorageProvider({
     id,
@@ -88,6 +122,19 @@ function createService(collection, id) {
     environment: "test",
   });
   return createWeaverConfigService({ providers: [provider], environment: "test" });
+}
+
+async function seedDuplicateRoots(collection) {
+  const setup = await createService(collection, "mongo-duplicate-setup");
+  expect((await setup.set("platform", "billing", { current: true })).success)
+    .toBe(true);
+  await collection.insertOne({
+    layer: "platform",
+    environment: "test",
+    key: "billing",
+    value: { old: true },
+    updatedAt: "2024-01-01T00:00:00.000Z",
+  });
 }
 
 function delayedFirstUpdate(collection) {
@@ -113,4 +160,29 @@ function delayedFirstUpdate(collection) {
     },
   });
   return { collection: wrapped, reached, release: releaseUpdate };
+}
+
+function delayedFirstOperation(collection, operation) {
+  let signalReached;
+  let releaseOperation;
+  let delayed = false;
+  const reached = new Promise((resolve) => { signalReached = resolve; });
+  const released = new Promise((resolve) => { releaseOperation = resolve; });
+  const wrapped = new Proxy(collection, {
+    get(target, property) {
+      if (property !== operation) {
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return async (...args) => {
+        if (!delayed) {
+          delayed = true;
+          signalReached();
+          await released;
+        }
+        return target[operation](...args);
+      };
+    },
+  });
+  return { collection: wrapped, reached, release: releaseOperation };
 }

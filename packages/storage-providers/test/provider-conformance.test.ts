@@ -36,10 +36,12 @@ interface KeyRegexFilter {
 }
 
 interface MongoFilter {
-  _id?: unknown;
+  _id?: MutationFilter;
   layer?: string;
   environment?: string;
   key?: string | KeyRegexFilter;
+  value?: MutationFilter;
+  updatedAt?: MutationFilter;
   _weaverMutationVersion?: MutationFilter;
   _weaverMutationToken?: MutationFilter;
   $or?: ReadonlyArray<{ key: string | KeyRegexFilter }>;
@@ -301,9 +303,7 @@ function matchesFilter(
   filter: MongoFilter,
 ): boolean {
   if (doc === undefined) return false;
-  if (filter._id !== undefined && String(doc._id) !== String(filter._id)) {
-    return false;
-  }
+  if (!matchesMutationField(doc, filter, "_id")) return false;
   if (filter.layer !== undefined && doc.layer !== filter.layer) return false;
   if (
     filter.environment !== undefined &&
@@ -312,6 +312,8 @@ function matchesFilter(
     return false;
   if (!matchesMutationField(doc, filter, "_weaverMutationVersion"))
     return false;
+  if (!matchesMutationField(doc, filter, "updatedAt")) return false;
+  if (!matchesMutationField(doc, filter, "value")) return false;
   if (!matchesMutationField(doc, filter, "_weaverMutationToken")) return false;
   if (filter.$or !== undefined)
     return filter.$or.some((clause) => matchesKey(doc.key, clause.key));
@@ -321,7 +323,12 @@ function matchesFilter(
 function matchesMutationField(
   doc: ConfigDoc,
   filter: MongoFilter,
-  key: "_weaverMutationVersion" | "_weaverMutationToken",
+  key:
+    | "_id"
+    | "updatedAt"
+    | "value"
+    | "_weaverMutationVersion"
+    | "_weaverMutationToken",
 ): boolean {
   const condition = filter[key];
   if (condition === undefined) return true;
@@ -329,7 +336,9 @@ function matchesMutationField(
     return doc[key] === condition;
   }
   if ("$exists" in condition) return !Object.hasOwn(doc, key);
-  if ("$eq" in condition) return doc[key] === condition.$eq;
+  if ("$eq" in condition) {
+    return JSON.stringify(doc[key]) === JSON.stringify(condition.$eq);
+  }
   return false;
 }
 
