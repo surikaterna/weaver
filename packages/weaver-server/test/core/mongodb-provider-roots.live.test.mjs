@@ -3,60 +3,65 @@ import { createMongoDBStorageProvider } from "@weaver-conf/storage-providers";
 import { MongoClient } from "mongodb";
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 
-const uri = process.env.WEAVER_TEST_MONGO_URI;
+const topologies = [
+  ["replica set", process.env.WEAVER_TEST_MONGO_URI],
+  ["standalone", process.env.WEAVER_TEST_MONGO_STANDALONE_URI],
+];
 
-describe.skipIf(uri === undefined)("Weaver server MongoDB root persistence", () => {
-  let client;
-  let collection;
-  let database;
+for (const [topology, uri] of topologies) {
+  registerTopologySuite(topology, uri);
+}
 
-  beforeAll(async () => {
-    client = await new MongoClient(uri, {
-      serverSelectionTimeoutMS: 10_000,
-    }).connect();
-    database = `weaver_server_${randomUUID().replaceAll("-", "")}`;
-    collection = client.db(database).collection("configuration");
+function registerTopologySuite(topology, uri) {
+  const state = { client: undefined, collection: undefined, database: "" };
+  describe.skipIf(uri === undefined)(
+    `Weaver server MongoDB root persistence (${topology})`,
+    () => {
+      beforeAll(() => openMongoFixture(state, uri));
+      beforeEach(() => state.collection.deleteMany({}));
+      afterAll(() => closeMongoFixture(state));
+      test("concurrent writes survive service reconstruction as one root", () =>
+        assertConcurrentReconstruction(state.collection));
+    },
+  );
+}
+
+async function openMongoFixture(state, uri) {
+  state.client = await new MongoClient(uri, {
+    serverSelectionTimeoutMS: 10_000,
+  }).connect();
+  state.database = `weaver_server_${randomUUID().replaceAll("-", "")}`;
+  state.collection = state.client.db(state.database).collection("configuration");
+}
+
+async function closeMongoFixture(state) {
+  await state.client.db(state.database).dropDatabase();
+  await state.client.close();
+}
+
+async function assertConcurrentReconstruction(collection) {
+  const first = await createService(collection, "mongo-platform-first");
+  const second = await createService(collection, "mongo-platform-second");
+  const results = await Promise.all([
+    first.set("platform", "billing.plan", "pro"),
+    second.set("platform", "billing.limits.seats", 10),
+  ]);
+  expect(results.every((result) => result.success)).toBe(true);
+  const stored = await collection
+    .find({ layer: "platform", environment: "test" })
+    .toArray();
+  expect(stored).toHaveLength(1);
+  expect(stored[0]).toMatchObject({
+    key: "billing",
+    value: { plan: "pro", limits: { seats: 10 } },
   });
+  const restarted = await createService(collection, "mongo-platform-restarted");
+  expect(await restarted.getNamespace("billing")).toEqual(stored[0].value);
+}
 
-  beforeEach(async () => {
-    await collection.deleteMany({});
-  });
-
-  afterAll(async () => {
-    await client.db(database).dropDatabase();
-    await client.close();
-  });
-
-  test("nested writes survive service reconstruction as one root", async () => {
-    const service = await createService(collection);
-
-    expect((await service.set("platform", "billing.plan", "pro")).success).toBe(
-      true,
-    );
-    expect(
-      (await service.set("platform", "billing.limits.seats", 10)).success,
-    ).toBe(true);
-
-    const stored = await collection
-      .find({ layer: "platform", environment: "test" })
-      .toArray();
-    expect(stored).toHaveLength(1);
-    expect(stored[0]).toMatchObject({
-      key: "billing",
-      value: { plan: "pro", limits: { seats: 10 } },
-    });
-
-    const restarted = await createService(collection);
-    expect(await restarted.getNamespace("billing")).toEqual({
-      plan: "pro",
-      limits: { seats: 10 },
-    });
-  });
-});
-
-function createService(collection) {
+function createService(collection, id) {
   const provider = createMongoDBStorageProvider({
-    id: "mongo-platform",
+    id,
     layer: "platform",
     collection,
     environment: "test",

@@ -22,6 +22,10 @@ function registerTopologySuite(topology, uri) {
       afterAll(() => closeMongoFixture(state));
       test("persists nested writes as one authoritative root", () =>
         assertAuthoritativeRoot(state.collection));
+      test("preserves concurrent mutations from distinct providers", () =>
+        assertConcurrentMutations(state.collection));
+      test("preserves literal dotted root identity during concurrent writes", () =>
+        assertConcurrentLiteralRoot(state.collection));
       test("removes only exact path aliases and descendants", () =>
         assertExactRemoval(state.collection));
       test("sends bounded key-only alias discovery queries", () =>
@@ -63,6 +67,37 @@ async function assertAuthoritativeRoot(collection) {
   expect((await provider.load()).entries.billing).toEqual(docs[0].value);
 }
 
+async function assertConcurrentMutations(collection) {
+  const first = createProvider(collection, "mongo-platform-first");
+  const second = createProvider(collection, "mongo-platform-second");
+  const writes = await Promise.all([
+    first.write("billing.plan", "pro"),
+    second.write("billing.limits.seats", 10),
+  ]);
+  expect(writes.every((result) => result.success)).toBe(true);
+  const mixed = await Promise.all([
+    first.write("billing.limits.requests", 1_000),
+    second.remove("billing.plan"),
+  ]);
+  expect(mixed.every((result) => result.success)).toBe(true);
+  expect((await createProvider(collection).load()).entries.billing).toEqual({
+    limits: { seats: 10, requests: 1_000 },
+  });
+}
+
+async function assertConcurrentLiteralRoot(collection) {
+  const first = createProvider(collection, "mongo-literal-first");
+  const second = createProvider(collection, "mongo-literal-second");
+  const results = await Promise.all([
+    first.write("[billing.plan].tier", "pro"),
+    second.write("[billing.plan].seats", 10),
+  ]);
+  expect(results.every((result) => result.success)).toBe(true);
+  const entries = (await createProvider(collection).load()).entries;
+  expect(entries["billing.plan"]).toEqual({ tier: "pro", seats: 10 });
+  expect(entries.billing).toBe(undefined);
+}
+
 async function assertExactRemoval(collection) {
   await collection.insertMany([
     stored("[billing]", { plan: "new" }),
@@ -100,9 +135,9 @@ async function assertBoundedDiscovery(collection, commands) {
   expect(find.command.projection).toEqual({ _id: 0, key: 1 });
 }
 
-function createProvider(collection) {
+function createProvider(collection, id = "mongo-platform") {
   return createMongoDBStorageProvider({
-    id: "mongo-platform",
+    id,
     layer: "platform",
     collection,
     environment: "test",

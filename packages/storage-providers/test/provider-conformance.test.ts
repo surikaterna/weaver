@@ -6,7 +6,7 @@ import type {
   ConfigurationStorageProvider,
   WriteResult,
 } from "@weaver-conf/config-types";
-import type { Collection } from "mongodb";
+import type { Collection, ObjectId } from "mongodb";
 import { createFileSystemStorageProvider } from "../src/fs-provider.js";
 import type { GitManager } from "../src/git-manager.js";
 import { createGitStorageProvider } from "../src/git-storage-provider.js";
@@ -21,11 +21,13 @@ interface ProviderHarness {
 type ProviderHarnessFactory = () => Promise<ProviderHarness>;
 
 interface ConfigDoc {
+  _id?: ObjectId;
   layer: string;
   environment: string;
   key: string;
   value: unknown;
   updatedAt: string;
+  _weaverMutationVersion?: unknown;
 }
 
 interface KeyRegexFilter {
@@ -33,9 +35,11 @@ interface KeyRegexFilter {
 }
 
 interface MongoFilter {
-  layer: string;
-  environment: string;
+  _id?: ObjectId;
+  layer?: string;
+  environment?: string;
   key?: string | KeyRegexFilter;
+  _weaverMutationVersion?: unknown | { $exists: false };
   $or?: ReadonlyArray<{ key: string | KeyRegexFilter }>;
 }
 
@@ -255,14 +259,16 @@ function createMockCollection(): Collection {
         if (existing !== undefined) {
           docs[index] = { ...existing, ...update.$set };
         }
-        return;
+        return { matchedCount: 1 };
       }
-      docs.push({
-        ...filter,
-        key: String(filter.key),
-        value: update.$set.value,
-        updatedAt: String(update.$set.updatedAt),
-      });
+      return { matchedCount: 0 };
+    },
+    async insertOne(doc: ConfigDoc) {
+      if (docs.some((existing) => existing._id?.equals(doc._id))) {
+        throw Object.assign(new Error("duplicate key"), { code: 11000 });
+      }
+      docs.push({ ...doc });
+      return { acknowledged: true, insertedId: doc._id };
     },
     async deleteMany(filter: MongoFilter) {
       for (let index = docs.length - 1; index >= 0; index -= 1) {
@@ -280,7 +286,26 @@ function matchesFilter(
   filter: MongoFilter,
 ): boolean {
   if (doc === undefined) return false;
-  if (doc.layer !== filter.layer || doc.environment !== filter.environment)
+  if (filter._id !== undefined && !doc._id?.equals(filter._id)) return false;
+  if (filter.layer !== undefined && doc.layer !== filter.layer) return false;
+  if (
+    filter.environment !== undefined &&
+    doc.environment !== filter.environment
+  )
+    return false;
+  if (
+    typeof filter._weaverMutationVersion === "object" &&
+    filter._weaverMutationVersion !== null &&
+    "$exists" in filter._weaverMutationVersion &&
+    filter._weaverMutationVersion.$exists === false &&
+    doc._weaverMutationVersion !== undefined
+  )
+    return false;
+  if (
+    filter._weaverMutationVersion !== undefined &&
+    typeof filter._weaverMutationVersion !== "object" &&
+    doc._weaverMutationVersion !== filter._weaverMutationVersion
+  )
     return false;
   if (filter.$or !== undefined)
     return filter.$or.some((clause) => matchesKey(doc.key, clause.key));
