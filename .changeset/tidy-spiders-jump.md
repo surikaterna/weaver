@@ -9,5 +9,5 @@ tokens and bounded optimistic retries, preserve optional MongoDB peer loading,
 remove every observed legacy duplicate with generation-aware comparisons,
 preserve concurrent value-only recreations with deep-value CAS, compare stored
 aliases by parsed path identity, bound root snapshots to 256 candidates, and
-remove whole roots with an authority guard deleted last for storage-provider and
-server consumers.
+reserve snapshot capacity before canonical root insertion. Remove whole roots
+with an authority guard deleted last for storage-provider and server consumers.

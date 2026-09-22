@@ -68,7 +68,7 @@ export async function mutateMongoRoot(
     if (nextMutation.kind === "none") {
       return { committed: false, snapshot };
     }
-    if (await commitRootMutation(options, snapshot.documents, nextMutation)) {
+    if (await commitRootMutation(options, snapshot, nextMutation)) {
       return { committed: true, snapshot };
     }
   }
@@ -102,16 +102,38 @@ function buildNextRootMutation(
 
 async function commitRootMutation(
   options: RootMutationOptions,
-  docs: readonly ObservedMongoDocument[],
+  snapshot: MongoRootSnapshot,
   mutation: { readonly kind: "write"; readonly value: unknown },
 ): Promise<boolean> {
   const canonical = sortConfigDocuments(
-    docs.filter((doc) => doc.key === options.rootKey),
+    snapshot.documents.filter((doc) => doc.key === options.rootKey),
   ).at(-1);
   if (canonical !== undefined) {
     return updateCanonicalRoot(options, canonical, mutation.value);
   }
-  return (await insertCanonicalRoot(options, mutation.value)) !== false;
+  if (snapshot.candidateCount >= MAX_MONGO_ROOT_CANDIDATES) {
+    throw new MongoRootCandidateLimitError(options.rootKey);
+  }
+  const inserted = await insertCanonicalRoot(options, mutation.value);
+  if (inserted === false) return false;
+  if (snapshot.candidateCount === MAX_MONGO_ROOT_CANDIDATES - 1) {
+    await verifyInsertedRootCapacity(options, inserted);
+  }
+  return true;
+}
+
+async function verifyInsertedRootCapacity(
+  options: RootMutationOptions,
+  inserted: ObservedMongoDocument,
+): Promise<void> {
+  try {
+    await snapshotMongoRoot(options);
+  } catch (error) {
+    await options.collection.deleteOne(observedMongoDocumentFilter(inserted), {
+      maxTimeMS: options.timeoutMs,
+    });
+    throw error;
+  }
 }
 
 async function updateCanonicalRoot(

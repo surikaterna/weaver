@@ -384,6 +384,126 @@ test("hierarchy guard capacity fails before insertion at 256 candidates", async 
   expect(collection.docs).toHaveLength(256);
 });
 
+test.each([
+  ["whole-root write", (provider) => provider.write("billing", { current: true })],
+  ["nested write", (provider) => provider.write("billing.current", true)],
+  ["nested remove", (provider) => provider.remove("billing.child0")],
+])("%s reserves canonical capacity before every effect", async (_name, mutate) => {
+  const collection = createCollection();
+  seedDescendants(collection, MAX_MONGO_ROOT_CANDIDATES);
+  const before = collection.docs.map((document) => ({ ...document }));
+
+  const result = await mutate(createProvider(collection, "capacity-boundary"));
+
+  expect(result).toMatchObject({ success: false, error: { code: "WRITE_ERROR" } });
+  expect(result.error.message).toMatch(/256 candidate limit/);
+  expect(collection.operations).toEqual({ inserts: 0, updates: 0, deletes: 0 });
+  expect(collection.docs).toEqual(before);
+});
+
+test("a 255-candidate write remains recoverable after cleanup failure", async () => {
+  const collection = createCollection();
+  seedDescendants(collection, MAX_MONGO_ROOT_CANDIDATES - 1);
+  const deleteOne = collection.deleteOne;
+  collection.deleteOne = async () => {
+    collection.operations.deletes += 1;
+    throw new Error("best-effort cleanup failed");
+  };
+  const provider = createProvider(collection, "capacity-recovery");
+
+  expect((await provider.write("billing.current", true)).success).toBe(true);
+  expect(collection.docs).toHaveLength(MAX_MONGO_ROOT_CANDIDATES);
+  expect(collection.docs.filter((document) => document.key === "billing"))
+    .toHaveLength(1);
+
+  collection.deleteOne = deleteOne;
+  expect((await provider.write("billing.recovered", true)).success).toBe(true);
+  expect(collection.docs).toHaveLength(1);
+  expect((await provider.load()).entries.billing).toMatchObject({
+    current: true,
+    recovered: true,
+  });
+});
+
+test("an exact root updates at 256 candidates without cardinality growth", async () => {
+  const collection = createCollection();
+  collection.docs.push(stored({ current: false }, { _weaverMutationToken: "root" }));
+  seedDescendants(collection, MAX_MONGO_ROOT_CANDIDATES - 1);
+  collection.deleteOne = async () => {
+    collection.operations.deletes += 1;
+    throw new Error("bounded cleanup failed");
+  };
+
+  const result = await createProvider(collection, "full-root-update").write(
+    "billing.current",
+    true,
+  );
+
+  expect(result.success).toBe(true);
+  expect(collection.operations).toEqual({ inserts: 0, updates: 1, deletes: 1 });
+  expect(collection.docs).toHaveLength(MAX_MONGO_ROOT_CANDIDATES);
+  expect(collection.docs.find((document) => document.key === "billing").value)
+    .toEqual({ current: true });
+});
+
+test("a candidate inserted before canonical insert forces rollback on refresh", async () => {
+  const collection = createCollection();
+  seedDescendants(collection, MAX_MONGO_ROOT_CANDIDATES - 1);
+  const insertOne = collection.insertOne;
+  let insertedConcurrentCandidate = false;
+  collection.insertOne = async (...args) => {
+    if (!insertedConcurrentCandidate) {
+      insertedConcurrentCandidate = true;
+      collection.docs.push({
+        ...stored("late", {}, "concurrent-candidate"),
+        key: "billing.concurrent",
+      });
+    }
+    return insertOne(...args);
+  };
+
+  const result = await createProvider(collection, "concurrent-capacity").write(
+    "billing.current",
+    true,
+  );
+
+  expect(result).toMatchObject({ success: false, error: { code: "WRITE_ERROR" } });
+  expect(result.error.message).toMatch(/256 candidate limit/);
+  expect(collection.docs).toHaveLength(MAX_MONGO_ROOT_CANDIDATES);
+  expect(collection.docs.some((document) => document.key === "billing")).toBe(false);
+  expect(collection.operations).toEqual({ inserts: 1, updates: 0, deletes: 1 });
+});
+
+test("a competing canonical insert retries from the refreshed full snapshot", async () => {
+  const collection = createCollection();
+  seedDescendants(collection, MAX_MONGO_ROOT_CANDIDATES - 1);
+  const insertOne = collection.insertOne;
+  let insertedCompetingRoot = false;
+  collection.insertOne = async (document, ...args) => {
+    if (!insertedCompetingRoot) {
+      insertedCompetingRoot = true;
+      collection.docs.push({
+        ...document,
+        value: { concurrent: true },
+        _weaverMutationToken: "competing-token",
+      });
+    }
+    return insertOne(document, ...args);
+  };
+
+  const result = await createProvider(collection, "canonical-capacity-race").write(
+    "billing.current",
+    true,
+  );
+
+  expect(result.success).toBe(true);
+  expect(collection.operations.inserts).toBe(1);
+  expect(collection.operations.updates).toBe(1);
+  expect(collection.docs).toHaveLength(1);
+  expect((await createProvider(collection, "capacity-race-reload").load()).entries.billing)
+    .toEqual({ concurrent: true, current: true });
+});
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function createCollection() {
@@ -443,6 +563,15 @@ function createCollection() {
       return { deletedCount: 0 };
     },
   };
+}
+
+function seedDescendants(collection, count) {
+  for (let index = 0; index < count; index += 1) {
+    collection.docs.push({
+      ...stored(index, {}, `descendant-${index}`),
+      key: `billing.child${index}`,
+    });
+  }
 }
 
 function matchesDocument(doc, filter) {

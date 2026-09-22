@@ -7,6 +7,7 @@ const topologies = [
   ["replica set", process.env.WEAVER_TEST_MONGO_URI],
   ["standalone", process.env.WEAVER_TEST_MONGO_STANDALONE_URI],
 ];
+const MAX_ROOT_CANDIDATES = 256;
 
 for (const [topology, uri] of topologies) {
   registerTopologySuite(topology, uri);
@@ -32,6 +33,8 @@ function registerTopologySuite(topology, uri) {
         assertValueRaceReconstruction(state.collection));
       test("overflow and strict cleanup retry reconstruct safely", () =>
         assertOverflowAndRetryReconstruction(state.collection));
+      test("capacity boundaries recover across reconstruction", () =>
+        assertCapacityBoundaryReconstruction(state.collection));
     },
   );
 }
@@ -172,6 +175,113 @@ async function assertOverflowAndRetryReconstruction(collection) {
   expect((await retry.remove("platform", "billing")).success).toBe(true);
   const restarted = await createService(collection, "mongo-strict-restarted");
   expect(await restarted.getNamespace("billing")).toEqual({});
+}
+
+async function assertCapacityBoundaryReconstruction(collection) {
+  await assertFullHierarchyReconstruction(collection);
+  await assertRecoverableReconstruction(collection);
+  await assertFullRootReconstruction(collection);
+  await assertConcurrentCapacityReconstruction(collection);
+}
+
+async function assertFullHierarchyReconstruction(collection) {
+  await seedDescendants(collection, MAX_ROOT_CANDIDATES);
+  const service = await createService(collection, "mongo-full-hierarchy");
+  const result = await service.set("platform", "billing.current", true);
+  expect(result).toMatchObject({ success: false, error: { code: "WRITE_ERROR" } });
+  expect(await collection.countDocuments({})).toBe(MAX_ROOT_CANDIDATES);
+  const restarted = await createService(collection, "mongo-full-hierarchy-restart");
+  expect((await restarted.getNamespace("billing")).current).toBeUndefined();
+}
+
+async function assertRecoverableReconstruction(collection) {
+  await collection.deleteMany({});
+  await seedDescendants(collection, MAX_ROOT_CANDIDATES - 1);
+  const first = await createService(failFirstDelete(collection), "mongo-capacity-first");
+  expect((await first.set("platform", "billing.current", true)).success).toBe(true);
+  expect(await collection.countDocuments({})).toBe(MAX_ROOT_CANDIDATES);
+  const retry = await createService(collection, "mongo-capacity-retry");
+  expect(await retry.getNamespace("billing")).toMatchObject({ current: true });
+  expect((await retry.set("platform", "billing.recovered", true)).success).toBe(true);
+  expect(await collection.countDocuments({})).toBe(1);
+}
+
+async function assertFullRootReconstruction(collection) {
+  await collection.deleteMany({});
+  const setup = await createService(collection, "mongo-full-root-setup");
+  expect((await setup.set("platform", "billing.current", false)).success).toBe(true);
+  await seedDescendants(collection, MAX_ROOT_CANDIDATES - 1);
+  const updater = await createService(failFirstDelete(collection), "mongo-full-root-update");
+  expect((await updater.set("platform", "billing.current", true)).success).toBe(true);
+  expect(await collection.countDocuments({})).toBe(MAX_ROOT_CANDIDATES);
+  const restarted = await createService(collection, "mongo-full-root-restart");
+  expect((await restarted.getNamespace("billing")).current).toBe(true);
+}
+
+async function assertConcurrentCapacityReconstruction(collection) {
+  await collection.deleteMany({});
+  await seedDescendants(collection, MAX_ROOT_CANDIDATES - 1);
+  const raced = insertCandidateBeforeRoot(collection);
+  const service = await createService(raced, "mongo-capacity-race");
+  const result = await service.set("platform", "billing.current", true);
+  expect(result).toMatchObject({ success: false, error: { code: "WRITE_ERROR" } });
+  expect(await collection.countDocuments({})).toBe(MAX_ROOT_CANDIDATES);
+  expect(await collection.countDocuments({ key: "billing" })).toBe(0);
+}
+
+function seedDescendants(collection, count) {
+  return collection.insertMany(
+    Array.from({ length: count }, (_, index) => ({
+      layer: "platform",
+      environment: "test",
+      key: `billing.child${index}`,
+      value: index,
+      updatedAt: "2024-01-01T00:00:00.000Z",
+    })),
+  );
+}
+
+function failFirstDelete(collection) {
+  let failed = false;
+  return new Proxy(collection, {
+    get(target, property) {
+      if (property !== "deleteOne") return boundProperty(target, property);
+      return async (...args) => {
+        if (!failed) {
+          failed = true;
+          throw new Error("forced cleanup failure");
+        }
+        return target.deleteOne(...args);
+      };
+    },
+  });
+}
+
+function insertCandidateBeforeRoot(collection) {
+  let inserted = false;
+  return new Proxy(collection, {
+    get(target, property) {
+      if (property !== "insertOne") return boundProperty(target, property);
+      return async (...args) => {
+        if (!inserted) {
+          inserted = true;
+          await target.insertOne({
+            layer: "platform",
+            environment: "test",
+            key: "billing.concurrent",
+            value: "late",
+            updatedAt: "2024-01-01T00:00:00.000Z",
+          });
+        }
+        return target.insertOne(...args);
+      };
+    },
+  });
+}
+
+function boundProperty(target, property) {
+  const value = Reflect.get(target, property, target);
+  return typeof value === "function" ? value.bind(target) : value;
 }
 
 function failDeletes(collection) {

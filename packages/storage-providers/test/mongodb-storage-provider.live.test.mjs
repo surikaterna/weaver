@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { MongoClient } from "mongodb";
 import { createMongoDBStorageProvider } from "../src/mongodb-storage-provider.ts";
+import { MAX_MONGO_ROOT_CANDIDATES } from "../src/mongodb-root-snapshot.ts";
 
 const topologies = [
   ["replica set", process.env.WEAVER_TEST_MONGO_URI],
@@ -34,6 +35,8 @@ function registerTopologySuite(topology, uri) {
         assertValueOnlyCleanupRaces(state.collection));
       test("rejects candidate overflow without storage effects", () =>
         assertCandidateOverflow(state.collection, commands));
+      test("reserves canonical capacity and recovers at the boundary", () =>
+        assertCanonicalCapacityBoundaries(state.collection, commands));
       test("retains authority on strict cleanup failure and converges on retry", () =>
         assertStrictCleanupRetry(state.collection));
       test("preserves literal dotted root identity during concurrent writes", () =>
@@ -197,6 +200,115 @@ async function assertCandidateOverflow(collection, commands) {
   expect(await collection.countDocuments({})).toBe(257);
   expect(commands.filter((event) =>
     ["insert", "update", "delete"].includes(event.commandName))).toEqual([]);
+}
+
+async function assertCanonicalCapacityBoundaries(collection, commands) {
+  await assertFullHierarchyRejected(collection, commands);
+  await assertRecoverableCapacity(collection);
+  await assertFullCanonicalUpdate(collection);
+  await assertConcurrentCapacityRefresh(collection);
+}
+
+async function assertFullHierarchyRejected(collection, commands) {
+  await seedDescendants(collection, MAX_MONGO_ROOT_CANDIDATES);
+  commands.length = 0;
+  const result = await createProvider(collection).write("billing.current", true);
+  expect(result).toMatchObject({ success: false, error: { code: "WRITE_ERROR" } });
+  expect(await collection.countDocuments({})).toBe(MAX_MONGO_ROOT_CANDIDATES);
+  expect(mutationCommands(commands)).toEqual([]);
+}
+
+async function assertRecoverableCapacity(collection) {
+  await collection.deleteMany({});
+  await seedDescendants(collection, MAX_MONGO_ROOT_CANDIDATES - 1);
+  const first = await createProvider(failFirstDelete(collection)).write(
+    "billing.current",
+    true,
+  );
+  expect(first.success).toBe(true);
+  expect(await collection.countDocuments({})).toBe(MAX_MONGO_ROOT_CANDIDATES);
+  expect((await createProvider(collection).write("billing.recovered", true)).success)
+    .toBe(true);
+  expect(await collection.countDocuments({})).toBe(1);
+}
+
+async function assertFullCanonicalUpdate(collection) {
+  await collection.deleteMany({});
+  expect((await createProvider(collection).write("billing.current", false)).success)
+    .toBe(true);
+  await seedDescendants(collection, MAX_MONGO_ROOT_CANDIDATES - 1);
+  const result = await createProvider(failFirstDelete(collection)).write(
+    "billing.current",
+    true,
+  );
+  expect(result.success).toBe(true);
+  expect(await collection.countDocuments({})).toBe(MAX_MONGO_ROOT_CANDIDATES);
+  expect((await createProvider(collection).load()).entries.billing.current).toBe(true);
+}
+
+async function assertConcurrentCapacityRefresh(collection) {
+  await collection.deleteMany({});
+  await seedDescendants(collection, MAX_MONGO_ROOT_CANDIDATES - 1);
+  const result = await createProvider(insertCandidateBeforeRoot(collection)).write(
+    "billing.current",
+    true,
+  );
+  expect(result).toMatchObject({ success: false, error: { code: "WRITE_ERROR" } });
+  expect(await collection.countDocuments({})).toBe(MAX_MONGO_ROOT_CANDIDATES);
+  expect(await collection.countDocuments({ key: "billing" })).toBe(0);
+}
+
+function mutationCommands(commands) {
+  return commands.filter((event) =>
+    ["insert", "update", "delete"].includes(event.commandName));
+}
+
+function seedDescendants(collection, count) {
+  return collection.insertMany(
+    Array.from({ length: count }, (_, index) =>
+      stored(`billing.child${index}`, index)),
+  );
+}
+
+function failFirstDelete(collection) {
+  let failed = false;
+  return wrapCollection(collection, async (target, ...args) => {
+    if (!failed) {
+      failed = true;
+      throw new Error("forced cleanup failure");
+    }
+    return target.deleteOne(...args);
+  });
+}
+
+function wrapCollection(collection, deleteOne) {
+  return new Proxy(collection, {
+    get(target, property) {
+      return property === "deleteOne" ? (...args) => deleteOne(target, ...args) :
+        boundProperty(target, property);
+    },
+  });
+}
+
+function boundProperty(target, property) {
+  const value = Reflect.get(target, property, target);
+  return typeof value === "function" ? value.bind(target) : value;
+}
+
+function insertCandidateBeforeRoot(collection) {
+  let inserted = false;
+  return new Proxy(collection, {
+    get(target, property) {
+      if (property !== "insertOne") return boundProperty(target, property);
+      return async (...args) => {
+        if (!inserted) {
+          inserted = true;
+          await target.insertOne(stored("billing.concurrent", "late"));
+        }
+        return target.insertOne(...args);
+      };
+    },
+  });
 }
 
 async function assertStrictCleanupRetry(collection) {
