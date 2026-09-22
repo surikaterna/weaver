@@ -24,6 +24,8 @@ function registerTopologySuite(topology, uri) {
         assertAuthoritativeRoot(state.collection));
       test("preserves concurrent mutations from distinct providers", () =>
         assertConcurrentMutations(state.collection));
+      test("preserves recreated fields across a stale writer retry", () =>
+        assertDeleteRecreateABA(state.collection));
       test("preserves literal dotted root identity during concurrent writes", () =>
         assertConcurrentLiteralRoot(state.collection));
       test("removes only exact path aliases and descendants", () =>
@@ -83,6 +85,23 @@ async function assertConcurrentMutations(collection) {
   expect((await createProvider(collection).load()).entries.billing).toEqual({
     limits: { seats: 10, requests: 1_000 },
   });
+}
+
+async function assertDeleteRecreateABA(collection) {
+  const setup = createProvider(collection, "mongo-aba-setup");
+  expect((await setup.write("billing", { base: true })).success).toBe(true);
+  const gate = delayedFirstUpdate(collection);
+  const stale = createProvider(gate.collection, "mongo-aba-stale");
+  const recreator = createProvider(collection, "mongo-aba-recreator");
+
+  const staleWrite = stale.write("billing.a", 1);
+  await gate.reached;
+  expect((await recreator.remove("billing")).success).toBe(true);
+  expect((await recreator.write("billing.c", 3)).success).toBe(true);
+  gate.release();
+
+  expect((await staleWrite).success).toBe(true);
+  expect((await setup.load()).entries.billing).toEqual({ c: 3, a: 1 });
 }
 
 async function assertConcurrentLiteralRoot(collection) {
@@ -152,4 +171,29 @@ function stored(key, value) {
     value,
     updatedAt: new Date().toISOString(),
   };
+}
+
+function delayedFirstUpdate(collection) {
+  let signalReached;
+  let releaseUpdate;
+  let delayed = false;
+  const reached = new Promise((resolve) => { signalReached = resolve; });
+  const released = new Promise((resolve) => { releaseUpdate = resolve; });
+  const wrapped = new Proxy(collection, {
+    get(target, property) {
+      if (property === "updateOne") {
+        return async (...args) => {
+          if (!delayed) {
+            delayed = true;
+            signalReached();
+            await released;
+          }
+          return target.updateOne(...args);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { collection: wrapped, reached, release: releaseUpdate };
 }

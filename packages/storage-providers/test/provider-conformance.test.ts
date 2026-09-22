@@ -6,7 +6,7 @@ import type {
   ConfigurationStorageProvider,
   WriteResult,
 } from "@weaver-conf/config-types";
-import type { Collection, ObjectId } from "mongodb";
+import type { Collection } from "mongodb";
 import { createFileSystemStorageProvider } from "../src/fs-provider.js";
 import type { GitManager } from "../src/git-manager.js";
 import { createGitStorageProvider } from "../src/git-storage-provider.js";
@@ -21,13 +21,14 @@ interface ProviderHarness {
 type ProviderHarnessFactory = () => Promise<ProviderHarness>;
 
 interface ConfigDoc {
-  _id?: ObjectId;
+  _id?: unknown;
   layer: string;
   environment: string;
   key: string;
   value: unknown;
   updatedAt: string;
   _weaverMutationVersion?: unknown;
+  _weaverMutationToken?: unknown;
 }
 
 interface KeyRegexFilter {
@@ -35,13 +36,16 @@ interface KeyRegexFilter {
 }
 
 interface MongoFilter {
-  _id?: ObjectId;
+  _id?: unknown;
   layer?: string;
   environment?: string;
   key?: string | KeyRegexFilter;
-  _weaverMutationVersion?: unknown | { $exists: false };
+  _weaverMutationVersion?: MutationFilter;
+  _weaverMutationToken?: MutationFilter;
   $or?: ReadonlyArray<{ key: string | KeyRegexFilter }>;
 }
+
+type MutationFilter = unknown | { $exists: false } | { $eq: unknown };
 
 const tempRoots: string[] = [];
 
@@ -252,23 +256,34 @@ function createMockCollection(): Collection {
         toArray: () => Promise.resolve(results),
       };
     },
-    async updateOne(filter: MongoFilter, update: { $set: Partial<ConfigDoc> }) {
+    async updateOne(
+      filter: MongoFilter,
+      update: { $set: Partial<ConfigDoc>; $unset?: Record<string, string> },
+    ) {
       const index = docs.findIndex((doc) => matchesFilter(doc, filter));
       if (index >= 0) {
         const existing = docs[index];
         if (existing !== undefined) {
           docs[index] = { ...existing, ...update.$set };
+          if (update.$unset?._weaverMutationVersion !== undefined) {
+            delete docs[index]?._weaverMutationVersion;
+          }
         }
         return { matchedCount: 1 };
       }
       return { matchedCount: 0 };
     },
     async insertOne(doc: ConfigDoc) {
-      if (docs.some((existing) => existing._id?.equals(doc._id))) {
+      if (docs.some((existing) => String(existing._id) === String(doc._id))) {
         throw Object.assign(new Error("duplicate key"), { code: 11000 });
       }
       docs.push({ ...doc });
       return { acknowledged: true, insertedId: doc._id };
+    },
+    async deleteOne(filter: MongoFilter) {
+      const index = docs.findIndex((doc) => matchesFilter(doc, filter));
+      if (index >= 0) docs.splice(index, 1);
+      return { deletedCount: index >= 0 ? 1 : 0 };
     },
     async deleteMany(filter: MongoFilter) {
       for (let index = docs.length - 1; index >= 0; index -= 1) {
@@ -286,30 +301,36 @@ function matchesFilter(
   filter: MongoFilter,
 ): boolean {
   if (doc === undefined) return false;
-  if (filter._id !== undefined && !doc._id?.equals(filter._id)) return false;
+  if (filter._id !== undefined && String(doc._id) !== String(filter._id)) {
+    return false;
+  }
   if (filter.layer !== undefined && doc.layer !== filter.layer) return false;
   if (
     filter.environment !== undefined &&
     doc.environment !== filter.environment
   )
     return false;
-  if (
-    typeof filter._weaverMutationVersion === "object" &&
-    filter._weaverMutationVersion !== null &&
-    "$exists" in filter._weaverMutationVersion &&
-    filter._weaverMutationVersion.$exists === false &&
-    doc._weaverMutationVersion !== undefined
-  )
+  if (!matchesMutationField(doc, filter, "_weaverMutationVersion"))
     return false;
-  if (
-    filter._weaverMutationVersion !== undefined &&
-    typeof filter._weaverMutationVersion !== "object" &&
-    doc._weaverMutationVersion !== filter._weaverMutationVersion
-  )
-    return false;
+  if (!matchesMutationField(doc, filter, "_weaverMutationToken")) return false;
   if (filter.$or !== undefined)
     return filter.$or.some((clause) => matchesKey(doc.key, clause.key));
   return filter.key === undefined || matchesKey(doc.key, filter.key);
+}
+
+function matchesMutationField(
+  doc: ConfigDoc,
+  filter: MongoFilter,
+  key: "_weaverMutationVersion" | "_weaverMutationToken",
+): boolean {
+  const condition = filter[key];
+  if (condition === undefined) return true;
+  if (typeof condition !== "object" || condition === null) {
+    return doc[key] === condition;
+  }
+  if ("$exists" in condition) return !Object.hasOwn(doc, key);
+  if ("$eq" in condition) return doc[key] === condition.$eq;
+  return false;
 }
 
 function matchesKey(key: string, filter: string | KeyRegexFilter): boolean {

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   buildPath,
   cloneValue,
@@ -7,7 +7,7 @@ import {
   deepSet,
   parsePath,
 } from "@weaver-conf/config-engine";
-import { type Collection, type Document, type Filter, ObjectId } from "mongodb";
+import type { Collection, Document, Filter } from "mongodb";
 import { z } from "zod";
 import { canonicalMongoPath } from "./mongodb-path-identity.js";
 
@@ -21,6 +21,7 @@ export const storedConfigDocumentSchema = z.object({
   value: z.unknown(),
   updatedAt: z.string(),
   _weaverMutationVersion: z.unknown().optional(),
+  _weaverMutationToken: z.unknown().optional(),
 });
 
 export type StoredConfigDocument = z.infer<typeof storedConfigDocumentSchema>;
@@ -71,26 +72,32 @@ export async function mutateMongoRoot(
       options.environment,
       options.timeoutMs,
     );
-    const nextValue = buildNextRootValue(options, docs);
-    if (!nextValue.hasValue) return false;
-    if (await commitRootValue(options, docs, nextValue.value)) return true;
+    const nextMutation = buildNextRootMutation(options, docs);
+    if (nextMutation.kind === "none") return false;
+    if (await commitRootMutation(options, docs, nextMutation)) return true;
   }
   throw new MongoRootMutationConflictError(options.rootKey);
 }
 
-function buildNextRootValue(
+type NextRootMutation =
+  | { readonly kind: "write"; readonly value: unknown }
+  | { readonly kind: "delete" }
+  | { readonly kind: "none" };
+
+function buildNextRootMutation(
   options: RootMutationOptions,
   docs: readonly StoredConfigDocument[],
-):
-  | { readonly hasValue: true; readonly value: unknown }
-  | { readonly hasValue: false } {
+): NextRootMutation {
   if (options.tail.length === 0 && options.mutation.kind === "write") {
-    return { hasValue: true, value: options.mutation.value };
+    return { kind: "write", value: options.mutation.value };
+  }
+  if (options.tail.length === 0) {
+    return { kind: "delete" };
   }
   const entries = hydrateEntries(docs);
   const existingRoot = deepGet(entries, options.rootKey);
   if (options.mutation.kind === "remove" && !isRecord(existingRoot)) {
-    return { hasValue: false };
+    return { kind: "none" };
   }
   const root = isRecord(existingRoot) ? cloneValue(existingRoot) : {};
   if (options.mutation.kind === "write") {
@@ -98,21 +105,25 @@ function buildNextRootValue(
   } else {
     deepRemove(root, buildPath(options.tail));
   }
-  return { hasValue: true, value: root };
+  return { kind: "write", value: root };
 }
 
-async function commitRootValue(
+async function commitRootMutation(
   options: RootMutationOptions,
   docs: readonly StoredConfigDocument[],
-  value: unknown,
+  mutation: Exclude<NextRootMutation, { readonly kind: "none" }>,
 ): Promise<boolean> {
   const canonical = sortConfigDocuments(
     docs.filter((doc) => doc.key === options.rootKey),
   ).at(-1);
   if (canonical !== undefined) {
-    return updateCanonicalRoot(options, canonical, value);
+    return mutation.kind === "delete"
+      ? deleteCanonicalRoot(options, canonical)
+      : updateCanonicalRoot(options, canonical, mutation.value);
   }
-  return insertCanonicalRoot(options, value);
+  return mutation.kind === "delete"
+    ? true
+    : insertCanonicalRoot(options, mutation.value);
 }
 
 async function updateCanonicalRoot(
@@ -120,20 +131,9 @@ async function updateCanonicalRoot(
   canonical: StoredConfigDocument,
   value: unknown,
 ): Promise<boolean> {
-  const version = canonical._weaverMutationVersion;
-  const parsedId = z.instanceof(ObjectId).safeParse(canonical._id);
-  const identity: Filter<Document> = parsedId.success
-    ? { _id: parsedId.data }
-    : {
-        layer: options.layer,
-        environment: options.environment,
-        key: options.rootKey,
-      };
   const filter: Filter<Document> = {
-    ...identity,
-    _weaverMutationVersion: Object.hasOwn(canonical, "_weaverMutationVersion")
-      ? version
-      : { $exists: false },
+    ...canonicalIdentity(options, canonical),
+    ...observedMutationState(canonical),
   };
   const result = await options.collection.updateOne(
     filter,
@@ -141,12 +141,27 @@ async function updateCanonicalRoot(
       $set: {
         value,
         updatedAt: new Date().toISOString(),
-        _weaverMutationVersion: nextMutationVersion(version),
+        _weaverMutationToken: freshMutationToken(),
       },
+      $unset: { _weaverMutationVersion: "" },
     },
     { upsert: false, maxTimeMS: options.timeoutMs },
   );
   return result.matchedCount === 1;
+}
+
+async function deleteCanonicalRoot(
+  options: RootMutationOptions,
+  canonical: StoredConfigDocument,
+): Promise<boolean> {
+  const result = await options.collection.deleteOne(
+    {
+      ...canonicalIdentity(options, canonical),
+      ...observedMutationState(canonical),
+    },
+    { maxTimeMS: options.timeoutMs },
+  );
+  return result.deletedCount === 1;
 }
 
 async function insertCanonicalRoot(
@@ -154,18 +169,18 @@ async function insertCanonicalRoot(
   value: unknown,
 ): Promise<boolean> {
   try {
-    await options.collection.insertOne(
-      {
-        _id: rootDocumentId(options),
-        layer: options.layer,
-        environment: options.environment,
-        key: options.rootKey,
-        value,
-        updatedAt: new Date().toISOString(),
-        _weaverMutationVersion: 1,
-      },
-      { maxTimeMS: options.timeoutMs },
-    );
+    const document: Document = {
+      layer: options.layer,
+      environment: options.environment,
+      key: options.rootKey,
+      value,
+      updatedAt: new Date().toISOString(),
+      _weaverMutationToken: freshMutationToken(),
+    };
+    document._id = rootDocumentId(options);
+    await options.collection.insertOne(document, {
+      maxTimeMS: options.timeoutMs,
+    });
     return true;
   } catch (error) {
     if (isDuplicateKeyError(error)) return false;
@@ -173,30 +188,52 @@ async function insertCanonicalRoot(
   }
 }
 
-function rootDocumentId(options: RootMutationOptions): ObjectId {
+function rootDocumentId(options: RootMutationOptions): string {
   const identity = JSON.stringify([
     options.layer,
     options.environment,
     canonicalMongoPath(options.rootKey),
   ]);
   const digest = createHash("sha256").update(identity).digest("hex");
-  return new ObjectId(digest.slice(0, 24));
+  return `weaver-root:${digest}`;
 }
 
 function isDuplicateKeyError(error: unknown): boolean {
   return z.object({ code: z.literal(11000) }).safeParse(error).success;
 }
 
-function nextMutationVersion(version: unknown): number {
-  if (
-    typeof version === "number" &&
-    Number.isSafeInteger(version) &&
-    version >= 0 &&
-    version < Number.MAX_SAFE_INTEGER
-  ) {
-    return version + 1;
+function canonicalIdentity(
+  options: RootMutationOptions,
+  canonical: StoredConfigDocument,
+): Filter<Document> {
+  if (canonical._id !== undefined) {
+    const identity: Document = {};
+    identity._id = canonical._id;
+    return identity;
   }
-  return 1;
+  return {
+    layer: options.layer,
+    environment: options.environment,
+    key: options.rootKey,
+  };
+}
+
+function observedMutationState(
+  canonical: StoredConfigDocument,
+): Filter<Document> {
+  if (Object.hasOwn(canonical, "_weaverMutationToken")) {
+    return { _weaverMutationToken: { $eq: canonical._weaverMutationToken } };
+  }
+  return {
+    _weaverMutationToken: { $exists: false },
+    _weaverMutationVersion: Object.hasOwn(canonical, "_weaverMutationVersion")
+      ? { $eq: canonical._weaverMutationVersion }
+      : { $exists: false },
+  };
+}
+
+function freshMutationToken(): string {
+  return randomUUID();
 }
 
 function hydrateEntries(

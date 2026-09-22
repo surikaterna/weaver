@@ -22,6 +22,8 @@ function registerTopologySuite(topology, uri) {
       afterAll(() => closeMongoFixture(state));
       test("concurrent writes survive service reconstruction as one root", () =>
         assertConcurrentReconstruction(state.collection));
+      test("delete/recreate survives a stale service writer and reconstruction", () =>
+        assertDeleteRecreateReconstruction(state.collection));
     },
   );
 }
@@ -59,6 +61,25 @@ async function assertConcurrentReconstruction(collection) {
   expect(await restarted.getNamespace("billing")).toEqual(stored[0].value);
 }
 
+async function assertDeleteRecreateReconstruction(collection) {
+  const setup = await createService(collection, "mongo-aba-setup");
+  expect((await setup.set("platform", "billing", { base: true })).success)
+    .toBe(true);
+  const gate = delayedFirstUpdate(collection);
+  const stale = await createService(gate.collection, "mongo-aba-stale");
+  const recreator = await createService(collection, "mongo-aba-recreator");
+
+  const staleWrite = stale.set("platform", "billing.a", 1);
+  await gate.reached;
+  expect((await recreator.remove("platform", "billing")).success).toBe(true);
+  expect((await recreator.set("platform", "billing.c", 3)).success).toBe(true);
+  gate.release();
+  expect((await staleWrite).success).toBe(true);
+
+  const restarted = await createService(collection, "mongo-aba-restarted");
+  expect(await restarted.getNamespace("billing")).toEqual({ c: 3, a: 1 });
+}
+
 function createService(collection, id) {
   const provider = createMongoDBStorageProvider({
     id,
@@ -67,4 +88,29 @@ function createService(collection, id) {
     environment: "test",
   });
   return createWeaverConfigService({ providers: [provider], environment: "test" });
+}
+
+function delayedFirstUpdate(collection) {
+  let signalReached;
+  let releaseUpdate;
+  let delayed = false;
+  const reached = new Promise((resolve) => { signalReached = resolve; });
+  const released = new Promise((resolve) => { releaseUpdate = resolve; });
+  const wrapped = new Proxy(collection, {
+    get(target, property) {
+      if (property === "updateOne") {
+        return async (...args) => {
+          if (!delayed) {
+            delayed = true;
+            signalReached();
+            await released;
+          }
+          return target.updateOne(...args);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { collection: wrapped, reached, release: releaseUpdate };
 }

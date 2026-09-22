@@ -25,6 +25,7 @@ function createMockCollection() {
       );
       if (idx >= 0) {
         Object.assign(docs[idx], update.$set);
+        for (const key of Object.keys(update.$unset ?? {})) delete docs[idx][key];
         return { matchedCount: 1 };
       } else if (options?.upsert) {
         docs.push({ ...filter, ...update.$set });
@@ -39,10 +40,9 @@ function createMockCollection() {
       return { acknowledged: true, insertedId: doc._id };
     },
     async deleteOne(filter) {
-      const idx = docs.findIndex(
-        (d) => d.layer === filter.layer && d.environment === filter.environment && d.key === filter.key,
-      );
+      const idx = docs.findIndex((d) => matchesDocument(d, filter));
       if (idx >= 0) docs.splice(idx, 1);
+      return { deletedCount: idx >= 0 ? 1 : 0 };
     },
     async deleteMany(filter) {
       for (let index = docs.length - 1; index >= 0; index -= 1) {
@@ -62,6 +62,10 @@ function createMockCollection() {
 }
 
 function matchesDocument(doc, filter) {
+  if (filter.$expr?.$eq !== undefined) {
+    const expectedId = filter.$expr.$eq[1];
+    if (String(doc._id) !== String(expectedId)) return false;
+  }
   if (filter._id !== undefined && String(doc._id) !== String(filter._id)) {
     return false;
   }
@@ -70,11 +74,16 @@ function matchesDocument(doc, filter) {
     return false;
   }
   if (filter.key !== undefined && doc.key !== filter.key) return false;
-  if (filter._weaverMutationVersion?.$exists === false) {
-    return doc._weaverMutationVersion === undefined;
-  }
-  return filter._weaverMutationVersion === undefined ||
-    doc._weaverMutationVersion === filter._weaverMutationVersion;
+  return matchesField(doc, filter, "_weaverMutationVersion") &&
+    matchesField(doc, filter, "_weaverMutationToken");
+}
+
+function matchesField(doc, filter, key) {
+  const condition = filter[key];
+  if (condition === undefined) return true;
+  if (condition?.$exists === false) return !Object.hasOwn(doc, key);
+  if (condition?.$eq !== undefined) return doc[key] === condition.$eq;
+  return doc[key] === condition;
 }
 
 test("load() returns entries from collection", async () => {

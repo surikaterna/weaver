@@ -217,7 +217,16 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
     const { segments, rootKey, tail } = parseRootPath(key);
 
     if (tail.length === 0) {
-      await this.deletePathAndDescendants(layer, rootKey);
+      await mutateMongoRoot({
+        collection: this.collection,
+        layer,
+        environment: this.environment,
+        rootKey,
+        tail,
+        mutation: { kind: "remove" },
+        timeoutMs: this.timeoutMs,
+      });
+      await this.deletePathAliasesAndDescendants(layer, rootKey);
       return;
     }
 
@@ -254,6 +263,14 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
         return;
       }
     }
+  }
+
+  private async deletePathAliasesAndDescendants(
+    layer: string,
+    key: string,
+  ): Promise<void> {
+    const storedKeys = await this.findStoredKeys(layer, key, false);
+    await this.deleteStoredKeys(layer, storedKeys);
   }
 
   private async deletePathAndDescendants(
