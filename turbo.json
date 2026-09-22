@@ -12,7 +12,8 @@
       "dependsOn": ["^build"]
     },
     "test": {
-      "dependsOn": ["build", "^build"]
+      "dependsOn": ["build", "^build"],
+      "env": ["WEAVER_TEST_MONGO_URI", "WEAVER_TEST_MONGO_STANDALONE_URI"]
     },
     "start": {
       "dependsOn": ["^build"],

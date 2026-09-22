@@ -5,10 +5,15 @@ function createMockCollection() {
 
   return {
     docs,
-    find(filter) {
-      const results = docs.filter(
-        (d) => d.layer === filter.layer && d.environment === filter.environment,
-      );
+    find(filter, options) {
+      const results = docs
+        .filter(
+          (d) =>
+            d.layer === filter.layer &&
+            d.environment === filter.environment &&
+            (filter.key === undefined || new RegExp(filter.key.$regex).test(d.key)),
+        )
+        .map((doc) => options?.projection ? { key: doc.key } : doc);
       return {
         maxTimeMS() { return this; },
         toArray: () => Promise.resolve(results),
@@ -29,6 +34,20 @@ function createMockCollection() {
         (d) => d.layer === filter.layer && d.environment === filter.environment && d.key === filter.key,
       );
       if (idx >= 0) docs.splice(idx, 1);
+    },
+    async deleteMany(filter) {
+      for (let index = docs.length - 1; index >= 0; index -= 1) {
+        const doc = docs[index];
+        const keys = filter.$or?.map((clause) => clause.key) ?? [filter.key];
+        const keyMatches = keys.some((keyFilter) => {
+          if (keyFilter === undefined) return true;
+          if (typeof keyFilter === "string") return doc.key === keyFilter;
+          return new RegExp(keyFilter.$regex).test(doc.key);
+        });
+        if (doc.layer === filter.layer && doc.environment === filter.environment && keyMatches) {
+          docs.splice(index, 1);
+        }
+      }
     },
   };
 }
@@ -72,6 +91,166 @@ test("write() upserts document", async () => {
   expect(col.docs[0].value).toBe("dark");
 });
 
+test("write() canonicalizes nested paths into a root object document", async () => {
+  const col = createMockCollection();
+  const provider = createMongoDBStorageProvider({
+    id: "mongo-user",
+    layer: "user",
+    collection: col,
+    environment: "prod",
+  });
+
+  await provider.write("billing.plan", "pro");
+  await provider.write("billing.limits.seats", 10);
+
+  expect(col.docs).toHaveLength(1);
+  expect(col.docs[0].key).toBe("billing");
+  expect(col.docs[0].value).toEqual({ plan: "pro", limits: { seats: 10 } });
+  expect((await provider.load()).entries.billing).toEqual({
+    plan: "pro",
+    limits: { seats: 10 },
+  });
+});
+
+test("write() succeeds when stale descendant cleanup fails", async () => {
+  const col = createMockCollection();
+  col.docs.push({
+    layer: "user",
+    environment: "prod",
+    key: "billing.plan",
+    value: "stale",
+    updatedAt: "9999-01-01",
+  });
+  col.deleteMany = () => Promise.reject(new Error("cleanup timeout"));
+  const provider = createMongoDBStorageProvider({
+    id: "mongo-user",
+    layer: "user",
+    collection: col,
+    environment: "prod",
+    logger: { info() {}, warn() {}, error() {}, debug() {} },
+  });
+
+  expect((await provider.write("billing.plan", "pro")).success).toBe(true);
+  expect((await provider.write("billing.limits.seats", 10)).success).toBe(true);
+  expect((await provider.load()).entries.billing).toEqual({
+    plan: "pro",
+    limits: { seats: 10 },
+  });
+  expect(col.docs.some((doc) => doc.key === "billing.plan")).toBe(true);
+});
+
+test("cleanup discovers candidates with a narrowed key-only query", async () => {
+  const col = createMockCollection();
+  const queries = [];
+  const find = col.find;
+  col.find = (filter, options) => {
+    queries.push({ filter, options });
+    return find(filter, options);
+  };
+  const provider = createMongoDBStorageProvider({
+    id: "mongo-user",
+    layer: "user",
+    collection: col,
+    environment: "prod",
+  });
+
+  expect((await provider.write("billing", { plan: "pro" })).success).toBe(true);
+  expect(queries).toHaveLength(1);
+  const cleanupQuery = queries.at(-1);
+  expect(cleanupQuery.filter.key.$regex).toMatch(/^\^/);
+  expect(cleanupQuery.filter.key.$regex).toContain("billing");
+  expect(cleanupQuery.options).toEqual({ projection: { _id: 0, key: 1 } });
+  expect(cleanupQuery.filter).not.toEqual({ layer: "user", environment: "prod" });
+});
+
+test("load() hydrates legacy dotted documents as nested objects", async () => {
+  const col = createMockCollection();
+  col.docs.push(
+    { layer: "user", environment: "prod", key: "billing.plan", value: "pro", updatedAt: "2024-01-01" },
+    { layer: "user", environment: "prod", key: "billing.limits.seats", value: 10, updatedAt: "2024-01-02" },
+  );
+
+  const provider = createMongoDBStorageProvider({
+    id: "mongo-user",
+    layer: "user",
+    collection: col,
+    environment: "prod",
+  });
+
+  expect((await provider.load()).entries.billing).toEqual({
+    plan: "pro",
+    limits: { seats: 10 },
+  });
+});
+
+test("load() treats noncanonical root aliases as authoritative", async () => {
+  const col = createMockCollection();
+  col.docs.push(
+    { layer: "user", environment: "prod", key: "[billing]", value: { plan: "new" }, updatedAt: "2024-01-01" },
+    { layer: "user", environment: "prod", key: "billing.plan", value: "stale", updatedAt: "9999-01-01" },
+  );
+  const provider = createMongoDBStorageProvider({
+    id: "mongo-user",
+    layer: "user",
+    collection: col,
+    environment: "prod",
+  });
+
+  expect((await provider.load()).entries.billing).toEqual({ plan: "new" });
+});
+
+test("remove() updates MongoDB root object document for nested paths", async () => {
+  const col = createMockCollection();
+  const provider = createMongoDBStorageProvider({
+    id: "mongo-user",
+    layer: "user",
+    collection: col,
+    environment: "prod",
+  });
+
+  await provider.write("billing", { plan: "pro", limits: { seats: 10 } });
+  const result = await provider.remove("billing.limits.seats");
+
+  expect(result.success).toBe(true);
+  expect(col.docs).toHaveLength(1);
+  expect(col.docs[0].key).toBe("billing");
+  expect(col.docs[0].value).toEqual({ plan: "pro", limits: {} });
+});
+
+test("nested remove succeeds without resurrecting stale descendants when cleanup fails", async () => {
+  const col = createMockCollection();
+  col.docs.push(
+    {
+      layer: "user",
+      environment: "prod",
+      key: "billing",
+      value: { plan: "pro", limits: { seats: 10 } },
+      updatedAt: "2024-01-01",
+    },
+    {
+      layer: "user",
+      environment: "prod",
+      key: "billing.plan",
+      value: "stale",
+      updatedAt: "9999-01-01",
+    },
+  );
+  col.deleteMany = () => Promise.reject(new Error("cleanup timeout"));
+  const provider = createMongoDBStorageProvider({
+    id: "mongo-user",
+    layer: "user",
+    collection: col,
+    environment: "prod",
+    logger: { info() {}, warn() {}, error() {}, debug() {} },
+  });
+
+  expect((await provider.remove("billing.plan")).success).toBe(true);
+  expect((await provider.load()).entries.billing).toEqual({
+    limits: { seats: 10 },
+  });
+  expect(col.docs.some((doc) => doc.key === "billing.plan")).toBe(true);
+});
+
 test("remove() deletes document", async () => {
   const col = createMockCollection();
   col.docs.push({ layer: "user", environment: "prod", key: "theme", value: "dark", updatedAt: "x" });
@@ -87,6 +266,27 @@ test("remove() deletes document", async () => {
   expect(result.success).toBe(true);
   expect(col.docs.length).toBe(0);
 });
+
+for (const key of ["billing", "[billing]"]) {
+  test(`remove(${key}) deletes equivalent root aliases and descendants`, async () => {
+    const col = createMockCollection();
+    col.docs.push(
+      { layer: "user", environment: "prod", key: "[billing]", value: { plan: "new" }, updatedAt: "2024-01-01" },
+      { layer: "user", environment: "prod", key: "billing.plan", value: "stale", updatedAt: "9999-01-01" },
+      { layer: "user", environment: "prod", key: "billing[limits]", value: { seats: 10 }, updatedAt: "9999-01-02" },
+    );
+    const provider = createMongoDBStorageProvider({
+      id: "mongo-user",
+      layer: "user",
+      collection: col,
+      environment: "prod",
+    });
+
+    expect((await provider.remove(key)).success).toBe(true);
+    expect(col.docs).toHaveLength(0);
+    expect((await provider.load()).entries).toEqual({});
+  });
+}
 
 test("read-only provider rejects writes", async () => {
   const col = createMockCollection();

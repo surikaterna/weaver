@@ -1,8 +1,12 @@
-// MongoDBStorageProvider — native MongoDB driver for user/device config layers
-
 import {
+  buildPath,
+  cloneValue,
   consoleLogger,
+  deepGet,
+  deepRemove,
+  deepSet,
   extractErrorMessage,
+  parsePath,
   type WeaverLogger,
 } from "@weaver-conf/config-engine";
 import type {
@@ -13,6 +17,11 @@ import type {
 } from "@weaver-conf/config-types";
 import type { ChangeStream, Collection } from "mongodb";
 import { z } from "zod";
+import {
+  canonicalMongoPath,
+  isSameMongoPathOrDescendant,
+  mongoPathCandidatePattern,
+} from "./mongodb-path-identity.js";
 
 const MAX_BACKOFF_MS = 30_000;
 const BASE_BACKOFF_MS = 1_000;
@@ -35,16 +44,10 @@ const configDocumentSchema = z.object({
   value: z.unknown(),
   updatedAt: z.string(),
 });
+const storedKeyDocumentSchema = z.object({ key: z.string() });
 
-interface ConfigDocument {
-  layer: string;
-  environment: string;
-  key: string;
-  value: unknown;
-  updatedAt: string;
-}
+type ConfigDocument = z.infer<typeof configDocumentSchema>;
 
-/** @see {@link createMongoDBStorageProvider} — prefer the factory function for consistency */
 class MongoDBStorageProvider implements ConfigurationStorageProvider {
   readonly id: string;
   readonly layer: string;
@@ -89,8 +92,8 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
     const docs = z.array(configDocumentSchema).parse(rawDocs);
 
     const entries: Record<string, unknown> = {};
-    for (const doc of docs) {
-      entries[doc.key] = doc.value;
+    for (const doc of selectEffectiveDocuments(docs)) {
+      deepSet(entries, doc.key, cloneValue(doc.value));
     }
     return { entries };
   }
@@ -111,13 +114,15 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
       };
     }
 
-    const updatedAt = new Date().toISOString();
     try {
-      await this.collection.updateOne(
-        { layer, environment: this.environment, key },
-        { $set: { value, updatedAt } },
-        { upsert: true, maxTimeMS: this.timeoutMs },
+      const { key: rootKey, value: rootValue } = await this.toRootDocument(
+        layer,
+        key,
+        value,
       );
+
+      await this.upsertRootDocument(layer, rootKey, rootValue);
+      await this.deleteDescendantDocumentsBestEffort(layer, rootKey);
     } catch (err) {
       const message = extractErrorMessage(err);
       return {
@@ -144,14 +149,7 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
     }
 
     try {
-      await this.collection.deleteOne(
-        {
-          layer,
-          environment: this.environment,
-          key,
-        },
-        { maxTimeMS: this.timeoutMs },
-      );
+      await this.removeNestedPath(layer, key);
     } catch (err) {
       const message = extractErrorMessage(err);
       return {
@@ -215,9 +213,186 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
       }
     };
   }
+
+  private async toRootDocument(
+    layer: string,
+    key: string,
+    value: unknown,
+  ): Promise<{ key: string; value: unknown }> {
+    const segments = parsePath(key);
+    const root = getRootSegment(segments);
+    const rootKey = buildPath([root]);
+    const tail = segments.slice(1);
+
+    if (tail.length === 0) {
+      return { key: rootKey, value };
+    }
+
+    const entries = (await this.loadLayer(layer)).entries;
+    const existingRoot = deepGet(entries, rootKey);
+    const rootValue = isRecord(existingRoot) ? existingRoot : {};
+    deepSet(rootValue, buildPath(tail), value);
+
+    return { key: rootKey, value: rootValue };
+  }
+
+  private async removeNestedPath(layer: string, key: string): Promise<void> {
+    const segments = parsePath(key);
+    const root = getRootSegment(segments);
+    const rootKey = buildPath([root]);
+    const tail = segments.slice(1);
+
+    if (tail.length === 0) {
+      await this.deletePathAndDescendants(layer, rootKey);
+      return;
+    }
+
+    const entries = (await this.loadLayer(layer)).entries;
+    const existingRoot = deepGet(entries, rootKey);
+    if (!isRecord(existingRoot)) {
+      await this.deletePathAndDescendants(layer, buildPath(segments));
+      return;
+    }
+
+    deepRemove(existingRoot, buildPath(tail));
+    await this.upsertRootDocument(layer, rootKey, existingRoot);
+    await this.deleteDescendantDocumentsBestEffort(layer, rootKey);
+  }
+
+  private async upsertRootDocument(
+    layer: string,
+    key: string,
+    value: unknown,
+  ): Promise<void> {
+    await this.collection.updateOne(
+      { layer, environment: this.environment, key },
+      { $set: { value, updatedAt: new Date().toISOString() } },
+      { upsert: true, maxTimeMS: this.timeoutMs },
+    );
+  }
+
+  private async deleteDescendantDocumentsBestEffort(
+    layer: string,
+    key: string,
+  ): Promise<void> {
+    try {
+      const storedKeys = await this.findStoredKeys(layer, key, false);
+      await this.deleteStoredKeys(layer, storedKeys);
+    } catch (err) {
+      const message = extractErrorMessage(err);
+      try {
+        this.logger.warn(
+          `[weaver] MongoDB descendant cleanup failed for root "${key}"; the authoritative root document remains valid: ${message}`,
+        );
+      } catch {
+        return;
+      }
+    }
+  }
+
+  private async deletePathAndDescendants(
+    layer: string,
+    key: string,
+  ): Promise<void> {
+    const storedKeys = await this.findStoredKeys(layer, key, true);
+    await this.deleteStoredKeys(layer, storedKeys);
+  }
+
+  private async findStoredKeys(
+    layer: string,
+    key: string,
+    includeCanonicalPath: boolean,
+  ): Promise<string[]> {
+    const rawDocs = await this.collection
+      .find(
+        {
+          layer,
+          environment: this.environment,
+          key: { $regex: mongoPathCandidatePattern(key) },
+        },
+        { projection: { _id: 0, key: 1 } },
+      )
+      .maxTimeMS(this.timeoutMs)
+      .toArray();
+    const targetSegments = parsePath(key);
+    const docs = z.array(storedKeyDocumentSchema).parse(rawDocs);
+    return docs
+      .filter((doc) => {
+        if (!isSameMongoPathOrDescendant(parsePath(doc.key), targetSegments)) {
+          return false;
+        }
+        return includeCanonicalPath || doc.key !== key;
+      })
+      .map((doc) => doc.key);
+  }
+
+  private async deleteStoredKeys(
+    layer: string,
+    storedKeys: readonly string[],
+  ): Promise<void> {
+    if (storedKeys.length === 0) return;
+    await this.collection.deleteMany(
+      {
+        layer,
+        environment: this.environment,
+        $or: storedKeys.map((storedKey) => ({ key: storedKey })),
+      },
+      { maxTimeMS: this.timeoutMs },
+    );
+  }
 }
 
-/** Creates a MongoDB-backed storage provider instance. */
+function getRootSegment(segments: readonly string[]): string {
+  const root = segments[0];
+  if (root === undefined) {
+    throw new Error("Path must not be empty");
+  }
+  return root;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sortConfigDocuments(
+  docs: readonly ConfigDocument[],
+): ConfigDocument[] {
+  return [...docs].sort((left, right) => {
+    const dateOrder = left.updatedAt.localeCompare(right.updatedAt);
+    if (dateOrder !== 0) return dateOrder;
+    return parsePath(left.key).length - parsePath(right.key).length;
+  });
+}
+
+function selectEffectiveDocuments(
+  docs: readonly ConfigDocument[],
+): ConfigDocument[] {
+  const rootIdentities = new Set(
+    docs
+      .filter((doc) => parsePath(doc.key).length === 1)
+      .map((doc) => canonicalMongoPath(doc.key)),
+  );
+  const canonicalRootIdentities = new Set(
+    docs
+      .filter(
+        (doc) =>
+          parsePath(doc.key).length === 1 &&
+          doc.key === canonicalMongoPath(doc.key),
+      )
+      .map((doc) => doc.key),
+  );
+  const effectiveDocs = docs.filter((doc) => {
+    const segments = parsePath(doc.key);
+    if (segments.length === 1) {
+      const identity = canonicalMongoPath(doc.key);
+      return !canonicalRootIdentities.has(identity) || doc.key === identity;
+    }
+    const rootKey = buildPath([getRootSegment(segments)]);
+    return !rootIdentities.has(rootKey);
+  });
+  return sortConfigDocuments(effectiveDocs);
+}
+
 export function createMongoDBStorageProvider(
   options: MongoDBStorageProviderOptions,
 ): ConfigurationStorageProvider {
