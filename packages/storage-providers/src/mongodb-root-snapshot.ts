@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import { parsePath } from "@weaver-conf/config-engine";
 import type { Collection, Document } from "mongodb";
 import { z } from "zod";
@@ -29,10 +28,6 @@ export type StoredConfigDocument = z.infer<typeof storedConfigDocumentSchema>;
 
 const rootCandidateSchema = z.object({
   _id: mongoDocumentIdSchema,
-  key: z.string(),
-  updatedAt: z.unknown().optional(),
-  _weaverMutationVersion: z.unknown().optional(),
-  _weaverMutationToken: z.unknown().optional(),
 });
 
 export const observedMongoDocumentSchema = z.object({
@@ -49,7 +44,6 @@ export const observedMongoDocumentSchema = z.object({
 export type ObservedMongoDocument = z.infer<typeof observedMongoDocumentSchema>;
 
 export interface MongoRootSnapshot {
-  readonly candidateCount: number;
   readonly documents: readonly ObservedMongoDocument[];
 }
 
@@ -67,13 +61,6 @@ export class MongoRootCandidateLimitError extends Error {
       `MongoDB root "${rootKey}" exceeds the ${MAX_MONGO_ROOT_CANDIDATES} candidate limit`,
     );
     this.name = "MongoRootCandidateLimitError";
-  }
-}
-
-export class MongoRootSnapshotError extends Error {
-  constructor(rootKey: string) {
-    super(`MongoDB root snapshot changed identity for "${rootKey}"`);
-    this.name = "MongoRootSnapshotError";
   }
 }
 
@@ -98,7 +85,7 @@ export async function snapshotMongoRoot(
     throw new MongoRootCandidateLimitError(options.rootKey);
   }
   if (candidates.length === 0) {
-    return { candidateCount: 0, documents: [] };
+    return { documents: [] };
   }
   const exactFilter: Document = {
     layer: options.layer,
@@ -111,10 +98,8 @@ export async function snapshotMongoRoot(
     .limit(MAX_MONGO_ROOT_CANDIDATES)
     .toArray();
   const documents = z.array(observedMongoDocumentSchema).parse(rawDocuments);
-  verifySnapshotIdentities(options.rootKey, candidates, documents);
   const target = parsePath(options.rootKey);
   return {
-    candidateCount: candidates.length,
     documents: documents.filter((document) =>
       isSameMongoPathOrDescendant(parsePath(document.key), target),
     ),
@@ -137,28 +122,9 @@ async function discoverRootCandidates(options: MongoRootSnapshotOptions) {
   return z.array(rootCandidateSchema).parse(rawCandidates);
 }
 
-function verifySnapshotIdentities(
-  rootKey: string,
-  candidates: readonly z.infer<typeof rootCandidateSchema>[],
-  documents: readonly ObservedMongoDocument[],
-): void {
-  const unmatched = [...candidates];
-  for (const document of documents) {
-    const index = unmatched.findIndex((candidate) =>
-      isDeepStrictEqual(candidate._id, document._id),
-    );
-    if (index < 0) throw new MongoRootSnapshotError(rootKey);
-    unmatched.splice(index, 1);
-  }
-}
-
 function candidateProjection(): Record<string, 1> {
   return {
     _id: 1,
-    key: 1,
-    updatedAt: 1,
-    _weaverMutationToken: 1,
-    _weaverMutationVersion: 1,
   };
 }
 

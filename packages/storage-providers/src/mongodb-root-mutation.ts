@@ -16,8 +16,6 @@ import {
 } from "./mongodb-observed-cleanup.js";
 import { canonicalMongoPath } from "./mongodb-path-identity.js";
 import {
-  MAX_MONGO_ROOT_CANDIDATES,
-  MongoRootCandidateLimitError,
   type MongoRootSnapshot,
   type ObservedMongoDocument,
   snapshotMongoRoot,
@@ -111,29 +109,7 @@ async function commitRootMutation(
   if (canonical !== undefined) {
     return updateCanonicalRoot(options, canonical, mutation.value);
   }
-  if (snapshot.candidateCount >= MAX_MONGO_ROOT_CANDIDATES) {
-    throw new MongoRootCandidateLimitError(options.rootKey);
-  }
-  const inserted = await insertCanonicalRoot(options, mutation.value);
-  if (inserted === false) return false;
-  if (snapshot.candidateCount === MAX_MONGO_ROOT_CANDIDATES - 1) {
-    await verifyInsertedRootCapacity(options, inserted);
-  }
-  return true;
-}
-
-async function verifyInsertedRootCapacity(
-  options: RootMutationOptions,
-  inserted: ObservedMongoDocument,
-): Promise<void> {
-  try {
-    await snapshotMongoRoot(options);
-  } catch (error) {
-    await options.collection.deleteOne(observedMongoDocumentFilter(inserted), {
-      maxTimeMS: options.timeoutMs,
-    });
-    throw error;
-  }
+  return (await insertCanonicalRoot(options, mutation.value)) !== false;
 }
 
 async function updateCanonicalRoot(
@@ -168,9 +144,6 @@ async function removeWholeRoot(
   let guard = authoritativeExactRoot(options, snapshot.documents);
   let documents = snapshot.documents;
   if (guard === undefined) {
-    if (snapshot.candidateCount >= MAX_MONGO_ROOT_CANDIDATES) {
-      throw new MongoRootCandidateLimitError(options.rootKey);
-    }
     const value = deepGet(hydrateEntries(documents), options.rootKey);
     if (value === undefined) return true;
     const inserted = await insertCanonicalRoot(options, cloneValue(value));

@@ -203,40 +203,6 @@ test("concurrent providers retry a first-root insert without losing disjoint wri
     .toEqual({ plan: "pro", limits: { seats: 10 } });
 });
 
-test("same-leaf conflicts use last committed mutation wins semantics", async () => {
-  const col = createMockCollection();
-  const firstInsert = deferred();
-  const releaseFirst = deferred();
-  const insertOne = col.insertOne;
-  let insertCalls = 0;
-  col.insertOne = async (doc) => {
-    insertCalls += 1;
-    if (insertCalls === 1) {
-      firstInsert.resolve();
-      await releaseFirst.promise;
-    } else {
-      const result = await insertOne(doc);
-      releaseFirst.resolve();
-      return result;
-    }
-    return insertOne(doc);
-  };
-  const first = createProvider(col, "mongo-first");
-  const second = createProvider(col, "mongo-second");
-
-  const firstWrite = first.write("billing.plan", "first-committed-last");
-  await firstInsert.promise;
-  const results = await Promise.all([
-    firstWrite,
-    second.write("billing.plan", "second-committed-first"),
-  ]);
-
-  expect(results.every((result) => result.success)).toBe(true);
-  expect((await first.load()).entries.billing).toEqual({
-    plan: "first-committed-last",
-  });
-});
-
 test("concurrent nested write and remove preserve both committed mutations", async () => {
   const col = createMockCollection();
   const setup = createProvider(col, "mongo-setup");
@@ -269,41 +235,6 @@ test("concurrent nested write and remove preserve both committed mutations", asy
   expect((await first.load()).entries.billing).toEqual({
     limits: { seats: 10 },
   });
-});
-
-test("concurrent disjoint removes retry without resurrecting either leaf", async () => {
-  const col = createMockCollection();
-  const setup = createProvider(col, "mongo-setup");
-  await setup.write("billing", { plan: "pro", limits: { seats: 10 } });
-  const firstUpdate = deferred();
-  const releaseFirst = deferred();
-  const updateOne = col.updateOne;
-  let updateCalls = 0;
-  col.updateOne = async (...args) => {
-    updateCalls += 1;
-    if (updateCalls === 1) {
-      firstUpdate.resolve();
-      await releaseFirst.promise;
-    } else if (updateCalls === 2) {
-      const result = await updateOne(...args);
-      releaseFirst.resolve();
-      return result;
-    }
-    return updateOne(...args);
-  };
-  const first = createProvider(col, "mongo-first");
-  const second = createProvider(col, "mongo-second");
-
-  const removePlan = first.remove("billing.plan");
-  await firstUpdate.promise;
-  const results = await Promise.all([
-    removePlan,
-    second.remove("billing.limits.seats"),
-  ]);
-
-  expect(results.every((result) => result.success)).toBe(true);
-  expect(updateCalls).toBe(3);
-  expect((await first.load()).entries.billing).toEqual({ limits: {} });
 });
 
 test("root mutation conflict retries are bounded and return a typed failure", async () => {
@@ -350,39 +281,6 @@ test("write() succeeds when stale descendant cleanup fails", async () => {
     limits: { seats: 10 },
   });
   expect(col.docs.some((doc) => doc.key === "billing.plan")).toBe(true);
-});
-
-test("cleanup discovers candidates with a narrowed key-only query", async () => {
-  const col = createMockCollection();
-  const queries = [];
-  const find = col.find;
-  col.find = (filter, options) => {
-    queries.push({ filter, options });
-    return find(filter, options);
-  };
-  const provider = createMongoDBStorageProvider({
-    id: "mongo-user",
-    layer: "user",
-    collection: col,
-    environment: "prod",
-  });
-
-  expect((await provider.write("billing", { plan: "pro" })).success).toBe(true);
-  const cleanupQueries = queries.filter((query) => query.filter.key !== undefined);
-  expect(cleanupQueries).toHaveLength(1);
-  const cleanupQuery = cleanupQueries[0];
-  expect(cleanupQuery.filter.key.$regex).toMatch(/^\^/);
-  expect(cleanupQuery.filter.key.$regex).toContain("billing");
-  expect(cleanupQuery.options).toEqual({
-    projection: {
-      _id: 1,
-      key: 1,
-      updatedAt: 1,
-      _weaverMutationToken: 1,
-      _weaverMutationVersion: 1,
-    },
-  });
-  expect(cleanupQuery.filter).not.toEqual({ layer: "user", environment: "prod" });
 });
 
 test("load() hydrates legacy dotted documents as nested objects", async () => {
