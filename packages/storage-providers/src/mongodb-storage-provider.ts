@@ -14,22 +14,17 @@ import type {
   WriteResult,
 } from "@weaver-conf/config-types";
 import type { ChangeStream, Collection } from "mongodb";
-import { z } from "zod";
+import { deleteObservedMongoDocuments } from "./mongodb-observed-cleanup.js";
+import { isSameMongoPathOrDescendant } from "./mongodb-path-identity.js";
 import {
-  deleteObservedMongoDocuments,
-  type ObservedMongoDocument,
-  observedMongoDocumentSchema,
-} from "./mongodb-observed-cleanup.js";
-import {
-  isSameMongoPathOrDescendant,
-  mongoPathCandidatePattern,
-} from "./mongodb-path-identity.js";
-import {
-  findStoredConfigDocuments,
   mutateMongoRoot,
-  type StoredConfigDocument,
   selectEffectiveDocuments,
 } from "./mongodb-root-mutation.js";
+import {
+  findStoredConfigDocuments,
+  type ObservedMongoDocument,
+  type StoredConfigDocument,
+} from "./mongodb-root-snapshot.js";
 
 const MAX_BACKOFF_MS = 30_000;
 const BASE_BACKOFF_MS = 1_000;
@@ -113,7 +108,7 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
 
     try {
       const { rootKey, tail } = parseRootPath(key);
-      await mutateMongoRoot({
+      const result = await mutateMongoRoot({
         collection: this.collection,
         layer,
         environment: this.environment,
@@ -122,7 +117,7 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
         mutation: { kind: "write", value },
         timeoutMs: this.timeoutMs,
       });
-      await this.deleteDescendantDocumentsBestEffort(layer, rootKey);
+      await this.deleteDocumentsBestEffort(rootKey, result.snapshot.documents);
     } catch (err) {
       const message = extractErrorMessage(err);
       return {
@@ -229,11 +224,10 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
         mutation: { kind: "remove" },
         timeoutMs: this.timeoutMs,
       });
-      await this.deletePathAliasesAndDescendants(layer, rootKey);
       return;
     }
 
-    const committed = await mutateMongoRoot({
+    const result = await mutateMongoRoot({
       collection: this.collection,
       layer,
       environment: this.environment,
@@ -242,25 +236,25 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
       mutation: { kind: "remove" },
       timeoutMs: this.timeoutMs,
     });
-    if (!committed) {
-      await this.deletePathAndDescendants(layer, buildPath(segments));
+    if (!result.committed) {
+      const documents = documentsAtPath(result.snapshot.documents, segments);
+      await this.deleteObservedDocuments(documents);
       return;
     }
-    await this.deleteDescendantDocumentsBestEffort(layer, rootKey);
+    await this.deleteDocumentsBestEffort(rootKey, result.snapshot.documents);
   }
 
-  private async deleteDescendantDocumentsBestEffort(
-    layer: string,
-    key: string,
+  private async deleteDocumentsBestEffort(
+    rootKey: string,
+    documents: readonly ObservedMongoDocument[],
   ): Promise<void> {
     try {
-      const documents = await this.findStoredDocuments(layer, key, false);
-      await this.deleteObservedDocuments(layer, documents);
+      await this.deleteObservedDocuments(documents);
     } catch (err) {
       const message = extractErrorMessage(err);
       try {
         this.logger.warn(
-          `[weaver] MongoDB descendant cleanup failed for root "${key}"; the authoritative root document remains valid: ${message}`,
+          `[weaver] MongoDB descendant cleanup failed for root "${rootKey}"; the authoritative root document remains valid: ${message}`,
         );
       } catch {
         return;
@@ -268,69 +262,24 @@ class MongoDBStorageProvider implements ConfigurationStorageProvider {
     }
   }
 
-  private async deletePathAliasesAndDescendants(
-    layer: string,
-    key: string,
-  ): Promise<void> {
-    const documents = await this.findStoredDocuments(layer, key, false);
-    await this.deleteObservedDocuments(layer, documents);
-  }
-
-  private async deletePathAndDescendants(
-    layer: string,
-    key: string,
-  ): Promise<void> {
-    const documents = await this.findStoredDocuments(layer, key, true);
-    await this.deleteObservedDocuments(layer, documents);
-  }
-
-  private async findStoredDocuments(
-    layer: string,
-    key: string,
-    includeCanonicalPath: boolean,
-  ): Promise<ObservedMongoDocument[]> {
-    const rawDocs = await this.collection
-      .find(
-        {
-          layer,
-          environment: this.environment,
-          key: { $regex: mongoPathCandidatePattern(key) },
-        },
-        {
-          projection: {
-            _id: 1,
-            key: 1,
-            updatedAt: 1,
-            _weaverMutationToken: 1,
-            _weaverMutationVersion: 1,
-          },
-        },
-      )
-      .maxTimeMS(this.timeoutMs)
-      .toArray();
-    const targetSegments = parsePath(key);
-    const docs = z.array(observedMongoDocumentSchema).parse(rawDocs);
-    return docs.filter((doc) => {
-      if (!isSameMongoPathOrDescendant(parsePath(doc.key), targetSegments)) {
-        return false;
-      }
-      return includeCanonicalPath || doc.key !== key;
-    });
-  }
-
   private async deleteObservedDocuments(
-    layer: string,
     documents: readonly ObservedMongoDocument[],
   ): Promise<void> {
     await deleteObservedMongoDocuments({
       collection: this.collection,
-      layer,
-      environment: this.environment,
       documents,
-      compareValue: false,
       timeoutMs: this.timeoutMs,
     });
   }
+}
+
+function documentsAtPath(
+  documents: readonly ObservedMongoDocument[],
+  target: readonly string[],
+): ObservedMongoDocument[] {
+  return documents.filter((document) =>
+    isSameMongoPathOrDescendant(parsePath(document.key), target),
+  );
 }
 
 function getRootSegment(segments: readonly string[]): string {

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   buildPath,
   cloneValue,
@@ -7,25 +8,22 @@ import {
   deepSet,
   parsePath,
 } from "@weaver-conf/config-engine";
-import type { Collection, Document, Filter } from "mongodb";
+import type { Collection, Document } from "mongodb";
 import { z } from "zod";
-import { deleteObservedMongoDocuments } from "./mongodb-observed-cleanup.js";
+import {
+  deleteObservedMongoDocuments,
+  observedMongoDocumentFilter,
+} from "./mongodb-observed-cleanup.js";
 import { canonicalMongoPath } from "./mongodb-path-identity.js";
+import {
+  MAX_MONGO_ROOT_CANDIDATES,
+  MongoRootCandidateLimitError,
+  type MongoRootSnapshot,
+  type ObservedMongoDocument,
+  snapshotMongoRoot,
+} from "./mongodb-root-snapshot.js";
 
 const MAX_MUTATION_ATTEMPTS = 5;
-
-export const storedConfigDocumentSchema = z.object({
-  _id: z.unknown().optional(),
-  layer: z.string(),
-  environment: z.string(),
-  key: z.string(),
-  value: z.unknown(),
-  updatedAt: z.string(),
-  _weaverMutationVersion: z.unknown().optional(),
-  _weaverMutationToken: z.unknown().optional(),
-});
-
-export type StoredConfigDocument = z.infer<typeof storedConfigDocumentSchema>;
 
 export type RootMutation =
   | { readonly kind: "write"; readonly value: unknown }
@@ -50,36 +48,29 @@ export class MongoRootMutationConflictError extends Error {
   }
 }
 
-export async function findStoredConfigDocuments(
-  collection: Collection,
-  layer: string,
-  environment: string,
-  timeoutMs: number,
-): Promise<StoredConfigDocument[]> {
-  const rawDocs = await collection
-    .find({ layer, environment })
-    .maxTimeMS(timeoutMs)
-    .toArray();
-  return z.array(storedConfigDocumentSchema).parse(rawDocs);
+export interface RootMutationResult {
+  readonly committed: boolean;
+  readonly snapshot: MongoRootSnapshot;
 }
 
 export async function mutateMongoRoot(
   options: RootMutationOptions,
-): Promise<boolean> {
+): Promise<RootMutationResult> {
   for (let attempt = 0; attempt < MAX_MUTATION_ATTEMPTS; attempt += 1) {
-    const docs = await findStoredConfigDocuments(
-      options.collection,
-      options.layer,
-      options.environment,
-      options.timeoutMs,
-    );
+    const snapshot = await snapshotMongoRoot(options);
     if (isWholeRootRemoval(options)) {
-      await deleteObservedExactRoots(options, docs);
-      return true;
+      if (await removeWholeRoot(options, snapshot)) {
+        return { committed: true, snapshot };
+      }
+      continue;
     }
-    const nextMutation = buildNextRootMutation(options, docs);
-    if (nextMutation.kind === "none") return false;
-    if (await commitRootMutation(options, docs, nextMutation)) return true;
+    const nextMutation = buildNextRootMutation(options, snapshot.documents);
+    if (nextMutation.kind === "none") {
+      return { committed: false, snapshot };
+    }
+    if (await commitRootMutation(options, snapshot.documents, nextMutation)) {
+      return { committed: true, snapshot };
+    }
   }
   throw new MongoRootMutationConflictError(options.rootKey);
 }
@@ -90,7 +81,7 @@ type NextRootMutation =
 
 function buildNextRootMutation(
   options: RootMutationOptions,
-  docs: readonly StoredConfigDocument[],
+  docs: readonly ObservedMongoDocument[],
 ): NextRootMutation {
   if (options.tail.length === 0 && options.mutation.kind === "write") {
     return { kind: "write", value: options.mutation.value };
@@ -111,7 +102,7 @@ function buildNextRootMutation(
 
 async function commitRootMutation(
   options: RootMutationOptions,
-  docs: readonly StoredConfigDocument[],
+  docs: readonly ObservedMongoDocument[],
   mutation: { readonly kind: "write"; readonly value: unknown },
 ): Promise<boolean> {
   const canonical = sortConfigDocuments(
@@ -120,20 +111,16 @@ async function commitRootMutation(
   if (canonical !== undefined) {
     return updateCanonicalRoot(options, canonical, mutation.value);
   }
-  return insertCanonicalRoot(options, mutation.value);
+  return (await insertCanonicalRoot(options, mutation.value)) !== false;
 }
 
 async function updateCanonicalRoot(
   options: RootMutationOptions,
-  canonical: StoredConfigDocument,
+  canonical: ObservedMongoDocument,
   value: unknown,
 ): Promise<boolean> {
-  const filter: Filter<Document> = {
-    ...canonicalIdentity(options, canonical),
-    ...observedMutationState(canonical),
-  };
   const result = await options.collection.updateOne(
-    filter,
+    observedMongoDocumentFilter(canonical),
     {
       $set: {
         value,
@@ -151,26 +138,47 @@ function isWholeRootRemoval(options: RootMutationOptions): boolean {
   return options.tail.length === 0 && options.mutation.kind === "remove";
 }
 
-async function deleteObservedExactRoots(
+async function removeWholeRoot(
   options: RootMutationOptions,
-  documents: readonly StoredConfigDocument[],
-): Promise<void> {
+  snapshot: MongoRootSnapshot,
+): Promise<boolean> {
+  if (snapshot.documents.length === 0) return true;
+  let guard = authoritativeExactRoot(options, snapshot.documents);
+  let documents = snapshot.documents;
+  if (guard === undefined) {
+    if (snapshot.candidateCount >= MAX_MONGO_ROOT_CANDIDATES) {
+      throw new MongoRootCandidateLimitError(options.rootKey);
+    }
+    const value = deepGet(hydrateEntries(documents), options.rootKey);
+    if (value === undefined) return true;
+    const inserted = await insertCanonicalRoot(options, cloneValue(value));
+    if (inserted === false) return false;
+    guard = inserted;
+    documents = [...documents, guard];
+  }
+  const stale = documents.filter(
+    (document) => !isDeepStrictEqual(document._id, guard._id),
+  );
   await deleteObservedMongoDocuments({
     collection: options.collection,
-    layer: options.layer,
-    environment: options.environment,
-    documents: documents.filter((document) => document.key === options.rootKey),
-    compareValue: true,
+    documents: stale,
     timeoutMs: options.timeoutMs,
   });
+  await deleteObservedMongoDocuments({
+    collection: options.collection,
+    documents: [guard],
+    timeoutMs: options.timeoutMs,
+  });
+  return true;
 }
 
 async function insertCanonicalRoot(
   options: RootMutationOptions,
   value: unknown,
-): Promise<boolean> {
+): Promise<ObservedMongoDocument | false> {
   try {
-    const document: Document = {
+    const document: ObservedMongoDocument = {
+      _id: rootDocumentId(options),
       layer: options.layer,
       environment: options.environment,
       key: options.rootKey,
@@ -178,11 +186,11 @@ async function insertCanonicalRoot(
       updatedAt: new Date().toISOString(),
       _weaverMutationToken: freshMutationToken(),
     };
-    document._id = rootDocumentId(options);
-    await options.collection.insertOne(document, {
+    const storedDocument: Document = { ...document };
+    await options.collection.insertOne(storedDocument, {
       maxTimeMS: options.timeoutMs,
     });
-    return true;
+    return document;
   } catch (error) {
     if (isDuplicateKeyError(error)) return false;
     throw error;
@@ -203,34 +211,13 @@ function isDuplicateKeyError(error: unknown): boolean {
   return z.object({ code: z.literal(11000) }).safeParse(error).success;
 }
 
-function canonicalIdentity(
+function authoritativeExactRoot(
   options: RootMutationOptions,
-  canonical: StoredConfigDocument,
-): Filter<Document> {
-  if (canonical._id !== undefined) {
-    const identity: Document = {};
-    identity._id = canonical._id;
-    return identity;
-  }
-  return {
-    layer: options.layer,
-    environment: options.environment,
-    key: options.rootKey,
-  };
-}
-
-function observedMutationState(
-  canonical: StoredConfigDocument,
-): Filter<Document> {
-  if (Object.hasOwn(canonical, "_weaverMutationToken")) {
-    return { _weaverMutationToken: { $eq: canonical._weaverMutationToken } };
-  }
-  return {
-    _weaverMutationToken: { $exists: false },
-    _weaverMutationVersion: Object.hasOwn(canonical, "_weaverMutationVersion")
-      ? { $eq: canonical._weaverMutationVersion }
-      : { $exists: false },
-  };
+  documents: readonly ObservedMongoDocument[],
+): ObservedMongoDocument | undefined {
+  return sortConfigDocuments(
+    documents.filter((document) => document.key === options.rootKey),
+  ).at(-1);
 }
 
 function freshMutationToken(): string {
@@ -238,7 +225,7 @@ function freshMutationToken(): string {
 }
 
 function hydrateEntries(
-  docs: readonly StoredConfigDocument[],
+  docs: readonly ConfigDocument[],
 ): Record<string, unknown> {
   const entries: Record<string, unknown> = {};
   for (const doc of selectEffectiveDocuments(docs)) {
@@ -251,19 +238,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function sortConfigDocuments(
-  docs: readonly StoredConfigDocument[],
-): StoredConfigDocument[] {
+function sortConfigDocuments<T extends ConfigDocument>(
+  docs: readonly T[],
+): T[] {
   return [...docs].sort((left, right) => {
-    const dateOrder = left.updatedAt.localeCompare(right.updatedAt);
+    const dateOrder = comparableDate(left).localeCompare(comparableDate(right));
     if (dateOrder !== 0) return dateOrder;
     return parsePath(left.key).length - parsePath(right.key).length;
   });
 }
 
-export function selectEffectiveDocuments(
-  docs: readonly StoredConfigDocument[],
-): StoredConfigDocument[] {
+export function selectEffectiveDocuments<T extends ConfigDocument>(
+  docs: readonly T[],
+): T[] {
   const roots = docs.filter((doc) => parsePath(doc.key).length === 1);
   const rootIdentities = new Set(
     roots.map((doc) => canonicalMongoPath(doc.key)),
@@ -283,4 +270,14 @@ export function selectEffectiveDocuments(
     return root === undefined || !rootIdentities.has(buildPath([root]));
   });
   return sortConfigDocuments(effectiveDocs);
+}
+
+interface ConfigDocument {
+  readonly key: string;
+  readonly value?: unknown;
+  readonly updatedAt?: unknown;
+}
+
+function comparableDate(document: ConfigDocument): string {
+  return typeof document.updatedAt === "string" ? document.updatedAt : "";
 }

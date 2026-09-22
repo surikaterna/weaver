@@ -30,6 +30,12 @@ function registerTopologySuite(topology, uri) {
         assertDuplicateRootRemoval(state.collection));
       test("preserves a fresh root recreated after duplicate observation", () =>
         assertDuplicateRemovalRecreation(state.collection));
+      test("preserves value-only alias and descendant rewrites", () =>
+        assertValueOnlyCleanupRaces(state.collection));
+      test("rejects candidate overflow without storage effects", () =>
+        assertCandidateOverflow(state.collection, commands));
+      test("retains authority on strict cleanup failure and converges on retry", () =>
+        assertStrictCleanupRetry(state.collection));
       test("preserves literal dotted root identity during concurrent writes", () =>
         assertConcurrentLiteralRoot(state.collection));
       test("removes only exact path aliases and descendants", () =>
@@ -154,6 +160,63 @@ async function assertConcurrentLiteralRoot(collection) {
   expect(entries.billing).toBe(undefined);
 }
 
+async function assertValueOnlyCleanupRaces(collection) {
+  for (const [key, oldValue, freshValue] of [
+    ["[billing]", { plan: "old" }, { plan: "fresh" }],
+    ["billing.plan", "old", "fresh"],
+  ]) {
+    await collection.deleteMany({});
+    const inserted = await collection.insertOne(stored(key, oldValue));
+    const gate = delayedFirstDelete(collection);
+    const removal = createProvider(gate.collection, `mongo-value-race-${key}`).remove(
+      "billing",
+    );
+    await gate.reached;
+    await collection.updateOne(
+      { _id: inserted.insertedId },
+      { $set: { value: freshValue } },
+    );
+    gate.release();
+    expect((await removal).success).toBe(true);
+    expect((await createProvider(collection).load()).entries.billing).toEqual(
+      key === "[billing]" ? freshValue : { plan: freshValue },
+    );
+  }
+}
+
+async function assertCandidateOverflow(collection, commands) {
+  await collection.insertMany(
+    Array.from({ length: 257 }, (_, index) =>
+      stored(`billing.child${index}`, index)),
+  );
+  commands.length = 0;
+
+  const result = await createProvider(collection).write("billing.current", true);
+
+  expect(result).toMatchObject({ success: false, error: { code: "WRITE_ERROR" } });
+  expect(await collection.countDocuments({})).toBe(257);
+  expect(commands.filter((event) =>
+    ["insert", "update", "delete"].includes(event.commandName))).toEqual([]);
+}
+
+async function assertStrictCleanupRetry(collection) {
+  await collection.insertOne(stored("billing.plan", "pro"));
+  const failing = new Proxy(collection, {
+    get(target, property) {
+      if (property === "deleteOne") {
+        return async () => { throw new Error("strict cleanup failure"); };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+
+  expect((await createProvider(failing).remove("billing")).success).toBe(false);
+  expect((await createProvider(collection).load()).entries.billing).toEqual({ plan: "pro" });
+  expect((await createProvider(collection).remove("billing")).success).toBe(true);
+  expect((await createProvider(collection).load()).entries.billing).toBeUndefined();
+}
+
 async function assertExactRemoval(collection) {
   await collection.insertMany([
     stored("[billing]", { plan: "new" }),
@@ -195,6 +258,10 @@ async function assertBoundedDiscovery(collection, commands) {
     _weaverMutationToken: 1,
     _weaverMutationVersion: 1,
   });
+  expect(find.command.limit).toBe(257);
+  const exact = commands.filter((event) => event.commandName === "find")[1];
+  expect(exact.command.limit).toBe(256);
+  expect(exact.command.projection.value).toBe(1);
 }
 
 function createProvider(collection, id = "mongo-platform") {

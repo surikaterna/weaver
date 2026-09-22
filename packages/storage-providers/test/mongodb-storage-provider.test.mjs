@@ -6,18 +6,23 @@ function createMockCollection() {
   return {
     docs,
     find(filter, options) {
-      const results = docs
+      docs.forEach((doc, index) => {
+        if (!Object.hasOwn(doc, "_id")) doc._id = `mock-${index}`;
+      });
+      let results = docs
         .filter(
           (d) =>
             d.layer === filter.layer &&
             d.environment === filter.environment &&
-            (filter.key === undefined || new RegExp(filter.key.$regex).test(d.key)),
+            (filter.key === undefined || new RegExp(filter.key.$regex).test(d.key)) &&
+            (filter._id === undefined || filter._id.$in.some((id) => id === d._id)),
         )
         .map((doc) => options?.projection
           ? projectDocument(doc, options.projection)
           : doc);
       return {
         maxTimeMS() { return this; },
+        limit(count) { results = results.slice(0, count); return this; },
         toArray: () => Promise.resolve(results),
       };
     },
@@ -523,6 +528,7 @@ test("load() throws with descriptive error when collection fails", async () => {
   const col = createMockCollection();
   col.find = () => ({
     maxTimeMS() { return this; },
+    limit() { return this; },
     toArray: () => Promise.reject(new Error("connection timed out")),
   });
 

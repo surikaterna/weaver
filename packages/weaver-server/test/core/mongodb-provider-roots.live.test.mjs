@@ -28,6 +28,10 @@ function registerTopologySuite(topology, uri) {
         assertDuplicateRemovalReconstruction(state.collection));
       test("concurrent fresh roots survive duplicate cleanup and reconstruction", () =>
         assertDuplicateRecreationReconstruction(state.collection));
+      test("value-only cleanup races survive service reconstruction", () =>
+        assertValueRaceReconstruction(state.collection));
+      test("overflow and strict cleanup retry reconstruct safely", () =>
+        assertOverflowAndRetryReconstruction(state.collection));
     },
   );
 }
@@ -112,6 +116,74 @@ async function assertDuplicateRecreationReconstruction(collection) {
   const restarted = await createService(collection, "mongo-fresh-restarted");
   expect(await restarted.getNamespace("billing")).toEqual({ fresh: true });
   expect(await collection.countDocuments({ key: "billing" })).toBe(1);
+}
+
+async function assertValueRaceReconstruction(collection) {
+  await collection.insertOne({
+    layer: "platform",
+    environment: "test",
+    key: "billing.plan",
+    value: "old",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+  });
+  const gate = delayedFirstOperation(collection, "deleteOne");
+  const remover = await createService(gate.collection, "mongo-value-remover");
+  const removal = remover.remove("platform", "billing");
+  await gate.reached;
+  await collection.updateOne(
+    { key: "billing.plan" },
+    { $set: { value: "fresh" } },
+  );
+  gate.release();
+  expect((await removal).success).toBe(true);
+
+  const restarted = await createService(collection, "mongo-value-restarted");
+  expect(await restarted.getNamespace("billing")).toEqual({ plan: "fresh" });
+}
+
+async function assertOverflowAndRetryReconstruction(collection) {
+  await collection.insertMany(
+    Array.from({ length: 257 }, (_, index) => ({
+      layer: "platform",
+      environment: "test",
+      key: `billing.child${index}`,
+      value: index,
+      updatedAt: "2024-01-01T00:00:00.000Z",
+    })),
+  );
+  const service = await createService(collection, "mongo-overflow");
+  const overflow = await service.set("platform", "billing.current", true);
+  expect(overflow).toMatchObject({ success: false, error: { code: "WRITE_ERROR" } });
+  expect(await collection.countDocuments({})).toBe(257);
+
+  await collection.deleteMany({});
+  await collection.insertOne({
+    layer: "platform",
+    environment: "test",
+    key: "billing.plan",
+    value: "pro",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+  });
+  const failing = failDeletes(collection);
+  const first = await createService(failing, "mongo-strict-first");
+  expect((await first.remove("platform", "billing")).success).toBe(false);
+  const retry = await createService(collection, "mongo-strict-retry");
+  expect(await retry.getNamespace("billing")).toEqual({ plan: "pro" });
+  expect((await retry.remove("platform", "billing")).success).toBe(true);
+  const restarted = await createService(collection, "mongo-strict-restarted");
+  expect(await restarted.getNamespace("billing")).toEqual({});
+}
+
+function failDeletes(collection) {
+  return new Proxy(collection, {
+    get(target, property) {
+      if (property === "deleteOne") {
+        return async () => { throw new Error("strict cleanup failure"); };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 function createService(collection, id) {

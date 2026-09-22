@@ -250,9 +250,13 @@ function createMockCollection(): Collection {
   const docs: ConfigDoc[] = [];
   const collection = {
     find(filter: MongoFilter) {
-      const results = docs.filter((doc) => matchesFilter(doc, filter));
+      let results = docs.filter((doc) => matchesFilter(doc, filter));
       return {
         maxTimeMS() {
+          return this;
+        },
+        limit(count: number) {
+          results = results.slice(0, count);
           return this;
         },
         toArray: () => Promise.resolve(results),
@@ -303,7 +307,7 @@ function matchesFilter(
   filter: MongoFilter,
 ): boolean {
   if (doc === undefined) return false;
-  if (!matchesMutationField(doc, filter, "_id")) return false;
+  if (!matchesId(doc, filter)) return false;
   if (filter.layer !== undefined && doc.layer !== filter.layer) return false;
   if (
     filter.environment !== undefined &&
@@ -318,6 +322,21 @@ function matchesFilter(
   if (filter.$or !== undefined)
     return filter.$or.some((clause) => matchesKey(doc.key, clause.key));
   return filter.key === undefined || matchesKey(doc.key, filter.key);
+}
+
+function matchesId(doc: ConfigDoc, filter: MongoFilter): boolean {
+  const condition = filter._id;
+  if (
+    typeof condition === "object" &&
+    condition !== null &&
+    "$in" in condition &&
+    Array.isArray(condition.$in)
+  ) {
+    return condition.$in.some(
+      (id: unknown) => JSON.stringify(id) === JSON.stringify(doc._id),
+    );
+  }
+  return matchesMutationField(doc, filter, "_id");
 }
 
 function matchesMutationField(
