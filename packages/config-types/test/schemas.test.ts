@@ -182,9 +182,12 @@ describe("schema registration request schemas", () => {
 
   it("accepts path-first service registration shape", () => {
     const result = serviceSchemaRegistrationRequestSchema.safeParse({
-      serviceId: "lynx",
+      serviceId: "example-service",
       environment: "default",
-      owner: { name: "Lynx", contact: "lynx@example.com" },
+      owner: {
+        name: "Example Service",
+        contact: "example-service@example.com",
+      },
       schema: { type: "object" },
       schemaVersion: "1.2.3",
       fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }],
@@ -196,9 +199,12 @@ describe("schema registration request schemas", () => {
   it("rejects service root path, namespace, ownerId, and missing slots", () => {
     expect(
       serviceSchemaRegistrationRequestSchema.safeParse({
-        serviceId: "lynx",
+        serviceId: "example-service",
         environment: "default",
-        owner: { name: "Lynx", contact: "lynx@example.com" },
+        owner: {
+          name: "Example Service",
+          contact: "example-service@example.com",
+        },
         schema: { type: "object" },
         path: "/custom",
       }).success,
@@ -206,9 +212,12 @@ describe("schema registration request schemas", () => {
 
     expect(
       serviceSchemaRegistrationRequestSchema.safeParse({
-        serviceId: "lynx",
+        serviceId: "example-service",
         environment: "default",
-        owner: { name: "Lynx", contact: "lynx@example.com" },
+        owner: {
+          name: "Example Service",
+          contact: "example-service@example.com",
+        },
         schema: { type: "object" },
         fragmentSlots: [],
         namespace: "legacy",
@@ -219,7 +228,7 @@ describe("schema registration request schemas", () => {
 
   it("accepts fragment registration and rejects independent fragment path", () => {
     const valid = fragmentSchemaRegistrationRequestSchema.safeParse({
-      serviceId: "lynx",
+      serviceId: "example-service",
       providerId: "ghost.settings.panel",
       slotPath: "/plugins",
       environment: "default",
@@ -231,13 +240,13 @@ describe("schema registration request schemas", () => {
     expect(valid.success).toBe(true);
     expect(
       fragmentSchemaRegistrationRequestSchema.safeParse({
-        serviceId: "lynx",
+        serviceId: "example-service",
         providerId: "ghost.settings.panel",
         slotPath: "/plugins",
         environment: "default",
         owner: { name: "Ghost", contact: "ghost@example.com" },
         schema: { type: "object" },
-        path: "/lynx/plugins/ghost.settings.panel",
+        path: "/example-service/plugins/ghost.settings.panel",
       }).success,
     ).toBe(false);
   });
@@ -249,16 +258,19 @@ describe("schema registration request schemas", () => {
       );
       expect(
         serviceSchemaRegistrationRequestSchema.safeParse({
-          serviceId: "lynx",
+          serviceId: "example-service",
           environment,
-          owner: { name: "Lynx", contact: "lynx@example.com" },
+          owner: {
+            name: "Example Service",
+            contact: "example-service@example.com",
+          },
           schema: { type: "object" },
           fragmentSlots: [],
         }).success,
       ).toBe(false);
       expect(
         fragmentSchemaRegistrationRequestSchema.safeParse({
-          serviceId: "lynx",
+          serviceId: "example-service",
           providerId: "ghost.settings.panel",
           slotPath: "/plugins",
           environment,
@@ -321,13 +333,16 @@ describe("schema registration request schemas", () => {
 
   it("accepts response metadata with owner, provider identity, and audit", () => {
     const result = schemaRegistrationMetadataSchema.safeParse({
-      serviceId: "lynx",
-      servicePath: "/lynx",
+      serviceId: "example-service",
+      servicePath: "/example-service",
       environment: "default",
-      providerId: "lynx",
-      owner: { name: "Lynx", contact: "lynx@example.com" },
+      providerId: "example-service",
+      owner: {
+        name: "Example Service",
+        contact: "example-service@example.com",
+      },
       schemaVersion: "1.2.3",
-      audit: { subject: "svc:lynx", actor: "api" },
+      audit: { subject: "svc:example-service", actor: "api" },
     });
 
     expect(result.success).toBe(true);
