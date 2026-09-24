@@ -315,9 +315,11 @@ describe("SchemaRegistry", () => {
     });
     await registry.register(serviceRegistration());
 
-    expect((await registry.resolveAnchor("/lynx"))?.environment).toBe(
-      "default",
-    );
-    expect(await registry.resolveAnchor("/lynx", "other")).toBeNull();
+    expect(
+      (await registry.resolveAnchor("/example-service"))?.environment,
+    ).toBe("default");
+    expect(
+      await registry.resolveAnchor("/example-service", "other"),
+    ).toBeNull();
   });
 });
