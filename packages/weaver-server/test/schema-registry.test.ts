@@ -1,4 +1,7 @@
-import type { ConfigurationStorageProvider } from "@weaver-conf/config-types";
+import type {
+  ConfigurationPropertySchema,
+  ConfigurationStorageProvider,
+} from "@weaver-conf/config-types";
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import type { WeaverConfigService } from "../src/core/config-service.js";
 import { createWeaverConfigService } from "../src/core/config-service.js";
@@ -62,7 +65,150 @@ function fragmentRegistration(providerId = "ghost.settings.panel") {
   };
 }
 
+function compositionSchema(): ConfigurationPropertySchema {
+  const branches: ConfigurationPropertySchema[] = [
+    {
+      type: "object",
+      properties: {
+        kind: { type: "string", const: "text" },
+        value: { type: "string" },
+      },
+      additionalProperties: true,
+    },
+    {
+      type: "object",
+      properties: {
+        kind: { type: "string", const: "count" },
+        value: { type: "number" },
+      },
+      additionalProperties: true,
+    },
+  ];
+  return {
+    type: "object",
+    required: ["kind", "value"],
+    properties: {
+      kind: { type: "string" },
+      value: { type: ["string", "number"] },
+      nested: {
+        type: "string",
+        anyOf: [{ type: "string", minLength: 1 }],
+        oneOf: [{ type: "string", maxLength: 20 }],
+        allOf: [{ type: "string", pattern: "^[a-z]+$" }],
+        not: { type: "string", const: "blocked" },
+      },
+    },
+    additionalProperties: false,
+    anyOf: branches,
+    oneOf: branches,
+    allOf: [{ type: "object", maxProperties: 3, additionalProperties: true }],
+    not: {
+      type: "object",
+      const: { kind: "blocked", value: "blocked" },
+      additionalProperties: true,
+    },
+  };
+}
+
 describe("SchemaRegistry", () => {
+  it("preserves supported composition in transient service and fragment registrations", async () => {
+    const registry = createSchemaRegistry({ configService });
+    const schema = compositionSchema();
+    const service = await registry.register({
+      ...serviceRegistration(),
+      schema,
+    });
+    const fragment = await registry.register({
+      ...fragmentRegistration(),
+      schema,
+    });
+
+    expect(service.success).toBe(true);
+    expect(fragment.success).toBe(true);
+    expect(await registry.getSchema("example-service", "default")).toEqual(
+      schema,
+    );
+    expect(
+      (
+        await registry.resolveAnchor(
+          "/example-service/plugins/ghost.settings.panel",
+          "default",
+        )
+      )?.schema,
+    ).toEqual(schema);
+  });
+
+  it("hydrates exact composition and uses it for registered writes after restart", async () => {
+    const persistentConfigService = await createWeaverConfigService({
+      providers: [
+        createInMemoryStorageProvider({
+          id: "platform",
+          layer: "platform",
+          initialEntries: {},
+        }),
+      ],
+      environment: "default",
+    });
+    const registry = await createPersistentSchemaRegistry({
+      configService: persistentConfigService,
+    });
+    const schema = compositionSchema();
+    expect(
+      (
+        await registry.register({
+          ...serviceRegistration(),
+          schema,
+        })
+      ).success,
+    ).toBe(true);
+    expect(
+      (
+        await registry.register({
+          ...fragmentRegistration(),
+          schema,
+        })
+      ).success,
+    ).toBe(true);
+
+    const restarted = await createPersistentSchemaRegistry({
+      configService: persistentConfigService,
+    });
+    expect(await restarted.getSchema("example-service", "default")).toEqual(
+      schema,
+    );
+    expect(
+      (
+        await restarted.resolveAnchor(
+          "/example-service/plugins/ghost.settings.panel",
+          "default",
+        )
+      )?.schema,
+    ).toEqual(schema);
+
+    expect(
+      await persistentConfigService.setRegisteredObject(
+        "platform",
+        "/example-service",
+        { kind: "text", value: "old", nested: "safe" },
+        { schemaRegistry: restarted },
+      ),
+    ).toEqual({ success: true });
+    expect(
+      await persistentConfigService.patchRegisteredPath(
+        "platform",
+        "/example-service/value",
+        "new",
+        { schemaRegistry: restarted },
+      ),
+    ).toEqual({ success: true });
+    expect(
+      await persistentConfigService.validateRegisteredEffective(
+        "/example-service",
+        { schemaRegistry: restarted },
+      ),
+    ).toEqual({ valid: true, errors: [] });
+  });
+
   it("registers service schema metadata with owner, version, and derived paths", async () => {
     const registry = createSchemaRegistry({ configService });
     const result = await registry.register(serviceRegistration(), {

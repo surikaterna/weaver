@@ -167,9 +167,21 @@ function patchObject(
 function createContainer(
   schemas: readonly ConfigurationPropertySchema[] | undefined,
 ): unknown[] | Record<string, unknown> {
-  return schemas?.length !== 0 && schemas?.every(allowsArrayOnly) === true
-    ? []
-    : {};
+  if (schemas === undefined || schemas.length === 0) return {};
+  const projected: ConfigurationPropertySchema[] = [];
+  for (let index = 0; index < schemas.length; index++) {
+    if (!Object.hasOwn(schemas, index)) continue;
+    const schema = schemas[index];
+    if (schema === undefined) continue;
+    for (const candidate of directAndAllOfSchemas(schema)) {
+      appendSchema(projected, candidate);
+    }
+  }
+  const allowsArray = projected.every((schema) => allowsType(schema, "array"));
+  const allowsObject = projected.every((schema) =>
+    allowsType(schema, "object"),
+  );
+  return allowsArray && !allowsObject ? [] : {};
 }
 
 function resolvePatchMemberSchemas(
@@ -177,15 +189,64 @@ function resolvePatchMemberSchemas(
   segment: string,
 ): ConfigurationPropertySchema[] | undefined {
   if (schemas === undefined) return undefined;
-  return schemas.flatMap((schema) => {
-    if (allowsType(schema, "object"))
-      return objectMemberSchemas(schema, segment);
-    if (!allowsType(schema, "array")) return [];
-    const items = schema.items;
-    if (items === undefined) return [];
-    if (!Array.isArray(items)) return [items];
-    const item = items[Number(segment)];
-    return item === undefined ? [] : [item];
+  const resolved: ConfigurationPropertySchema[] = [];
+  for (let index = 0; index < schemas.length; index++) {
+    if (!Object.hasOwn(schemas, index)) continue;
+    const schema = schemas[index];
+    if (schema === undefined) continue;
+    for (const projected of directAndAllOfSchemas(schema)) {
+      for (const member of directPatchMemberSchemas(projected, segment)) {
+        appendSchema(resolved, member);
+      }
+    }
+  }
+  return resolved;
+}
+
+function directPatchMemberSchemas(
+  schema: ConfigurationPropertySchema,
+  segment: string,
+): ConfigurationPropertySchema[] {
+  if (allowsType(schema, "object")) return objectMemberSchemas(schema, segment);
+  if (!allowsType(schema, "array")) return [];
+  const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
+  if (items === undefined) return [];
+  if (!Array.isArray(items)) return [items];
+  const item = items[Number(segment)];
+  return item === undefined ? [] : [item];
+}
+
+function directAndAllOfSchemas(
+  schema: ConfigurationPropertySchema,
+): readonly ConfigurationPropertySchema[] {
+  const projected: ConfigurationPropertySchema[] = [];
+  const pending = [schema];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) continue;
+    appendSchema(projected, current);
+    const branches = Object.hasOwn(current, "allOf")
+      ? current.allOf
+      : undefined;
+    if (!Array.isArray(branches)) continue;
+    for (let index = branches.length - 1; index >= 0; index--) {
+      if (!Object.hasOwn(branches, index)) continue;
+      const branch = branches[index];
+      if (branch !== undefined) appendSchema(pending, branch);
+    }
+  }
+  return projected;
+}
+
+function appendSchema(
+  target: ConfigurationPropertySchema[],
+  schema: ConfigurationPropertySchema,
+): void {
+  Reflect.defineProperty(target, String(target.length), {
+    configurable: true,
+    enumerable: true,
+    value: schema,
+    writable: true,
   });
 }
 
@@ -193,25 +254,28 @@ function objectMemberSchemas(
   schema: ConfigurationPropertySchema,
   key: string,
 ): ConfigurationPropertySchema[] {
-  const properties = schema.properties;
+  const properties = Object.hasOwn(schema, "properties")
+    ? schema.properties
+    : undefined;
   const declared =
     properties !== undefined && Object.hasOwn(properties, key)
       ? properties[key]
       : undefined;
-  const schemas = Object.entries(schema.patternProperties ?? {}).flatMap(
-    ([pattern, memberSchema]) =>
-      new RegExp(pattern).test(key) ? [memberSchema] : [],
-  );
+  const patterns = Object.hasOwn(schema, "patternProperties")
+    ? schema.patternProperties
+    : undefined;
+  const schemas: ConfigurationPropertySchema[] = [];
+  for (const [pattern, memberSchema] of Object.entries(patterns ?? {})) {
+    if (new RegExp(pattern).test(key)) appendSchema(schemas, memberSchema);
+  }
   if (declared !== undefined) return [declared, ...schemas];
   if (schemas.length > 0) return schemas;
-  const additional = schema.additionalProperties;
+  const additional = Object.hasOwn(schema, "additionalProperties")
+    ? schema.additionalProperties
+    : undefined;
   return additional !== null && typeof additional === "object"
     ? [additional]
     : [];
-}
-
-function allowsArrayOnly(schema: ConfigurationPropertySchema): boolean {
-  return allowsType(schema, "array") && !allowsType(schema, "object");
 }
 
 function allowsType(
