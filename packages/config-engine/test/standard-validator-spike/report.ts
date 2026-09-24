@@ -62,6 +62,7 @@ const manifest = {
   },
   commands: [
     "pnpm install --frozen-lockfile",
+    "pnpm exec turbo run build --filter=@weaver-conf/config-engine... --force --output-logs=errors-only",
     "pnpm exec tsc -p packages/config-engine/test/standard-validator-spike/tsconfig.json --noEmit",
     "pnpm exec node --import tsx --test packages/config-engine/test/standard-validator-spike/*.test.ts",
     "pnpm exec tsx packages/config-engine/test/standard-validator-spike/run-matrix.ts",
