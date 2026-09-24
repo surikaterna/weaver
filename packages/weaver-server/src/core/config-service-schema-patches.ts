@@ -211,7 +211,7 @@ function directPatchMemberSchemas(
   if (!allowsType(schema, "array")) return [];
   const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
   if (items === undefined) return [];
-  if (!Array.isArray(items)) return [items];
+  if (!isSchemaArray(items)) return [items];
   const item = items[Number(segment)];
   return item === undefined ? [] : [item];
 }
@@ -285,6 +285,12 @@ function allowsType(
   return Array.isArray(schema.type)
     ? schema.type.includes(type)
     : schema.type === type;
+}
+
+function isSchemaArray(
+  value: ConfigurationPropertySchema | readonly ConfigurationPropertySchema[],
+): value is readonly ConfigurationPropertySchema[] {
+  return Array.isArray(value);
 }
 
 function defineOwnDataProperty(
