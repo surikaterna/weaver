@@ -1,6 +1,7 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 
 import {
+  validateConfigurationPatch,
   validateEffectiveConfiguration,
   validatePartialConfiguration,
 } from "../src/schema-validation.js";
@@ -103,6 +104,21 @@ function deepObject(depth: number, leaf: unknown): unknown {
   let value = leaf;
   for (let index = 0; index < depth; index++) value = { next: value };
   return value;
+}
+
+function sharedAllOfDiamond(
+  depth: number,
+  leaf: ConfigurationPropertySchema,
+): ConfigurationPropertySchema {
+  let schema = leaf;
+  for (let index = 0; index < depth; index++) {
+    schema = {
+      type: "object",
+      allOf: [schema, schema],
+      additionalProperties: true,
+    };
+  }
+  return schema;
 }
 
 describe("composition schema preflight", () => {
@@ -364,6 +380,49 @@ describe("composition iterative and adversarial safety", () => {
       valid: true,
       errors: [],
     });
+  });
+
+  it.each([
+    30, 40,
+  ])("projects a depth-%i shared allOf diamond once per identity", (depth) => {
+    const schema = sharedAllOfDiamond(depth, {
+      type: "object",
+      properties: { x: { type: "string" } },
+      additionalProperties: true,
+    });
+
+    expect(validatePartialConfiguration(schema, { x: "ok" })).toEqual({
+      valid: true,
+      errors: [],
+    });
+    expect(validateConfigurationPatch(schema, "x", "ok")).toEqual({
+      valid: true,
+      errors: [],
+    });
+    expect(validateConfigurationPatch(schema, "x", 1).errors).toEqual([
+      {
+        code: "invalid-type",
+        path: "$.x",
+        segments: ["x"],
+        message: "Value does not match schema type",
+        expected: "string",
+        actual: "number",
+      },
+    ]);
+  });
+
+  it("keeps structurally equal distinct allOf branches conjunctive", () => {
+    const branch = (): ConfigurationPropertySchema => ({
+      type: "object",
+      properties: { x: { type: "string" } },
+      additionalProperties: true,
+    });
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      allOf: [branch(), branch()],
+      additionalProperties: true,
+    };
+    expect(validateConfigurationPatch(schema, "x", 1).errors).toHaveLength(2);
   });
 
   it("allows shared acyclic schemas and values under composition", () => {

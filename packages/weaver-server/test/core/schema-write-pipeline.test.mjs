@@ -108,6 +108,14 @@ function serviceRegistration(schema, fragmentSlots = [], serviceId = "billing") 
   };
 }
 
+function sharedAllOfDiamond(depth, leaf) {
+  let schema = leaf;
+  for (let index = 0; index < depth; index++) {
+    schema = { type: "object", allOf: [schema, schema], additionalProperties: true };
+  }
+  return schema;
+}
+
 async function makeRegisteredService(entries = {}) {
   const provider = createTestProvider("p1", "platform", entries);
   const service = await createWeaverConfigService({
@@ -1128,5 +1136,72 @@ describe("schema-registered config writes", () => {
     cursor = result.value;
     for (const segment of segments) cursor = cursor[segment];
     expect(cursor).toBe("new");
+  });
+
+  test.each([30, 40])("builds depth-%i shared allOf patches", (depth) => {
+    const schema = sharedAllOfDiamond(depth, {
+      type: "object",
+      properties: { x: { type: "string" } },
+      additionalProperties: true,
+    });
+    expect(buildSchemaPatch({}, ["x"], "ok", schema)).toEqual({
+      success: true,
+      value: { x: "ok" },
+    });
+  });
+
+  test("shared allOf registered patches retain effect safety", async () => {
+    const contextual = {
+      type: "object",
+      properties: { kind: { type: "string" }, value: { type: ["string", "number"] } },
+      additionalProperties: false,
+      anyOf: [{
+        type: "object",
+        properties: { kind: { type: "string", const: "text" }, value: { type: "string" } },
+        additionalProperties: true,
+      }],
+    };
+    const schema = sharedAllOfDiamond(40, contextual);
+    const provider = createTestProvider("p1", "platform", {
+      billing: { kind: "text", value: "old" },
+    });
+    const service = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const registry = { resolveAnchor: async () => anchor };
+    const initialRevision = service.revision;
+    let notifications = 0;
+    const unsubscribe = service.onDelta(() => notifications++);
+
+    expect(await patchRegistered(service, registry, "/billing/value", "new")).toEqual({ success: true });
+    const acceptedEntries = await providerEntries(provider);
+    const acceptedRevision = service.revision;
+    expect([provider.writes.length, notifications]).toEqual([1, 1]);
+    expect(acceptedRevision).not.toBe(initialRevision);
+    expect(acceptedEntries).toEqual({ billing: { kind: "text", value: "new" } });
+
+    const invalid = await patchRegistered(service, registry, "/billing/value", 1);
+    expect(invalid.error.details.errors).toEqual([
+      expect.objectContaining({
+        code: "invalid-value",
+        path: "$.billing",
+        message: "Value must match every allOf branch (matched 0 of 2)",
+      }),
+    ]);
+    expect([provider.writes.length, notifications]).toEqual([1, 1]);
+    expect(service.revision).toBe(acceptedRevision);
+    const unchangedEntries = await providerEntries(provider);
+    expect(unchangedEntries).toEqual(acceptedEntries);
+    expect(Object.getPrototypeOf(unchangedEntries)).toBe(Object.prototype);
+    expect(Object.getPrototypeOf(unchangedEntries.billing)).toBe(Object.prototype);
+    unsubscribe();
   });
 });

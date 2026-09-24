@@ -221,9 +221,12 @@ function directAndAllOfSchemas(
 ): readonly ConfigurationPropertySchema[] {
   const projected: ConfigurationPropertySchema[] = [];
   const pending = [schema];
+  const completed = new WeakSet<ConfigurationPropertySchema>();
   while (pending.length > 0) {
     const current = pending.pop();
     if (current === undefined) continue;
+    if (completed.has(current)) continue;
+    completed.add(current);
     appendSchema(projected, current);
     const branches = Object.hasOwn(current, "allOf")
       ? current.allOf
