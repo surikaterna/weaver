@@ -1,155 +1,147 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 import { createClientSchemaRegistry } from "../src/schema-registry.js";
 
-describe("ClientSchemaRegistry", () => {
-  it("getSchema returns undefined for unknown key", () => {
-    const reg = createClientSchemaRegistry();
-    expect(reg.getSchema("unknown.key")).toBe(undefined);
-  });
+const fragmentSchema: ConfigurationPropertySchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    enabled: {
+      type: "boolean",
+      "x-weaver": { sensitive: true, reloadBehavior: "restart-required" },
+    },
+  },
+};
 
-  it("getSchema returns schema after load", () => {
-    const reg = createClientSchemaRegistry();
-    const schema: ConfigurationPropertySchema = { type: "string" };
-    reg.load({ "app.name": schema });
-    expect(reg.getSchema("app.name")).toEqual(schema);
-  });
-
-  it("isSensitive returns true when x-weaver.sensitive is true", () => {
-    const reg = createClientSchemaRegistry();
-    reg.load({
-      "db.password": {
-        type: "string",
-        "x-weaver": { sensitive: true },
-      },
-    });
-    expect(reg.isSensitive("db.password")).toBe(true);
-  });
-
-  it("isSensitive returns false when not set", () => {
-    const reg = createClientSchemaRegistry();
-    reg.load({ "app.name": { type: "string" } });
-    expect(reg.isSensitive("app.name")).toBe(false);
-  });
-
-  it("getRestartRequiredKeys returns correct keys", () => {
-    const reg = createClientSchemaRegistry();
-    reg.load({
-      "app.port": {
-        type: "integer",
-        "x-weaver": { reloadBehavior: "restart-required" },
-      },
-      "app.name": {
-        type: "string",
-        "x-weaver": { reloadBehavior: "hot" },
-      },
-      "app.workers": {
-        type: "integer",
-        "x-weaver": { reloadBehavior: "restart-required" },
-      },
-    });
-    const keys = reg.getRestartRequiredKeys();
-    expect([...keys].sort()).toEqual(["app.port", "app.workers"]);
-  });
-
-  it("validate — valid string passes", () => {
-    const reg = createClientSchemaRegistry();
-    reg.load({ "app.name": { type: "string", minLength: 1 } });
-    expect(reg.validate("app.name", "hello")).toEqual({
-      valid: true,
-      errors: [],
-    });
-  });
-
-  it("validate — wrong type fails", () => {
-    const reg = createClientSchemaRegistry();
-    reg.load({ "app.name": { type: "string" } });
-    const result = reg.validate("app.name", 42);
-    expect(result.valid).toBe(false);
-    expect(result.errors && result.errors.length > 0).toBeTruthy();
-  });
-
-  it("validate — enum constraint works", () => {
-    const reg = createClientSchemaRegistry();
-    reg.load({ "app.env": { type: "string", enum: ["dev", "prod"] } });
-    expect(reg.validate("app.env", "dev").valid).toBe(true);
-    expect(reg.validate("app.env", "staging").valid).toBe(false);
-  });
-
-  it("validate — number min/max works", () => {
-    const reg = createClientSchemaRegistry();
-    reg.load({ "app.port": { type: "integer", minimum: 1, maximum: 65535 } });
-    expect(reg.validate("app.port", 8080).valid).toBe(true);
-    expect(reg.validate("app.port", 0).valid).toBe(false);
-    expect(reg.validate("app.port", 70000).valid).toBe(false);
-  });
-
-  it("validate — unknown key returns valid", () => {
-    const reg = createClientSchemaRegistry();
-    expect(reg.validate("no.schema", "anything")).toEqual({
-      valid: true,
-      errors: [],
-    });
-  });
-
-  it("validate — pattern constraint works", () => {
-    const reg = createClientSchemaRegistry();
-    reg.load({ "app.id": { type: "string", pattern: "^[a-z]+$" } });
-    expect(reg.validate("app.id", "hello").valid).toBe(true);
-    expect(reg.validate("app.id", "Hello123").valid).toBe(false);
-  });
-
-  it("delegates nested object and composition validation to config-engine", () => {
-    const reg = createClientSchemaRegistry();
-    reg.load({
-      "app.settings": {
+const serviceSchema: ConfigurationPropertySchema = {
+  type: "object",
+  required: ["name"],
+  additionalProperties: false,
+  "x-weaver": { sensitive: true, reloadBehavior: "hot" },
+  properties: {
+    name: { type: "string", minLength: 1 },
+    nested: {
+      type: "object",
+      properties: { count: { type: "integer", minimum: 1 } },
+      additionalProperties: false,
+    },
+    list: {
+      type: "array",
+      items: {
         type: "object",
-        required: ["mode", "servers"],
+        properties: { label: { type: "string" } },
         additionalProperties: false,
-        properties: {
-          mode: {
-            type: "string",
-            enum: ["safe", "fast"],
-          },
-          servers: {
-            type: "array",
-            minItems: 1,
-            items: {
-              type: "object",
-              required: ["host"],
-              properties: { host: { type: "string", minLength: 1 } },
-              additionalProperties: false,
-            },
-          },
+      },
+    },
+    "feature.flag": { type: "boolean" },
+    plugins: {
+      type: "object",
+      additionalProperties: {
+        type: "object",
+        properties: { enabled: { type: "string" } },
+      },
+    },
+    dynamic: {
+      type: "object",
+      patternProperties: {
+        "^fixed$": {
+          type: "string",
+          "x-weaver": { sensitive: true, reloadBehavior: "rolling-restart" },
         },
       },
-    });
-
-    expect(
-      reg.validate("app.settings", {
-        mode: "safe",
-        servers: [{ host: "db.internal" }],
-      }),
-    ).toEqual({ valid: true, errors: [] });
-    const invalid = reg.validate("app.settings", {
-      mode: "unknown",
-      servers: [{ host: "", extra: true }],
-    });
-    expect(invalid.valid).toBe(false);
-    expect(invalid.errors.some(({ code }) => code === "unknown-property")).toBe(
-      true,
-    );
-    expect(
-      invalid.errors.every(({ segments }) => Array.isArray(segments)),
-    ).toBe(true);
-
-    reg.load({
-      "app.composed": {
-        type: "string",
-        oneOf: [{ type: "string", const: "safe" }],
+      properties: {
+        fixed: { type: "string", "x-weaver": { reloadBehavior: "hot" } },
       },
-    });
-    expect(reg.validate("app.composed", "safe").errors[0]?.code).toBe(
-      "invalid-schema",
+      additionalProperties: {
+        type: "number",
+        "x-weaver": { reloadBehavior: "restart-required" },
+      },
+    },
+  },
+};
+
+function registry(environment = "default") {
+  const result = createClientSchemaRegistry(environment);
+  result.load({
+    "/app:default": serviceSchema,
+    "/app/plugins/analytics:default": fragmentSchema,
+    "/app:production": {
+      type: "object",
+      properties: { name: { type: "number" } },
+    },
+  });
+  return result;
+}
+
+describe("ClientSchemaRegistry", () => {
+  it("resolves canonical storage keys by longest segment-boundary anchor", () => {
+    const reg = registry();
+    expect(reg.getSchema("app")).toBe(serviceSchema);
+    expect(reg.getSchema("app.name")).toEqual(serviceSchema.properties?.name);
+    expect(reg.getSchema("app.plugins.analytics")).toBe(fragmentSchema);
+    expect(reg.getSchema("app.plugins.analytics.enabled")).toEqual(
+      fragmentSchema.properties?.enabled,
     );
+    expect(reg.getSchema("application.name")).toBe(undefined);
+    expect(reg.getSchema("/app/name")).toBe(undefined);
+  });
+
+  it("validates roots effectively and members as relative patches", () => {
+    const reg = registry();
+    expect(reg.validate("app", { name: "ok" }).valid).toBe(true);
+    expect(reg.validate("app", {}).errors[0]?.code).toBe("missing-required");
+    expect(reg.validate("app.nested.count", 2).valid).toBe(true);
+    expect(reg.validate("app.nested.count", 0).valid).toBe(false);
+    expect(reg.validate("app.list.0.label", "first").valid).toBe(true);
+    expect(reg.validate("app[feature.flag]", false).valid).toBe(true);
+    expect(reg.validate("app.unknown", true).errors[0]?.code).toBe(
+      "unknown-property",
+    );
+    expect(reg.validate("absent.key", Symbol("opaque")).valid).toBe(true);
+  });
+
+  it("selects one exact environment, including environment names with colons", () => {
+    expect(registry().validate("app.name", 1).valid).toBe(false);
+    expect(registry("production").validate("app.name", 1).valid).toBe(true);
+    const colon = createClientSchemaRegistry("prod:blue");
+    colon.load({
+      "/app:prod": { type: "string" },
+      "/app:prod:blue": { type: "number" },
+    });
+    expect(colon.validate("app", 1).valid).toBe(true);
+    expect(colon.validate("app", "wrong").valid).toBe(false);
+  });
+
+  it("rejects selected-environment aliases and malformed canonical keys", () => {
+    const reg = createClientSchemaRegistry();
+    expect(() =>
+      reg.load({ "app.port:default": { type: "number" } }),
+    ).toThrow();
+    expect(() => reg.load({ "/app/:default": { type: "object" } })).toThrow();
+    expect(() =>
+      reg.load({ "/app//port:default": { type: "number" } }),
+    ).toThrow();
+    expect(() =>
+      reg.load({ "app.port:other": { type: "number" } }),
+    ).not.toThrow();
+  });
+
+  it("resolves local metadata through object patterns, additional values, and items", () => {
+    const reg = registry();
+    expect(reg.isSensitive("app")).toBe(true);
+    expect(reg.isSensitive("app.name")).toBe(false);
+    expect(reg.isSensitive("app.plugins.analytics.enabled")).toBe(true);
+    expect(reg.getSchema("app.dynamic.fixed")).toBe(undefined);
+    expect(reg.isSensitive("app.dynamic.fixed")).toBe(true);
+    expect(reg.getReloadBehavior("app.dynamic.fixed")).toBe("rolling-restart");
+    expect(reg.getReloadBehavior("app.dynamic.other")).toBe("restart-required");
+    expect(reg.getSchema("app.list.0.label")?.type).toBe("string");
+  });
+
+  it("does not resolve inherited property keys", () => {
+    const properties = Object.create({ inherited: { type: "string" } });
+    const reg = createClientSchemaRegistry();
+    reg.load({ "/safe:default": { type: "object", properties } });
+    expect(reg.getSchema("safe.inherited")).toBe(undefined);
+    expect(reg.isSensitive("safe.inherited")).toBe(false);
   });
 });

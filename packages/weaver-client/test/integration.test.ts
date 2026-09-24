@@ -92,7 +92,7 @@ describe("Integration: WeaverClient full flow", () => {
     const transport = createMockTransport({ app: { port: 3000 } });
     (transport as unknown as Record<string, unknown>).fetchSchemas =
       async () => ({
-        "app.port": {
+        "/app/port:default": {
           type: "number",
           "x-weaver": { reloadBehavior: "restart-required" },
         },
@@ -101,9 +101,9 @@ describe("Integration: WeaverClient full flow", () => {
     const client = await createWeaverClient({ transport, schemas: true });
     expect(client.pendingRestart).toBe(false);
 
-    let restartFired = false;
+    let restartCount = 0;
     client.onRestartRequired(() => {
-      restartFired = true;
+      restartCount++;
     });
 
     transport.fireDeltas([
@@ -114,10 +114,17 @@ describe("Integration: WeaverClient full flow", () => {
         layer: "user",
         timestamp: new Date().toISOString(),
       },
+      {
+        key: "app.port",
+        action: "set",
+        value: 5000,
+        layer: "user",
+        timestamp: new Date().toISOString(),
+      },
     ]);
 
     expect(client.pendingRestart).toBe(true);
-    expect(restartFired).toBe(true);
+    expect(restartCount).toBe(1);
 
     await client.close();
   });

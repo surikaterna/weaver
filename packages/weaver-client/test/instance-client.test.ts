@@ -5,7 +5,7 @@ import {
 import type { WriteResult } from "../src/transport.js";
 
 interface EditorConfig {
-  theme: string;
+  theme: string | null;
   missing: number;
 }
 
@@ -81,6 +81,18 @@ describe("createInstanceClient", () => {
       makeDeps(state),
     );
     expect(client.getOrDefault("missing", 42)).toBe(42);
+  });
+
+  it.each([
+    [{ editor: { instances: { vim: { theme: null } }, theme: "light" } }, null],
+    [{ editor: { instances: { vim: {} }, theme: null } }, null],
+  ])("getOrDefault() preserves nullable override and base values", (state, expected) => {
+    const client = createInstanceClient<EditorConfig>(
+      "editor",
+      "vim",
+      makeDeps(state),
+    );
+    expect(client.getOrDefault("theme", "fallback")).toBe(expected);
   });
 
   it("set() writes to instance path", async () => {

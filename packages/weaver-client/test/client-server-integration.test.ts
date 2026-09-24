@@ -1,8 +1,145 @@
+import {
+  createInMemoryStorageProvider,
+  startWeaverServer,
+} from "@weaver-conf/weaver-server";
 import type { WeaverClient } from "../src/client.js";
 import { createWeaverClient } from "../src/client.js";
+import { createHttpTransport } from "../src/http-transport.js";
 import type { LocalTransport } from "../src/local-transport.js";
 import { createLocalTransport } from "../src/local-transport.js";
 import type { ConfigDelta } from "../src/types.js";
+
+const owner = { name: "Checkout", contact: "checkout@example.com" };
+
+describe("client schema flow against a real D1 server", () => {
+  it("uses canonical environment keys and the longest registered anchor", async () => {
+    const server = await startWeaverServer({
+      port: 0,
+      environment: "default",
+      providers: [
+        createInMemoryStorageProvider({
+          id: "memory",
+          layer: "platform",
+          initialEntries: {
+            checkout: {
+              enabled: true,
+              plugins: { analytics: { enabled: true, token: "secret" } },
+            },
+          },
+        }),
+      ],
+    });
+    const baseUrl = `http://127.0.0.1:${server.port}`;
+    try {
+      const registration = createHttpTransport({ baseUrl });
+      await registerSchemas(registration);
+      await expect(registration.fetchSchemas?.()).resolves.toMatchObject({
+        "/checkout:default": { type: "object" },
+        "/checkout:production": { type: "object" },
+        "/checkout/plugins/analytics:default": { type: "object" },
+      });
+      await registration.close();
+
+      let remoteWrites = 0;
+      const trackedFetch: typeof fetch = async (input, init) => {
+        if (["PUT", "PATCH", "DELETE"].includes(init?.method ?? "GET")) {
+          remoteWrites++;
+        }
+        return fetch(input, init);
+      };
+      const first = await createWeaverClient({
+        transport: createHttpTransport({ baseUrl, fetch: trackedFetch }),
+        schemas: true,
+      });
+      expect(first.validate("checkout.enabled", "wrong").valid).toBe(false);
+      expect(first.isSensitive("checkout.plugins.analytics.token")).toBe(true);
+      const rejected = await first.set("checkout.enabled", "wrong");
+      expect(rejected).toMatchObject({
+        success: false,
+        error: { code: "VALIDATION_ERROR" },
+      });
+      expect(remoteWrites).toBe(0);
+      await first.close();
+
+      const rebooted = await createWeaverClient({
+        transport: createHttpTransport({ baseUrl }),
+        schemas: true,
+      });
+      expect(
+        rebooted.validate("checkout.plugins.analytics.enabled", true).valid,
+      ).toBe(true);
+      expect(
+        rebooted.validate("checkout.plugins.analytics.enabled", "service-shape")
+          .valid,
+      ).toBe(false);
+      await rebooted.close();
+
+      const production = await createWeaverClient({
+        transport: createHttpTransport({ baseUrl }),
+        schemas: { environment: "production" },
+      });
+      expect(production.validate("checkout.enabled", "production").valid).toBe(
+        true,
+      );
+      expect(production.validate("checkout.enabled", true).valid).toBe(false);
+      expect(production.isSensitive("checkout.plugins.analytics.token")).toBe(
+        false,
+      );
+      await production.close();
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+async function registerSchemas(
+  transport: ReturnType<typeof createHttpTransport>,
+): Promise<void> {
+  const baseSchema = {
+    type: "object" as const,
+    properties: {
+      enabled: { type: "boolean" as const },
+      plugins: {
+        type: "object" as const,
+        additionalProperties: {
+          type: "object" as const,
+          properties: { enabled: { type: "string" as const } },
+        },
+      },
+    },
+  };
+  await transport.registerSchema?.({
+    serviceId: "checkout",
+    environment: "default",
+    owner,
+    schema: baseSchema,
+    fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }],
+  });
+  await transport.registerSchema?.({
+    serviceId: "checkout",
+    environment: "production",
+    owner,
+    schema: {
+      type: "object",
+      properties: { enabled: { type: "string" } },
+    },
+    fragmentSlots: [],
+  });
+  await transport.registerSchema?.({
+    serviceId: "checkout",
+    providerId: "analytics",
+    slotPath: "/plugins",
+    environment: "default",
+    owner,
+    schema: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+        token: { type: "string", "x-weaver": { sensitive: true } },
+      },
+    },
+  });
+}
 
 describe("client↔server integration (local transport round-trip)", () => {
   let transport: LocalTransport;
@@ -20,7 +157,6 @@ describe("client↔server integration (local transport round-trip)", () => {
         timestamp: new Date().toISOString(),
       },
     });
-
     client = await createWeaverClient({ transport });
   });
 
@@ -31,20 +167,18 @@ describe("client↔server integration (local transport round-trip)", () => {
   it("should set and get a value round-trip", async () => {
     const result = await client.set("app.name", "Weaver");
     expect(result.success).toBe(true);
-
-    const value = client.get<string>("app.name");
-    expect(value).toBe("Weaver");
+    expect(client.get<string>("app.name")).toBe("Weaver");
   });
 
   it("should get namespace values", () => {
-    const ns = client.getNamespace("database");
-    expect(ns).toEqual({ host: "localhost", port: 5432 });
+    expect(client.getNamespace("database")).toEqual({
+      host: "localhost",
+      port: 5432,
+    });
   });
 
   it("should reflect writes after delta notification", async () => {
     await client.set("cache.redis.host", "redis.local");
-
-    // Simulate server pushing the delta back (as would happen in real server)
     transport.pushDelta({
       key: "cache.redis.host",
       action: "set",
@@ -52,17 +186,12 @@ describe("client↔server integration (local transport round-trip)", () => {
       layer: "user",
       timestamp: new Date().toISOString(),
     });
-
-    const value = client.get<string>("cache.redis.host");
-    expect(value).toBe("redis.local");
+    expect(client.get<string>("cache.redis.host")).toBe("redis.local");
   });
 
   it("should receive change deltas via subscription", () => {
     const received: ConfigDelta[] = [];
-    client.onChange("app.*", (deltas) => {
-      received.push(...deltas);
-    });
-
+    client.onChange("app.*", (deltas) => received.push(...deltas));
     const delta: ConfigDelta = {
       key: "app.name",
       action: "set",
@@ -71,18 +200,12 @@ describe("client↔server integration (local transport round-trip)", () => {
       timestamp: new Date().toISOString(),
     };
     transport.pushDelta(delta);
-
-    expect(received.length).toBe(1);
-    expect(received[0].key).toBe("app.name");
-    expect(received[0].value).toBe("Updated");
+    expect(received).toEqual([delta]);
   });
 
   it("should remove a value", async () => {
-    const result = await client.remove("app.name");
-    expect(result.success).toBe(true);
-
-    const value = client.get("app.name");
-    expect(value).toBe(undefined);
+    expect((await client.remove("app.name")).success).toBe(true);
+    expect(client.get("app.name")).toBe(undefined);
   });
 
   it("should report connected mode after boot", () => {
@@ -93,7 +216,6 @@ describe("client↔server integration (local transport round-trip)", () => {
   it("should transition to disconnected on close", async () => {
     await client.close();
     expect(client.connected).toBe(false);
-    // Re-assign so afterEach doesn't double-close
     client = await createWeaverClient({
       transport: createLocalTransport({
         snapshot: {

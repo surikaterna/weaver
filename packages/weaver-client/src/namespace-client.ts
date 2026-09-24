@@ -61,7 +61,8 @@ function namespaceReads<TConfig extends object>(
   return {
     get,
     getOrDefault(key, defaultValue) {
-      return get(key) ?? defaultValue;
+      const value = get(key);
+      return value === undefined ? defaultValue : value;
     },
     getAll() {
       const value = deepGet(

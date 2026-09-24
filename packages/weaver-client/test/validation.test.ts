@@ -11,7 +11,6 @@ function createMockRegistry(
     getSchema: () => undefined,
     isSensitive: () => false,
     getReloadBehavior: () => undefined,
-    getRestartRequiredKeys: () => [],
     validate: () => ({ valid: true, errors: [] }),
     ...overrides,
   };
@@ -156,7 +155,7 @@ describe("client validation integration", () => {
     });
     // Add fetchSchemas to transport
     (transport as Record<string, unknown>).fetchSchemas = async () => ({
-      "app.port": { type: "number" as const },
+      "/app/port:default": { type: "number" as const },
     });
 
     const client = await createWeaverClient({ transport, schemas: true });
@@ -175,7 +174,7 @@ describe("client validation integration", () => {
       },
     });
     (transport as Record<string, unknown>).fetchSchemas = async () => ({
-      "app.port": { type: "number" as const },
+      "/app/port:default": { type: "number" as const },
     });
 
     const client = await createWeaverClient({ transport, schemas: true });
@@ -187,7 +186,7 @@ describe("client validation integration", () => {
   it("validate() returns ValidationResult", async () => {
     const transport = createMockTransport();
     (transport as Record<string, unknown>).fetchSchemas = async () => ({
-      "app.name": { type: "string" as const },
+      "/app/name:default": { type: "string" as const },
     });
 
     const client = await createWeaverClient({ transport, schemas: true });
@@ -200,11 +199,11 @@ describe("client validation integration", () => {
   it("isSensitive() returns correct boolean", async () => {
     const transport = createMockTransport();
     (transport as Record<string, unknown>).fetchSchemas = async () => ({
-      "db.password": {
+      "/db/password:default": {
         type: "string" as const,
         "x-weaver": { sensitive: true },
       },
-      "app.name": { type: "string" as const },
+      "/app/name:default": { type: "string" as const },
     });
 
     const client = await createWeaverClient({ transport, schemas: true });
@@ -221,5 +220,21 @@ describe("client validation integration", () => {
       errors: [],
     });
     expect(client.isSensitive("any")).toBe(false);
+  });
+
+  it("validates explicit schema environments through the registration contract", async () => {
+    const transport = createMockTransport();
+    (transport as Record<string, unknown>).fetchSchemas = async () => ({
+      "/app/value:default": { type: "string" as const },
+      "/app/value:production": { type: "number" as const },
+    });
+    const client = await createWeaverClient({
+      transport,
+      schemas: { environment: "production" },
+    });
+    expect(client.validate("app.value", 1).valid).toBe(true);
+    await expect(
+      createWeaverClient({ transport, schemas: { environment: "__proto__" } }),
+    ).rejects.toThrow();
   });
 });

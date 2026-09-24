@@ -1,5 +1,7 @@
+import { deepRemove, deepSet } from "@weaver-conf/config-engine";
+import { registrationEnvironmentSchema } from "@weaver-conf/config-types";
 import { bootClient } from "./client-boot";
-import { setupDeltaSubscription } from "./client-subscriptions";
+import { matchGlob } from "./client-helpers";
 import type { WeaverClientOptions } from "./client-types";
 import {
   type ClientSchemaRegistry,
@@ -69,8 +71,11 @@ function schemaRuntime(schemas: WeaverClientOptions["schemas"]): {
 } {
   const options: SchemaOptions | undefined =
     schemas === true ? {} : schemas || undefined;
+  const environment = options
+    ? registrationEnvironmentSchema.parse(options.environment ?? "default")
+    : undefined;
   return {
-    registry: options ? createClientSchemaRegistry() : undefined,
+    registry: environment ? createClientSchemaRegistry(environment) : undefined,
     validationOptions: { warnOnMismatch: options?.warnOnMismatch ?? true },
   };
 }
@@ -122,24 +127,36 @@ function snapshotFromBoot(
 
 function subscribe(runtime: ClientRuntime, hasFreshSnapshot: boolean): void {
   try {
-    runtime.unsubscribe = setupDeltaSubscription({
-      baseState: runtime.baseState,
-      transport: runtime.transport,
-      registry: runtime.registry,
-      changeListeners: runtime.changeListeners,
-      restartListeners: runtime.restartListeners,
-      stalenessMonitor: runtime.stalenessMonitor,
-      onSync: (date) => {
-        runtime.state.lastSyncedAt = date;
-        runtime.state.connected = true;
-      },
-      onRestartRequired: () => {
-        runtime.state.pendingRestart = true;
-      },
-    });
+    runtime.unsubscribe = subscribeToDeltas(runtime);
     if (hasFreshSnapshot) runtime.state.connected = true;
   } catch {
     runtime.state.connected = false;
     runtime.state.staleSince ??= new Date();
   }
+}
+
+function subscribeToDeltas(runtime: ClientRuntime): Unsubscribe {
+  let pendingRestart = false;
+  return runtime.transport.subscribe((delta) => {
+    if (!delta.layer.includes(":")) {
+      if (delta.action === "set")
+        deepSet(runtime.baseState, delta.key, delta.value);
+      else deepRemove(runtime.baseState, delta.key);
+    }
+    runtime.state.lastSyncedAt = new Date();
+    runtime.state.connected = true;
+    runtime.stalenessMonitor.recordSync();
+    if (
+      !pendingRestart &&
+      runtime.registry?.getReloadBehavior(delta.key) === "restart-required"
+    ) {
+      pendingRestart = true;
+      runtime.state.pendingRestart = true;
+      for (const listener of runtime.restartListeners) listener();
+    }
+    for (const [pattern, handlers] of runtime.changeListeners) {
+      if (!matchGlob(pattern, delta.key)) continue;
+      for (const handler of handlers) handler([delta]);
+    }
+  });
 }

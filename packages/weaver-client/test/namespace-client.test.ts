@@ -5,7 +5,7 @@ import type { ConfigDelta } from "../src/types.js";
 
 interface EditorConfig {
   fontSize: number;
-  theme: "light" | "dark";
+  theme: "light" | "dark" | null;
   wordWrap: boolean;
 }
 
@@ -70,6 +70,12 @@ describe("NamespaceClient", () => {
     expect(client.get("fontSize")).toBe(undefined);
     expect(client.getOrDefault("fontSize", 16)).toBe(16);
     expect(client.getAll()).toEqual({});
+  });
+
+  it("preserves null instead of applying a default", () => {
+    const { deps } = createDeps({ editor: { theme: null } });
+    const client = createNamespaceClient<EditorConfig>("editor", deps);
+    expect(client.getOrDefault("theme", "light")).toBe(null);
   });
 
   it("prefixes set, setMany, and remove operations", async () => {

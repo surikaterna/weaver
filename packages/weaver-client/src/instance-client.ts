@@ -36,7 +36,8 @@ export function createInstanceClient<
   return {
     get,
     getOrDefault(key, defaultValue) {
-      return get(key) ?? defaultValue;
+      const value = get(key);
+      return value === undefined ? defaultValue : value;
     },
     async set(key, value, options) {
       return deps.set(
