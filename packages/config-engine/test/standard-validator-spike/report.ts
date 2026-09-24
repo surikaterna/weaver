@@ -64,6 +64,7 @@ const manifest = {
     "pnpm exec tsx packages/config-engine/test/standard-validator-spike/benchmark.ts",
     "pnpm exec tsx packages/config-engine/test/standard-validator-spike/loc.ts",
     "pnpm exec tsx packages/config-engine/test/standard-validator-spike/report.ts",
+    "pnpm exec turbo run build --filter=@weaver-conf/weaver-server... --force --output-logs=errors-only",
   ],
 };
 await writeJson("manifest.json", manifest);

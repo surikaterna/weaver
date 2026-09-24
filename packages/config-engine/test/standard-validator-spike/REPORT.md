@@ -49,7 +49,7 @@ This is a bounded decision spike, not a full JSON Schema Test Suite run. The sha
 
 ## Bounds and test impact
 
-Handwritten scope is 18 files / 2479 nonblank LOC, within the 18-file limit and below the 2485-LOC investigation marker and 2500-LOC stop. Existing 73 config-engine and 24 server write-pipeline tests remain necessary because no candidate qualifies. Changeset status intentionally exits 1 with "Some packages have been changed but no changesets were found" because this non-mergeable test-only evidence lives under config-engine; no changeset is appropriate. No production source, existing test, public contract, changeset, or PR was changed.
+Handwritten scope is 18 files / 2480 nonblank LOC, within the 18-file limit and below the 2485-LOC investigation marker and 2500-LOC stop. Existing 73 config-engine and 24 server write-pipeline tests remain necessary because no candidate qualifies. Changeset status intentionally exits 1 with "Some packages have been changed but no changesets were found" because this non-mergeable test-only evidence lives under config-engine; no changeset is appropriate. No production source, existing test, public contract, changeset, or PR was changed.
 
 ## Artifact SHA-256
 
@@ -57,7 +57,7 @@ Handwritten scope is 18 files / 2479 nonblank LOC, within the 18-file limit and 
 - `bundle.json`: `38c1286e5b7c8be45bf202843ec2362d43fdcf03c162d4731db546319b2c2edf`
 - `dependencies.json`: `f1d720cea6a5b95fcad2d3b765e0a67a36fd4cc57437a003cde7b1d471530d20`
 - `environment.json`: `dc820cc08819fe58025db7e8ff7d7f075fbf1e7508c532c362a62dd300169d90`
-- `loc.json`: `e79b9748207b149186bcb037268dd11e754c6e2948ade7f8d29c60fc80a418b6`
+- `loc.json`: `04d7745b9cd0eff8e2207cec733c3fd7623dab6cd0e015b9c0bfe8551f5dc943`
 - `matrix.json`: `271463490b3ce78f97c7198383d1678d77a0fddaab0ca8498a133c0420f5537c`
 
 ## Recommended production decision
