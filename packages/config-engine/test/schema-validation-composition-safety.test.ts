@@ -10,7 +10,7 @@ const keywordCases = ["anyOf", "oneOf", "allOf"] as const;
 
 function setRuntimeField(
   schema: ConfigurationPropertySchema,
-  key: "anyOf" | "oneOf" | "allOf" | "not",
+  key: PropertyKey,
   value: unknown,
 ): void {
   Reflect.defineProperty(schema, key, {
@@ -19,6 +19,39 @@ function setRuntimeField(
     value,
     writable: true,
   });
+}
+
+function runtimeSchema(
+  type: ConfigurationPropertySchema["type"],
+  key: PropertyKey,
+  value: unknown,
+): ConfigurationPropertySchema {
+  const schema: ConfigurationPropertySchema = { type };
+  setRuntimeField(schema, key, value);
+  return schema;
+}
+
+function expectStructuralSchemaError(
+  schema: ConfigurationPropertySchema,
+  value: unknown,
+  message: string,
+): void {
+  const validate = () =>
+    validatePartialConfiguration(schema, value, { path: ["base", 2] });
+  expect(validate).not.toThrow();
+  const result = validate();
+  expect(result).toEqual({
+    valid: false,
+    errors: [
+      {
+        code: "invalid-schema",
+        path: "$.base[2]",
+        segments: ["base", 2],
+        message,
+      },
+    ],
+  });
+  expect(schemaValidationResultSchema.safeParse(result).success).toBe(true);
 }
 
 function compositionCycle(
@@ -73,6 +106,99 @@ function deepObject(depth: number, leaf: unknown): unknown {
 }
 
 describe("composition schema preflight", () => {
+  it("rejects malformed raw structural children before value traversal", () => {
+    const branch = runtimeSchema("object", "properties", { x: null });
+    const cases: readonly (readonly [
+      ConfigurationPropertySchema,
+      unknown,
+      string,
+    ])[] = [
+      [
+        runtimeSchema("object", "properties", { x: null }),
+        { x: 1 },
+        'properties entry "x" must be a schema object with a supported non-empty type',
+      ],
+      [
+        runtimeSchema("object", "patternProperties", { "^x$": null }),
+        { x: 1 },
+        'patternProperties entry "^x$" must be a schema object with a supported non-empty type',
+      ],
+      [
+        runtimeSchema("object", "additionalProperties", null),
+        { extra: 1 },
+        "additionalProperties must be a boolean or schema object with a supported non-empty type",
+      ],
+      [
+        runtimeSchema("array", "items", null),
+        [1],
+        "items must be a schema object or dense array of schema objects with supported non-empty types",
+      ],
+      [
+        runtimeSchema("array", "items", [null]),
+        [1],
+        "items entry 0 must be a schema object with a supported non-empty type",
+      ],
+      [
+        { type: "string", anyOf: [branch] },
+        "branch-type-mismatch",
+        'properties entry "x" must be a schema object with a supported non-empty type',
+      ],
+    ];
+
+    for (const [schema, value, message] of cases) {
+      expectStructuralSchemaError(schema, value, message);
+    }
+  });
+
+  it("preserves node-local and depth-first schema error order", () => {
+    const malformedShape = runtimeSchema("object", "properties", { x: null });
+    setRuntimeField(malformedShape, "anyOf", null);
+    expectStructuralSchemaError(
+      malformedShape,
+      { x: 1 },
+      "anyOf must be a non-empty dense array of schema objects",
+    );
+
+    const nestedFirst = runtimeSchema("array", "items", [null]);
+    const ordered = runtimeSchema("object", "properties", {
+      first: nestedFirst,
+      second: null,
+    });
+    setRuntimeField(ordered, "patternProperties", { ".*": null });
+    setRuntimeField(ordered, "additionalProperties", null);
+    setRuntimeField(ordered, "items", null);
+    setRuntimeField(ordered, "anyOf", [runtimeSchema("object", "items", null)]);
+    expectStructuralSchemaError(
+      ordered,
+      {},
+      "items entry 0 must be a schema object with a supported non-empty type",
+    );
+
+    const patternOrdered = runtimeSchema("object", "patternProperties", {
+      first: nestedFirst,
+      second: null,
+    });
+    expectStructuralSchemaError(
+      patternOrdered,
+      {},
+      "items entry 0 must be a schema object with a supported non-empty type",
+    );
+
+    const compositionOrdered: ConfigurationPropertySchema = {
+      type: "string",
+      anyOf: [
+        runtimeSchema("object", "properties", { first: null }),
+        runtimeSchema("array", "items", [null]),
+      ],
+      oneOf: [runtimeSchema("object", "items", null)],
+    };
+    expectStructuralSchemaError(
+      compositionOrdered,
+      "mismatch",
+      'properties entry "first" must be a schema object with a supported non-empty type',
+    );
+  });
+
   it.each(
     keywordCases,
   )("rejects empty and non-array %s definitions", (keyword) => {

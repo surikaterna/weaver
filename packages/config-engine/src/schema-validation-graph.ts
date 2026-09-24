@@ -21,6 +21,14 @@ interface SchemaInspection {
   readonly nodes: readonly ConfigurationPropertySchema[];
 }
 
+type SchemaGraphFrame =
+  | {
+      readonly kind: "enter";
+      readonly value: unknown;
+      readonly invalidMessage: string;
+    }
+  | { readonly kind: "exit"; readonly value: ConfigurationPropertySchema };
+
 type GraphFrame<T extends object> =
   | { readonly kind: "enter"; readonly value: T }
   | { readonly kind: "exit"; readonly value: T };
@@ -73,8 +81,12 @@ function inspectSchemaGraph(
   const active = new WeakSet<object>();
   const completed = new WeakSet<object>();
   const nodes: ConfigurationPropertySchema[] = [];
-  const pending: GraphFrame<ConfigurationPropertySchema>[] = [
-    { kind: "enter", value: root },
+  const pending: SchemaGraphFrame[] = [
+    {
+      kind: "enter",
+      value: root,
+      invalidMessage: "Schema must have a supported non-empty type",
+    },
   ];
   while (pending.length > 0) {
     const frame = pending.pop();
@@ -84,64 +96,103 @@ function inspectSchemaGraph(
       completed.add(frame.value);
       continue;
     }
-    if (active.has(frame.value)) return { cyclic: true, valid: true, nodes };
-    if (completed.has(frame.value)) continue;
-    if (!validateSchemaNode(frame.value, path, context)) {
+    if (!isSupportedSchema(frame.value)) {
+      addContextError(context, "invalid-schema", path, {
+        message: frame.invalidMessage,
+      });
       return { cyclic: false, valid: false, nodes };
     }
-    active.add(frame.value);
-    nodes.push(frame.value);
-    pending.push({ kind: "exit", value: frame.value });
-    pushSchemaChildren(frame.value, pending);
+    const schema = frame.value;
+    if (active.has(schema)) return { cyclic: true, valid: true, nodes };
+    if (completed.has(schema)) continue;
+    if (!validateSchemaNode(schema, path, context))
+      return { cyclic: false, valid: false, nodes };
+    active.add(schema);
+    nodes.push(schema);
+    pending.push({ kind: "exit", value: schema });
+    pushSchemaChildren(schema, pending);
   }
   return { cyclic: false, valid: true, nodes };
 }
 
 function pushSchemaChildren(
   schema: ConfigurationPropertySchema,
-  pending: GraphFrame<ConfigurationPropertySchema>[],
+  pending: SchemaGraphFrame[],
 ): void {
-  const children: ConfigurationPropertySchema[] = [];
+  const children: Extract<SchemaGraphFrame, { kind: "enter" }>[] = [];
   pushSchemaMapChildren(schema, "properties", children);
   pushSchemaMapChildren(schema, "patternProperties", children);
   const additional = Object.hasOwn(schema, "additionalProperties")
     ? schema.additionalProperties
     : undefined;
-  if (isSupportedSchema(additional)) children.push(additional);
+  if (additional !== undefined && typeof additional !== "boolean") {
+    children.push({
+      kind: "enter",
+      value: additional,
+      invalidMessage:
+        "additionalProperties must be a boolean or schema object with a supported non-empty type",
+    });
+  }
   pushItemChildren(schema, children);
   for (const entry of getCompositionEntries(schema)) {
-    children.push(...entry.branches);
+    for (let index = 0; index < entry.branches.length; index++) {
+      const branch = entry.branches[index];
+      if (branch === undefined) continue;
+      children.push({
+        kind: "enter",
+        value: branch,
+        invalidMessage:
+          entry.keyword === "not"
+            ? "not must be a schema object with a supported non-empty type"
+            : `${entry.keyword} branch ${String(index)} must be a schema object with a supported non-empty type`,
+      });
+    }
   }
   for (let index = children.length - 1; index >= 0; index--) {
     const child = children[index];
-    if (child !== undefined) pending.push({ kind: "enter", value: child });
+    if (child !== undefined) pending.push(child);
   }
 }
 
 function pushSchemaMapChildren(
   schema: ConfigurationPropertySchema,
   key: "properties" | "patternProperties",
-  children: ConfigurationPropertySchema[],
+  children: Extract<SchemaGraphFrame, { kind: "enter" }>[],
 ): void {
   if (!Object.hasOwn(schema, key)) return;
   const map = schema[key];
   if (map === undefined) return;
-  for (const child of Object.values(map)) {
-    if (isSupportedSchema(child)) children.push(child);
+  for (const [name, child] of Object.entries(map)) {
+    children.push({
+      kind: "enter",
+      value: child,
+      invalidMessage: `${key} entry ${JSON.stringify(name)} must be a schema object with a supported non-empty type`,
+    });
   }
 }
 
 function pushItemChildren(
   schema: ConfigurationPropertySchema,
-  children: ConfigurationPropertySchema[],
+  children: Extract<SchemaGraphFrame, { kind: "enter" }>[],
 ): void {
   if (!Object.hasOwn(schema, "items") || schema.items === undefined) return;
   if (!isSchemaArray(schema.items)) {
-    if (isSupportedSchema(schema.items)) children.push(schema.items);
+    children.push({
+      kind: "enter",
+      value: schema.items,
+      invalidMessage:
+        "items must be a schema object or dense array of schema objects with supported non-empty types",
+    });
     return;
   }
-  for (const child of schema.items) {
-    if (isSupportedSchema(child)) children.push(child);
+  for (let index = 0; index < schema.items.length; index++) {
+    children.push({
+      kind: "enter",
+      value: Object.hasOwn(schema.items, index)
+        ? schema.items[index]
+        : undefined,
+      invalidMessage: `items entry ${String(index)} must be a schema object with a supported non-empty type`,
+    });
   }
 }
 
