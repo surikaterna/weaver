@@ -136,7 +136,12 @@ describe("persistent schema registry hardening", () => {
     expect(Object.hasOwn(serialized.environments, "constructor")).toBe(true);
     expect(serialized.environments.constructor.schemas["/svc"]).toEqual({
       kind: "service",
-      schema: { type: "object" },
+      schema: {
+        encoding: "weaver.configuration-property-schema-graph",
+        version: 1,
+        root: 0,
+        nodes: [{ type: "object" }],
+      },
       metadata,
     });
   });
