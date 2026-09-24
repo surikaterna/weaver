@@ -35,6 +35,62 @@ function buildScompDeps(configService) {
   return { configService, scopeManager, schemaRegistry };
 }
 
+const schemaFidelityFixture = {
+  type: "object",
+  required: ["targets"],
+  properties: {
+    targets: {
+      type: "array",
+      minItems: 1,
+      maxItems: 5,
+      uniqueItems: true,
+      default: [{ name: "primary", weight: 1 }],
+      items: {
+        type: "object",
+        required: ["name", "weight"],
+        minProperties: 2,
+        maxProperties: 2,
+        additionalProperties: false,
+        properties: {
+          name: {
+            type: "string",
+            minLength: 2,
+            maxLength: 20,
+            pattern: "^[a-z-]+$",
+          },
+          weight: {
+            type: "number",
+            minimum: 0,
+            maximum: 1,
+            multipleOf: 0.1,
+          },
+        },
+      },
+    },
+  },
+  oneOf: [{ type: "object", required: ["targets"] }],
+  anyOf: [{ type: "object", minProperties: 1 }],
+  allOf: [{ type: "object", maxProperties: 3 }],
+  not: { type: "null" },
+  "x-weaver": {
+    visibility: "admin",
+    reloadBehavior: "hot",
+    expressionAllowed: false,
+  },
+};
+
+const schemaFidelityRequest = {
+  serviceId: "example-service",
+  environment: "dev",
+  owner: {
+    name: "Example Service",
+    contact: "example-service@example.com",
+  },
+  schema: schemaFidelityFixture,
+  schemaVersion: "1.2.3",
+  fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }],
+};
+
 describe("createWeaverScompService", () => {
   test("returns a ServiceDefinition with name and router", async () => {
     const provider = createTestProvider("p1", "platform", { app: { name: "test" } });
@@ -116,67 +172,13 @@ describe("createWeaverScompService", () => {
       },
     };
     const transport = createScompTransport({ peer });
-    const schema = {
-      type: "object",
-      required: ["targets"],
-      properties: {
-        targets: {
-          type: "array",
-          minItems: 1,
-          maxItems: 5,
-          uniqueItems: true,
-          default: [{ name: "primary", weight: 1 }],
-          items: {
-            type: "object",
-            required: ["name", "weight"],
-            minProperties: 2,
-            maxProperties: 2,
-            additionalProperties: false,
-            properties: {
-              name: {
-                type: "string",
-                minLength: 2,
-                maxLength: 20,
-                pattern: "^[a-z-]+$",
-              },
-              weight: {
-                type: "number",
-                minimum: 0,
-                maximum: 1,
-                multipleOf: 0.1,
-              },
-            },
-          },
-        },
-      },
-      oneOf: [{ type: "object", required: ["targets"] }],
-      anyOf: [{ type: "object", minProperties: 1 }],
-      allOf: [{ type: "object", maxProperties: 3 }],
-      not: { type: "null" },
-      "x-weaver": {
-        visibility: "admin",
-        reloadBehavior: "hot",
-        expressionAllowed: false,
-      },
-    };
-    const request = {
-      serviceId: "example-service",
-      environment: "dev",
-      owner: {
-        name: "Example Service",
-        contact: "example-service@example.com",
-      },
-      schema,
-      schemaVersion: "1.2.3",
-      fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }],
-    };
 
-    const result = await transport.registerSchema(request);
+    const result = await transport.registerSchema(schemaFidelityRequest);
 
     expect(result.success).toBe(true);
     expect(result.metadata?.servicePath).toBe("/example-service");
     expect(await deps.schemaRegistry.getSchema("example-service", "dev")).toEqual(
-      schema,
+      schemaFidelityFixture,
     );
     await transport.close();
   });
