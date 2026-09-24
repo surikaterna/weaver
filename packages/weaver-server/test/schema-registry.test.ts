@@ -17,9 +17,12 @@ const prototypeUnsafeEnvironments = [
 
 function serviceRegistration(environment = "default") {
   return {
-    serviceId: "lynx",
+    serviceId: "example-service",
     environment,
-    owner: { name: "Lynx", contact: "lynx@example.com" },
+    owner: {
+      name: "Example Service",
+      contact: "example-service@example.com",
+    },
     schema: { type: "object" as const },
     schemaVersion: "1.2.3",
     fragmentSlots: [{ slotPath: "/plugins", accepts: "object" as const }],
@@ -49,7 +52,7 @@ function createCountingProvider() {
 
 function fragmentRegistration(providerId = "ghost.settings.panel") {
   return {
-    serviceId: "lynx",
+    serviceId: "example-service",
     providerId,
     slotPath: "/plugins",
     environment: "default",
@@ -63,24 +66,29 @@ describe("SchemaRegistry", () => {
   it("registers service schema metadata with owner, version, and derived paths", async () => {
     const registry = createSchemaRegistry({ configService });
     const result = await registry.register(serviceRegistration(), {
-      subject: "svc:lynx",
+      subject: "svc:example-service",
       actor: "api",
     });
 
     expect(result.success).toBe(true);
     expect(result.metadata).toEqual({
-      serviceId: "lynx",
-      servicePath: "/lynx",
+      serviceId: "example-service",
+      servicePath: "/example-service",
       environment: "default",
-      providerId: "lynx",
-      owner: { name: "Lynx", contact: "lynx@example.com" },
+      providerId: "example-service",
+      owner: {
+        name: "Example Service",
+        contact: "example-service@example.com",
+      },
       schemaVersion: "1.2.3",
-      audit: { subject: "svc:lynx", actor: "api" },
+      audit: { subject: "svc:example-service", actor: "api" },
     });
-    expect(await registry.getSchema("lynx", "default")).toEqual({
+    expect(await registry.getSchema("example-service", "default")).toEqual({
       type: "object",
     });
-    expect(Object.keys(registry.listAll())).toEqual(["/lynx:default"]);
+    expect(Object.keys(registry.listAll())).toEqual([
+      "/example-service:default",
+    ]);
   });
 
   it("registers fragment schema metadata under a declared slot", async () => {
@@ -90,18 +98,18 @@ describe("SchemaRegistry", () => {
 
     expect(result.success).toBe(true);
     expect(result.metadata).toEqual({
-      serviceId: "lynx",
-      servicePath: "/lynx",
-      canonicalSlotPath: "/lynx/plugins",
+      serviceId: "example-service",
+      servicePath: "/example-service",
+      canonicalSlotPath: "/example-service/plugins",
       providerId: "ghost.settings.panel",
-      fragmentPath: "/lynx/plugins/ghost.settings.panel",
+      fragmentPath: "/example-service/plugins/ghost.settings.panel",
       environment: "default",
       owner: { name: "Ghost", contact: "ghost@example.com" },
       schemaVersion: "0.4.0",
     });
     expect(Object.keys(registry.listAll())).toEqual([
-      "/lynx:default",
-      "/lynx/plugins/ghost.settings.panel:default",
+      "/example-service:default",
+      "/example-service/plugins/ghost.settings.panel:default",
     ]);
   });
 
@@ -241,29 +249,35 @@ describe("SchemaRegistry", () => {
       environments: {
         default: {
           schemas: {
-            "/lynx": {
+            "/example-service": {
               kind: "service",
               schema: { type: "object" },
               metadata: {
-                serviceId: "lynx",
-                servicePath: "/lynx",
+                serviceId: "example-service",
+                servicePath: "/example-service",
                 environment: "default",
-                providerId: "lynx",
-                owner: { name: "Lynx", contact: "lynx@example.com" },
+                providerId: "example-service",
+                owner: {
+                  name: "Example Service",
+                  contact: "example-service@example.com",
+                },
                 schemaVersion: "1.2.3",
                 audit: { actor: "api" },
               },
             },
           },
           slots: {
-            "/lynx/plugins": {
-              serviceId: "lynx",
-              servicePath: "/lynx",
+            "/example-service/plugins": {
+              serviceId: "example-service",
+              servicePath: "/example-service",
               slotPath: "/plugins",
-              canonicalSlotPath: "/lynx/plugins",
+              canonicalSlotPath: "/example-service/plugins",
               environment: "default",
-              providerId: "lynx",
-              owner: { name: "Lynx", contact: "lynx@example.com" },
+              providerId: "example-service",
+              owner: {
+                name: "Example Service",
+                contact: "example-service@example.com",
+              },
               accepts: "object",
               schemaVersion: "1.2.3",
               audit: { actor: "api" },
@@ -280,7 +294,7 @@ describe("SchemaRegistry", () => {
       true,
     );
     expect(Object.keys(hydrated.listAll())).toContain(
-      "/lynx/plugins/ghost.settings.panel:default",
+      "/example-service/plugins/ghost.settings.panel:default",
     );
   });
 });
