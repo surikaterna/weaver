@@ -1,12 +1,6 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  lstat,
-  readdir,
-  readFile,
-  realpath,
-  writeFile,
-} from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const directory = import.meta.dirname;
@@ -101,7 +95,6 @@ async function dependencyEvidence(): Promise<unknown> {
       ["@esbuild/linux-x64@0.28.2"],
     ),
   ]);
-  const audit = auditEvidence();
   return {
     schemaVersion: 1,
     directCount: 3,
@@ -120,7 +113,11 @@ async function dependencyEvidence(): Promise<unknown> {
       "BSD-3-Clause": ["fast-uri"],
     },
     incompatibleLicenses: [],
-    audit,
+    advisoryPolicy: {
+      mode: "separate-live-pnpm-audit",
+      scope: "candidate closure versions declared in this artifact",
+      failureThreshold: "high-or-critical",
+    },
   };
 }
 
@@ -140,62 +137,8 @@ async function packageEvidence(
     integrity,
     license:
       typeof packageJson.license === "string" ? packageJson.license : "unknown",
-    installedBytes: await directoryBytes(await realpath(path)),
     transitive,
   };
-}
-
-function auditEvidence(): unknown {
-  const result = spawnSync("pnpm", ["audit", "--json"], {
-    cwd: root,
-    encoding: "utf8",
-    maxBuffer: 10 * 1024 * 1024,
-  });
-  const text = result.stdout.trim();
-  let parsed: unknown = {};
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    parsed = { parseError: result.stderr.trim() };
-  }
-  const introduced = new Map<string, string>([
-    ["@cfworker/json-schema", "4.1.1"],
-    ["ajv", "8.20.0"],
-    ["fast-deep-equal", "3.1.3"],
-    ["fast-uri", "3.1.8"],
-    ["json-schema-traverse", "1.0.0"],
-    ["require-from-string", "2.0.2"],
-    ["esbuild", "0.28.2"],
-    ["@esbuild/linux-x64", "0.28.2"],
-  ]);
-  const attributable = attributableAdvisories(parsed, introduced);
-  return {
-    exitCode: result.status,
-    attributableHighOrCritical: attributable,
-    note: "Workspace audit findings on other versions or packages are retained in raw evidence but are not attributed to the pinned closure.",
-    raw: parsed,
-  };
-}
-
-function attributableAdvisories(
-  value: unknown,
-  introduced: ReadonlyMap<string, string>,
-): readonly string[] {
-  const advisories = object(object(value).advisories);
-  const matches: string[] = [];
-  for (const [id, advisoryValue] of Object.entries(advisories)) {
-    const advisory = object(advisoryValue);
-    if (advisory.severity !== "high" && advisory.severity !== "critical")
-      continue;
-    const version = introduced.get(String(advisory.module_name));
-    const findings = Array.isArray(advisory.findings) ? advisory.findings : [];
-    if (
-      version !== undefined &&
-      findings.some((finding) => object(finding).version === version)
-    )
-      matches.push(id);
-  }
-  return matches;
 }
 
 function renderReport(
@@ -235,13 +178,13 @@ function renderReport(
     `## Ownership boundary\n\n` +
     `Candidates were credited only for ordinary keyword evaluation. Weaver-retained layers are profile/mode lowering, closed-default policy, effective default shadow, patch/member resolution, schema/value graph and sparse checks, regex policy, exact-decimal policy, x-weaver policy, and deterministic error normalization. Lowering preserves absent, boolean, and schema-valued additionalProperties; the explicit-false row rejects an unknown own member across the baseline and applicable candidates. Raw candidate errors remain beside normalized results.\n\n` +
     `## Performance, bundles, dependencies, and LOC\n\n` +
-    `The benchmark configuration discloses seed 1592636971, 20/100 compile warmup/samples and 5/30 hot batches, but all candidates are marked ineligible before timing. Bundle sizes and metafile contributions are in \`results/bundle.json\`. Dependency closure is 1 package for cfworker and 5 for Ajv; all licenses are MIT or BSD-3-Clause, with no attributable high/critical advisory. LOC projections are ${projectionText(projections)}.\n\n` +
+    `The benchmark configuration discloses seed 1592636971, 20/100 compile warmup/samples and 5/30 hot batches, but all candidates are marked ineligible before timing. Browser bundle artifacts own the shipped-size gate: \`results/bundle.json\` records raw, minified, gzip, and metafile evidence under the unchanged <=75 KiB rule. Installed filesystem totals are excluded because package-manager layout is not shipped-size evidence. Dependency closure is 1 package for cfworker and 5 for Ajv; all licenses are MIT or BSD-3-Clause. A separate live \`pnpm audit --json\` gate filters the exact declared closure and requires zero attributable high/critical advisories without adding registry data to hashed artifacts. LOC projections are ${projectionText(projections)}.\n\n` +
     `## Defaults, mutation, and adversarial evidence\n\n` +
     `Ajv mutation options and equivalent behavior are disabled. Annotation-only partial runs do not materialize defaults. The candidate-neutral iterative effective shadow supplies Weaver-consulted absent and own-undefined child defaults while descriptor/identity checks preserve originals. Sparse arrays and cycles are rejected by the retained B preflight. Child probes run with 5s and 512 MiB limits.\n\n` +
     `## Limitations\n\n` +
     `This is a bounded decision spike, not a full JSON Schema Test Suite run. The shared corpus has ${String(m.fixtureCount)} explicit rows and compares deterministic public validity/code/path/order while retaining full raw and normalized messages. Candidate error vocabularies do not always expose enough parameters for exact Weaver paths. Browser execution uses Node's VM with string/wasm generation disabled rather than a physical browser. Timing is intentionally absent after hard-gate failure.\n\n` +
     `## Bounds and test impact\n\n` +
-    `Handwritten scope is ${String(bounds.handwrittenFiles)} files / ${String(bounds.handwrittenNonblankLoc)} nonblank LOC, within the 18-file limit and below the 2550-LOC investigation marker and 2600-LOC stop. Existing 73 config-engine and 24 server write-pipeline tests remain necessary because no candidate qualifies. Changeset status intentionally exits 1 with "Some packages have been changed but no changesets were found" because this non-mergeable test-only evidence lives under config-engine; no changeset is appropriate. No production source, existing test, public contract, changeset, or PR was changed.\n\n` +
+    `Handwritten scope is ${String(bounds.handwrittenFiles)} files / ${String(bounds.handwrittenNonblankLoc)} nonblank LOC, within the 18-file limit and below the 2485-LOC investigation marker and 2500-LOC stop. Existing 73 config-engine and 24 server write-pipeline tests remain necessary because no candidate qualifies. Changeset status intentionally exits 1 with "Some packages have been changed but no changesets were found" because this non-mergeable test-only evidence lives under config-engine; no changeset is appropriate. No production source, existing test, public contract, changeset, or PR was changed.\n\n` +
     `## Artifact SHA-256\n\n${hashes}\n\n` +
     `## Recommended production decision\n\nRetain B unchanged and unblock its existing release flow after independent audit of this evidence. If reconsidered later, investigate an iterative interpreter with richer structured errors; do not use Ajv runtime under Weaver's no-eval dynamic-registration requirement or standalone as a universal registry.\n`
   );
@@ -313,16 +256,6 @@ function projectionText(value: Record<string, unknown>): string {
       ([name, projection]) => `${name} ${locResult(projection).toLowerCase()}`,
     )
     .join("; ");
-}
-
-async function directoryBytes(path: string): Promise<number> {
-  let total = 0;
-  for (const entry of await readdir(path, { withFileTypes: true })) {
-    const child = resolve(path, entry.name);
-    if (entry.isDirectory()) total += await directoryBytes(child);
-    else if (entry.isFile()) total += (await lstat(child)).size;
-  }
-  return total;
 }
 
 async function json(name: string): Promise<unknown> {

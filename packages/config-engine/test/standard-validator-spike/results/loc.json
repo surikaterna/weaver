@@ -44,7 +44,7 @@
   },
   "bounds": {
     "handwrittenFiles": 18,
-    "handwrittenNonblankLoc": 2543,
+    "handwrittenNonblankLoc": 2479,
     "investigate": {
       "files": 18,
       "loc": 2550
