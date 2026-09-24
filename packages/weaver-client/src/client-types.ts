@@ -7,7 +7,6 @@ import type {
   UntypedNamespaceClient,
 } from "./namespace";
 import type { WeaverClientPersistence } from "./persistence";
-import type { SchemaRegistrationResult } from "./registration";
 import type { ValidationResult } from "./schema-registry";
 import type { ScopeLoadingMode } from "./scope-manager";
 import type { StalenessConfig } from "./staleness";
@@ -107,11 +106,6 @@ export interface WeaverClient {
     definition: NamespaceDefinition<string, TShape>,
   ): TypedNamespaceClient<TShape>;
   namespace(prefix: string): UntypedNamespaceClient;
-
-  // ── Registration ──
-  registerNamespaces(
-    definitions: ReadonlyArray<NamespaceDefinition>,
-  ): Promise<SchemaRegistrationResult>;
 
   // ── Instances ──
   instance(basePath: string, instanceId: string): InstanceClient;
