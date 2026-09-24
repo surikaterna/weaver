@@ -4,7 +4,16 @@ import type {
   ObjectConfigurationPropertySchema,
 } from "./property-schema";
 
-type SchemaPath = readonly PropertyKey[];
+type PathMetric = "appends" | "materializations" | "copiedSegments";
+type PathMetrics = Record<PathMetric, number>;
+const OBJECT_ROOT_ERROR =
+  'Registered schema root must declare type exactly "object"';
+interface SchemaPath {
+  readonly parent: SchemaPath | undefined;
+  readonly key: PropertyKey | undefined;
+  readonly depth: number;
+  readonly metrics: PathMetrics | undefined;
+}
 interface ShallowSchema {
   readonly type: ConfigurationPropertySchema["type"];
   readonly [key: string]: unknown;
@@ -13,6 +22,9 @@ interface GraphError {
   readonly message: string;
   readonly path: SchemaPath;
 }
+type DataResult<T> =
+  | { readonly success: true; readonly data: T }
+  | { readonly success: false; readonly error: GraphError };
 interface ChildEdge {
   readonly input: unknown;
   readonly path: SchemaPath;
@@ -21,20 +33,19 @@ interface ChildEdge {
 type GraphFrame =
   | { readonly kind: "enter"; readonly edge: ChildEdge }
   | { readonly kind: "exit"; readonly input: object };
-type GraphResult =
-  | { readonly success: true; readonly data: ConfigurationPropertySchema }
-  | { readonly success: false; readonly error: GraphError };
+type GraphResult = DataResult<ConfigurationPropertySchema>;
 export function createSchemaPropertyGraphSchema(
   shallowSchema: z.ZodType<ShallowSchema>,
   objectRoot: boolean,
+  metrics?: PathMetrics,
 ): z.ZodType<ConfigurationPropertySchema> {
   return z.unknown().transform((input, context) => {
-    const result = parseGraph(input, shallowSchema, objectRoot);
+    const result = parseGraph(input, shallowSchema, objectRoot, metrics);
     if (result.success) return result.data;
     context.addIssue({
       code: "custom",
       message: result.error.message,
-      path: [...result.error.path],
+      path: materializePath(result.error.path),
     });
     return z.NEVER;
   });
@@ -50,11 +61,13 @@ function parseGraph(
   input: unknown,
   shallowSchema: z.ZodType<ShallowSchema>,
   objectRoot: boolean,
+  metrics?: PathMetrics,
 ): GraphResult {
   let root: ConfigurationPropertySchema | undefined;
+  const rootPath = createRootPath(metrics);
   const rootEdge: ChildEdge = {
     input,
-    path: [],
+    path: rootPath,
     attach: (schema) => {
       root = schema;
     },
@@ -63,22 +76,17 @@ function parseGraph(
   if (!parsed.success) {
     if (
       objectRoot &&
-      parsed.error.path.length === 1 &&
-      parsed.error.path[0] === "type"
+      parsed.error.path.depth === 1 &&
+      parsed.error.path.key === "type"
     ) {
-      return graphFailure(
-        ["type"],
-        'Registered schema root must declare type exactly "object"',
-      );
+      return graphFailure(parsed.error.path, OBJECT_ROOT_ERROR);
     }
     return parsed;
   }
-  if (root === undefined) return graphFailure([], "Schema graph is empty");
+  if (root === undefined)
+    return graphFailure(rootPath, "Schema graph is empty");
   if (objectRoot && root.type !== "object") {
-    return graphFailure(
-      ["type"],
-      'Registered schema root must declare type exactly "object"',
-    );
+    return graphFailure(appendPath(rootPath, "type"), OBJECT_ROOT_ERROR);
   }
   return { success: true, data: root };
 }
@@ -156,9 +164,7 @@ function collectEdges(
   input: object,
   clone: ConfigurationPropertySchema,
   path: SchemaPath,
-):
-  | { readonly success: true; readonly data: readonly ChildEdge[] }
-  | { readonly success: false; readonly error: GraphError } {
+): EdgeCollection {
   const edges: ChildEdge[] = [];
   for (const key of ["properties", "patternProperties"] as const) {
     const result = collectMapEdges(input, clone, key, path);
@@ -176,7 +182,7 @@ function collectEdges(
     if (!result.success) return result;
     edges.push(...result.data);
   }
-  const not = collectNot(input, clone, path);
+  const not = collectSingleEdge(input, clone, "not", path);
   if (!not.success) return not;
   edges.push(...not.data);
   return { success: true, data: edges };
@@ -189,10 +195,11 @@ function collectMapEdges(
 ): EdgeCollection {
   const value = ownDataValue(input, key);
   if (!value.present || value.data === undefined) return emptyEdges();
+  const keyPath = appendPath(path, key);
   if (!isObjectNode(value.data)) {
-    return graphFailure([...path, key], "Expected schema record");
+    return graphFailure(keyPath, "Expected schema record");
   }
-  const snapshot = snapshotRecord(value.data, [...path, key], key);
+  const snapshot = snapshotRecord(value.data, keyPath, key);
   if (!snapshot.success) return snapshot;
   const output: Record<string, ConfigurationPropertySchema> = {};
   defineOwn(clone, key, output);
@@ -200,7 +207,7 @@ function collectMapEdges(
   for (const name of Object.keys(snapshot.data)) {
     edges.push({
       input: snapshot.data[name],
-      path: [...path, key, name],
+      path: appendPath(keyPath, name),
       attach: (schema) => defineOwn(output, name, schema),
     });
   }
@@ -216,19 +223,9 @@ function collectAdditionalProperties(
     !value.present ||
     value.data === undefined ||
     typeof value.data === "boolean"
-  ) {
+  )
     return emptyEdges();
-  }
-  return {
-    success: true,
-    data: [
-      {
-        input: value.data,
-        path: [...path, "additionalProperties"],
-        attach: (schema) => defineOwn(clone, "additionalProperties", schema),
-      },
-    ],
-  };
+  return collectSingleEdge(input, clone, "additionalProperties", path);
 }
 function collectItems(
   input: object,
@@ -238,16 +235,7 @@ function collectItems(
   const value = ownDataValue(input, "items");
   if (!value.present || value.data === undefined) return emptyEdges();
   if (!Array.isArray(value.data)) {
-    return {
-      success: true,
-      data: [
-        {
-          input: value.data,
-          path: [...path, "items"],
-          attach: (schema) => defineOwn(clone, "items", schema),
-        },
-      ],
-    };
+    return collectSingleEdge(input, clone, "items", path);
   }
   return collectStructuralArray(value.data, clone, "items", path);
 }
@@ -260,7 +248,7 @@ function collectArrayEdges(
   const value = ownDataValue(input, key);
   if (!value.present || value.data === undefined) return emptyEdges();
   if (!Array.isArray(value.data)) {
-    return graphFailure([...path, key], "Expected array");
+    return graphFailure(appendPath(path, key), "Expected array");
   }
   return collectStructuralArray(value.data, clone, key, path);
 }
@@ -270,13 +258,14 @@ function collectStructuralArray(
   key: "items" | "oneOf" | "anyOf" | "allOf",
   path: SchemaPath,
 ): EdgeCollection {
-  const values = snapshotDenseArray(input, [...path, key]);
+  const keyPath = appendPath(path, key);
+  const values = snapshotDenseArray(input, keyPath);
   if (!values.success) return values;
   const output: ConfigurationPropertySchema[] = [];
   defineOwn(clone, key, output);
   const edges = values.data.map((child, index) => ({
     input: child,
-    path: [...path, key, index],
+    path: appendPath(keyPath, index),
     attach: (schema: ConfigurationPropertySchema) => {
       output[index] = schema;
       if (index === values.data.length - 1) Object.freeze(output);
@@ -285,40 +274,33 @@ function collectStructuralArray(
   if (values.data.length === 0) Object.freeze(output);
   return { success: true, data: edges };
 }
-function collectNot(
+function collectSingleEdge(
   input: object,
   clone: ConfigurationPropertySchema,
+  key: "additionalProperties" | "items" | "not",
   path: SchemaPath,
 ): EdgeCollection {
-  const value = ownDataValue(input, "not");
+  const value = ownDataValue(input, key);
   if (!value.present || value.data === undefined) return emptyEdges();
-  return {
-    success: true,
-    data: [
-      {
-        input: value.data,
-        path: [...path, "not"],
-        attach: (schema) => defineOwn(clone, "not", schema),
-      },
-    ],
+  const edge: ChildEdge = {
+    input: value.data,
+    path: appendPath(path, key),
+    attach: (schema) => defineOwn(clone, key, schema),
   };
+  return { success: true, data: [edge] };
 }
-type EdgeCollection =
-  | { readonly success: true; readonly data: readonly ChildEdge[] }
-  | { readonly success: false; readonly error: GraphError };
+type EdgeCollection = DataResult<readonly ChildEdge[]>;
 function snapshotRecord(
   input: object,
   path: SchemaPath,
   label: string,
-):
-  | { readonly success: true; readonly data: Record<string, unknown> }
-  | { readonly success: false; readonly error: GraphError } {
+): DataResult<Record<string, unknown>> {
   const output: Record<string, unknown> = {};
   for (const key of Object.keys(input)) {
     const descriptor = Object.getOwnPropertyDescriptor(input, key);
     if (descriptor === undefined || !("value" in descriptor)) {
       return graphFailure(
-        [...path, key],
+        appendPath(path, key),
         `${label} accessors are not supported`,
       );
     }
@@ -329,15 +311,13 @@ function snapshotRecord(
 function snapshotDenseArray(
   input: readonly unknown[],
   path: SchemaPath,
-):
-  | { readonly success: true; readonly data: readonly unknown[] }
-  | { readonly success: false; readonly error: GraphError } {
+): DataResult<readonly unknown[]> {
   const output: unknown[] = [];
   for (const key of Object.keys(input)) {
     const descriptor = Object.getOwnPropertyDescriptor(input, key);
     if (descriptor !== undefined && !("value" in descriptor)) {
       return graphFailure(
-        [...path, key],
+        appendPath(path, key),
         "Structural array accessors are not supported",
       );
     }
@@ -345,11 +325,14 @@ function snapshotDenseArray(
   for (let index = 0; index < input.length; index++) {
     const descriptor = Object.getOwnPropertyDescriptor(input, String(index));
     if (descriptor === undefined) {
-      return graphFailure([...path, index], "Structural arrays must be dense");
+      return graphFailure(
+        appendPath(path, index),
+        "Structural arrays must be dense",
+      );
     }
     if (!("value" in descriptor)) {
       return graphFailure(
-        [...path, index],
+        appendPath(path, index),
         "Structural array accessors are not supported",
       );
     }
@@ -370,10 +353,30 @@ function ownDataValue(
 function shallowFailure(path: SchemaPath, error: z.ZodError): EnterResult {
   const issue = error.issues[0];
   if (issue === undefined) return graphFailure(path, "Invalid schema node");
-  return graphFailure([...path, ...issue.path], issue.message);
+  let issuePath = path;
+  for (const key of issue.path) issuePath = appendPath(issuePath, key);
+  return graphFailure(issuePath, issue.message);
 }
 function graphFailure(path: SchemaPath, message: string) {
   return { success: false as const, error: { path, message } };
+}
+function createRootPath(metrics?: PathMetrics): SchemaPath {
+  return { parent: undefined, key: undefined, depth: 0, metrics };
+}
+function appendPath(path: SchemaPath, key: PropertyKey): SchemaPath {
+  if (path.metrics !== undefined) path.metrics.appends++;
+  return { parent: path, key, depth: path.depth + 1, metrics: path.metrics };
+}
+function materializePath(path: SchemaPath): PropertyKey[] {
+  const output: PropertyKey[] = Array(path.depth);
+  let cursor: SchemaPath | undefined = path;
+  while (cursor !== undefined) {
+    if (cursor.key !== undefined) output[cursor.depth - 1] = cursor.key;
+    cursor = cursor.parent;
+  }
+  if (path.metrics !== undefined) path.metrics.materializations++;
+  if (path.metrics !== undefined) path.metrics.copiedSegments += path.depth;
+  return output;
 }
 function emptyEdges(): EdgeCollection {
   return { success: true, data: [] };

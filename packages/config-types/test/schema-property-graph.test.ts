@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { createSchemaPropertyGraphSchema } from "../src/schema-property-graph.js";
 import {
   configurationPropertySchemaSchema,
   objectConfigurationPropertySchemaSchema,
@@ -39,6 +41,32 @@ const scalarFields = {
 };
 
 describe("configuration property graph parser", () => {
+  it("appends paths in constant work and materializes only failures", () => {
+    const shallow = z.looseObject({ type: z.literal("object") });
+    for (const signedDepth of [1_000, 4_000, -1_000]) {
+      const malformed = signedDepth < 0;
+      const depth = Math.abs(signedDepth);
+      const metrics = { appends: 0, materializations: 0, copiedSegments: 0 };
+      const schema = createSchemaPropertyGraphSchema(shallow, false, metrics);
+      const root: Record<string, unknown> = { type: "object" };
+      const expectedPath: PropertyKey[] = [];
+      let current = root;
+      for (let index = 0; index < depth; index++) {
+        const child =
+          malformed && index === depth - 1 ? null : { type: "object" };
+        current.properties = { child };
+        expectedPath.push("properties", "child");
+        if (child !== null) current = child;
+      }
+      const result = schema.safeParse(root);
+      expect(metrics.appends).toBe(2 * depth);
+      expect(metrics.materializations).toBe(malformed ? 1 : 0);
+      expect(metrics.copiedSegments).toBe(malformed ? 2 * depth : 0);
+      if (!result.success)
+        expect(result.error.issues[0]?.path).toEqual(expectedPath);
+    }
+  });
+
   it("accepts the complete scalar field matrix and preserves unknown values", () => {
     const result = configurationPropertySchemaSchema.parse(scalarFields);
 
@@ -175,7 +203,18 @@ describe("configuration property graph parser", () => {
   it("reports malformed children at deterministic paths", () => {
     const cases = [
       [{ type: "object", properties: { bad: null } }, ["properties", "bad"]],
+      [
+        { type: "object", patternProperties: { bad: null } },
+        ["patternProperties", "bad"],
+      ],
+      [
+        { type: "object", additionalProperties: null },
+        ["additionalProperties"],
+      ],
+      [{ type: "array", items: null }, ["items"]],
       [{ type: "array", items: [null] }, ["items", 0]],
+      [{ type: "string", oneOf: [null] }, ["oneOf", 0]],
+      [{ type: "string", anyOf: [null] }, ["anyOf", 0]],
       [{ type: "string", allOf: [null] }, ["allOf", 0]],
       [{ type: "string", not: null }, ["not"]],
     ] as const;
