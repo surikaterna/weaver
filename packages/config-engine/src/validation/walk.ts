@@ -4,7 +4,7 @@ import {
   validateArraySize,
   validateObjectSize,
   validateUniqueItems,
-} from "./schema-validation-cardinality";
+} from "./cardinality";
 import {
   addCompositionResult,
   type CompositionEntry,
@@ -12,9 +12,9 @@ import {
   getCompositionEntries,
   getMemoizedCompositionMatch,
   memoizeCompositionMatch,
-} from "./schema-validation-composition";
-import { validateValueConstraints } from "./schema-validation-constraints";
-import { collectMemberSchemas } from "./schema-validation-paths";
+} from "./composition";
+import { validateValueConstraints } from "./constraints";
+import { collectMemberSchemas } from "./paths";
 import {
   addContextError,
   addError,
@@ -28,7 +28,7 @@ import {
   matchesAnyType,
   type ValidationPath,
   type ValidationState,
-} from "./schema-validation-support";
+} from "./support";
 
 type WalkFrame =
   | { readonly kind: "value"; readonly state: ValidationState }

@@ -5,7 +5,7 @@ import {
   type ValidationContext,
   type ValidationErrorPath,
   type ValidationMode,
-} from "./schema-validation-support";
+} from "./support";
 
 export const COMPOSITION_KEYWORDS = ["anyOf", "oneOf", "allOf", "not"] as const;
 

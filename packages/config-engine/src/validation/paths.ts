@@ -12,7 +12,7 @@ import {
   type SchemaValidationPathSegment,
   type ValidationContext,
   type ValidationErrorPath,
-} from "./schema-validation-support";
+} from "./support";
 
 export function resolveMemberSchemas(
   schema: ConfigurationPropertySchema,

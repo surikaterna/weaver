@@ -4,7 +4,7 @@ import {
   getCompositionEntries,
   isSupportedSchema,
   validateCompositionShape,
-} from "./schema-validation-composition";
+} from "./composition";
 import {
   addContextError,
   appendValidationPath,
@@ -13,7 +13,7 @@ import {
   type SchemaValidationPathSegment,
   type ValidationContext,
   type ValidationPath,
-} from "./schema-validation-support";
+} from "./support";
 
 interface SchemaInspection {
   readonly cyclic: boolean;

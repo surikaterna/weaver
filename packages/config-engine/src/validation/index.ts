@@ -1,10 +1,11 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { createCompositionMemo } from "./schema-validation-composition";
+import { createCompositionMemo } from "./composition";
+// biome-ignore format: Preserve this moved module's rename similarity.
 import {
   validateSchemaGraph,
   validateValueGraph,
-} from "./schema-validation-graph";
-import { resolveMemberSchemas } from "./schema-validation-paths";
+} from "./graph";
+import { resolveMemberSchemas } from "./paths";
 import {
   createValidationPath,
   type SchemaValidationOptions,
@@ -14,8 +15,8 @@ import {
   type ValidationContext,
   type ValidationMode,
   type ValidationState,
-} from "./schema-validation-support";
-import { validateValuesIteratively } from "./schema-validation-walk";
+} from "./support";
+import { validateValuesIteratively } from "./walk";
 
 export type {
   SchemaValidationError,
@@ -23,7 +24,7 @@ export type {
   SchemaValidationOptions,
   SchemaValidationPathSegment,
   SchemaValidationResult,
-} from "./schema-validation-support";
+} from "./support";
 
 export function validatePartialConfiguration(
   schema: ConfigurationPropertySchema,

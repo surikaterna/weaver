@@ -1,11 +1,11 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { deepEqual } from "../src/deep-equal.js";
+import { deepEqual } from "../../src/deep-equal.js";
 import {
   validateConfigurationPatch,
   validateEffectiveConfiguration,
   validatePartialConfiguration,
-} from "../src/schema-validation.js";
-import { schemaValidationResultSchema } from "../src/schema-validation-schemas.js";
+} from "../../src/validation/index.js";
+import { schemaValidationResultSchema } from "../../src/validation/schemas.js";
 
 const settingsSchema: ConfigurationPropertySchema = {
   type: "object",

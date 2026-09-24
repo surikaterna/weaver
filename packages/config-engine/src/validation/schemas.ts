@@ -4,7 +4,7 @@ import type {
   SchemaValidationErrorCode,
   SchemaValidationPathSegment,
   SchemaValidationResult,
-} from "./schema-validation-support";
+} from "./support";
 
 export const schemaValidationPathSegmentSchema: z.ZodType<SchemaValidationPathSegment> =
   z.union([z.string(), z.number().finite()]);

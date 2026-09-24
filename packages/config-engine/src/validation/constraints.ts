@@ -1,10 +1,10 @@
-import { deepEqual } from "./deep-equal";
+import { deepEqual } from "../deep-equal";
 import {
   addBoundedError,
   addError,
   compileSchemaPattern,
   type ValidationState,
-} from "./schema-validation-support";
+} from "./support";
 
 interface DecimalNumber {
   readonly coefficient: bigint;

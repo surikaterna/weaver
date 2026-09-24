@@ -3,8 +3,8 @@ import type {
   ConfigurationPropertySchema,
 } from "@weaver-conf/config-types";
 
-import { parsePath } from "./path";
-import { getCachedRegex, isSafePattern } from "./regex-cache";
+import { parsePath } from "../path";
+import { getCachedRegex, isSafePattern } from "../regex-cache";
 
 export type SchemaValidationPathSegment = string | number;
 
