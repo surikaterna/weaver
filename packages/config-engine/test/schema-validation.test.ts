@@ -27,6 +27,13 @@ const settingsSchema: ConfigurationPropertySchema = {
 };
 
 const compositionKeywords = ["oneOf", "anyOf", "allOf", "not"] as const;
+const prototypeCollisionKeys = [
+  "toString",
+  "valueOf",
+  "hasOwnProperty",
+  "constructor",
+] as const;
+const patchCollisionKeys = ["toString", "valueOf", "hasOwnProperty"] as const;
 
 type CompositionKeyword = (typeof compositionKeywords)[number];
 
@@ -144,6 +151,140 @@ describe("schema validation", () => {
       code: "unknown-property",
       path: "$.flags.extra",
     });
+  });
+
+  it("validates prototype-colliding keys as open additional properties", () => {
+    const value = Object.fromEntries(
+      prototypeCollisionKeys.map((key) => [key, "allowed"]),
+    );
+    const typedSchema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: {},
+      additionalProperties: { type: "string" },
+    };
+    const schemas: ConfigurationPropertySchema[] = [
+      { type: "object", properties: {}, additionalProperties: true },
+      typedSchema,
+    ];
+
+    for (const schema of schemas) {
+      expect(validatePartialConfiguration(schema, value)).toEqual({
+        valid: true,
+        errors: [],
+      });
+      expect(validateEffectiveConfiguration(schema, value)).toEqual({
+        valid: true,
+        errors: [],
+      });
+      for (const key of patchCollisionKeys) {
+        expect(validateConfigurationPatch(schema, key, "allowed")).toEqual({
+          valid: true,
+          errors: [],
+        });
+      }
+    }
+    expect(
+      validateConfigurationPatch(typedSchema, "toString", 1).errors[0],
+    ).toMatchObject({ code: "invalid-type", expected: "string" });
+  });
+
+  it("reports prototype-colliding keys as unknown under closed schemas", () => {
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    };
+    const value = Object.fromEntries(
+      prototypeCollisionKeys.map((key) => [key, "blocked"]),
+    );
+
+    for (const result of [
+      validatePartialConfiguration(schema, value),
+      validateEffectiveConfiguration(schema, value),
+    ]) {
+      expect(result.errors).toHaveLength(prototypeCollisionKeys.length);
+      expect(
+        result.errors.every((error) => error.code === "unknown-property"),
+      ).toBe(true);
+    }
+    for (const key of patchCollisionKeys) {
+      const result = validateConfigurationPatch(schema, key, "blocked");
+      expect(result.errors[0]).toMatchObject({
+        code: "unknown-property",
+        segments: [key],
+      });
+    }
+  });
+
+  it("validates explicitly declared own prototype-colliding properties", () => {
+    const properties = Object.fromEntries(
+      prototypeCollisionKeys.map(
+        (key): [string, ConfigurationPropertySchema] => [
+          key,
+          { type: "string" },
+        ],
+      ),
+    );
+    properties.toString = { type: "string", default: "declared" };
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      required: ["toString"],
+      properties,
+      additionalProperties: false,
+    };
+    const value = Object.fromEntries(
+      prototypeCollisionKeys.map((key) => [key, "declared"]),
+    );
+
+    expect(validatePartialConfiguration(schema, value)).toEqual({
+      valid: true,
+      errors: [],
+    });
+    expect(validateEffectiveConfiguration(schema, {})).toEqual({
+      valid: true,
+      errors: [],
+    });
+    expect(
+      validateConfigurationPatch(schema, "toString", 1).errors[0],
+    ).toMatchObject({
+      code: "invalid-type",
+      path: "$.toString",
+    });
+  });
+
+  it("does not invoke getters for inherited property schemas", () => {
+    let getterCalls = 0;
+    const properties: Record<string, ConfigurationPropertySchema> = new Proxy(
+      {},
+      {
+        get() {
+          getterCalls += 1;
+          return { type: "number" };
+        },
+      },
+    );
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      required: ["toString"],
+      properties,
+      additionalProperties: true,
+    };
+
+    expect(
+      validatePartialConfiguration(
+        schema,
+        Object.fromEntries([["toString", "allowed"]]),
+      ),
+    ).toEqual({ valid: true, errors: [] });
+    expect(validateConfigurationPatch(schema, "toString", "allowed")).toEqual({
+      valid: true,
+      errors: [],
+    });
+    expect(validateEffectiveConfiguration(schema, {}).errors[0]).toMatchObject({
+      code: "missing-required",
+      path: "$.toString",
+    });
+    expect(getterCalls).toBe(0);
   });
 
   it("rejects enum values outside the schema", () => {

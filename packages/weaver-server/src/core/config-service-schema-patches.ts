@@ -193,7 +193,11 @@ function objectMemberSchemas(
   schema: ConfigurationPropertySchema,
   key: string,
 ): ConfigurationPropertySchema[] {
-  const declared = schema.properties?.[key];
+  const properties = schema.properties;
+  const declared =
+    properties !== undefined && Object.hasOwn(properties, key)
+      ? properties[key]
+      : undefined;
   const schemas = Object.entries(schema.patternProperties ?? {}).flatMap(
     ([pattern, memberSchema]) =>
       new RegExp(pattern).test(key) ? [memberSchema] : [],

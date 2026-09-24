@@ -44,7 +44,11 @@ export function collectMemberSchemas(
   context: ValidationContext,
 ): ConfigurationPropertySchema[] {
   const schemas: ConfigurationPropertySchema[] = [];
-  const declared = schema.properties?.[key];
+  const properties = schema.properties;
+  const declared =
+    properties !== undefined && Object.hasOwn(properties, key)
+      ? properties[key]
+      : undefined;
   if (declared !== undefined) schemas.push(declared);
   schemas.push(...patternSchemas(schema, key, path, context));
   return schemas;
