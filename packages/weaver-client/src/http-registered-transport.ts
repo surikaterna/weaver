@@ -1,5 +1,6 @@
 import {
   type ConfigurationPropertySchema,
+  configurationPropertySchemaSchema,
   fragmentSchemaRegistrationRequestSchema,
   publicConfigPathSchema,
   type RegisteredEffectiveValidationResponse,
@@ -191,10 +192,17 @@ function writeRequest(
 function parseRegistrationRequest(
   request: SchemaRegistrationRequest,
 ): SchemaRegistrationRequest {
+  const canonicalRequest = {
+    ...request,
+    schema: configurationPropertySchemaSchema.parse(request.schema),
+  };
   if (Object.hasOwn(request, "providerId")) {
-    return parseRequest(fragmentSchemaRegistrationRequestSchema, request);
+    return parseRequest(
+      fragmentSchemaRegistrationRequestSchema,
+      canonicalRequest,
+    );
   }
-  return parseRequest(serviceSchemaRegistrationRequestSchema, request);
+  return parseRequest(serviceSchemaRegistrationRequestSchema, canonicalRequest);
 }
 
 function parseWriteOptions(options: WriteOptions | undefined) {

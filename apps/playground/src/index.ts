@@ -5,13 +5,11 @@ import type { ConfigDelta, WeaverClient } from "@weaver-conf/weaver-client";
 import {
   createHttpTransport,
   createWeaverClient,
-  defineNamespace,
 } from "@weaver-conf/weaver-client";
 import {
   createInMemoryStorageProvider,
   startWeaverServer,
 } from "@weaver-conf/weaver-server";
-import { z } from "zod";
 
 // ─── Test Harness ────────────────────────────────────────────
 
@@ -129,12 +127,11 @@ function exerciseNamespaces(client: WeaverClient): void {
 
 function exerciseTypedNamespace(client: WeaverClient): void {
   section("5. Typed Namespace");
-  const appDef = defineNamespace("app", {
-    name: z.string(),
-    description: z.string(),
-  });
-
-  const typedNs = client.namespace(appDef);
+  interface AppConfig {
+    name: string;
+    description: string;
+  }
+  const typedNs = client.namespace<AppConfig>("app");
   const nsName = typedNs.get("name");
   assert(nsName === "Weaver Playground", `typedNs.get("name") = "${nsName}"`);
 }

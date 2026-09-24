@@ -12,14 +12,16 @@ function createMockRegistry(
     isSensitive: () => false,
     getReloadBehavior: () => undefined,
     getRestartRequiredKeys: () => [],
-    validate: () => ({ valid: true }),
+    validate: () => ({ valid: true, errors: [] }),
     ...overrides,
   };
 }
 
 describe("validateOnRead", () => {
   it("passes valid value through", () => {
-    const registry = createMockRegistry({ validate: () => ({ valid: true }) });
+    const registry = createMockRegistry({
+      validate: () => ({ valid: true, errors: [] }),
+    });
     const result = validateOnRead("key", 42, registry, {
       warnOnMismatch: true,
     });
@@ -30,7 +32,14 @@ describe("validateOnRead", () => {
     const registry = createMockRegistry({
       validate: () => ({
         valid: false,
-        errors: [{ path: "", message: "bad type" }],
+        errors: [
+          {
+            code: "invalid-type",
+            path: "",
+            segments: [],
+            message: "bad type",
+          },
+        ],
       }),
     });
     const warns: string[] = [];
@@ -55,7 +64,14 @@ describe("validateOnRead", () => {
     const registry = createMockRegistry({
       validate: () => ({
         valid: false,
-        errors: [{ path: "", message: "bad" }],
+        errors: [
+          {
+            code: "invalid-type",
+            path: "",
+            segments: [],
+            message: "bad",
+          },
+        ],
       }),
     });
     const warns: string[] = [];
@@ -71,13 +87,22 @@ describe("validateOnRead", () => {
 
 describe("validateOnWrite", () => {
   it("returns valid for valid value", () => {
-    const registry = createMockRegistry({ validate: () => ({ valid: true }) });
+    const registry = createMockRegistry({
+      validate: () => ({ valid: true, errors: [] }),
+    });
     const result = validateOnWrite("key", 42, registry);
-    expect(result).toEqual({ valid: true });
+    expect(result).toEqual({ valid: true, errors: [] });
   });
 
   it("returns invalid for bad value", () => {
-    const errors = [{ path: "", message: "Expected number, got string" }];
+    const errors = [
+      {
+        code: "invalid-type" as const,
+        path: "",
+        segments: [],
+        message: "Expected number, got string",
+      },
+    ];
     const registry = createMockRegistry({
       validate: () => ({ valid: false, errors }),
     });
@@ -191,7 +216,10 @@ describe("client validation integration", () => {
     const transport = createMockTransport();
     const client = await createWeaverClient({ transport });
     // validate/isSensitive still work, just return defaults
-    expect(client.validate("any", "val")).toEqual({ valid: true });
+    expect(client.validate("any", "val")).toEqual({
+      valid: true,
+      errors: [],
+    });
     expect(client.isSensitive("any")).toBe(false);
   });
 });

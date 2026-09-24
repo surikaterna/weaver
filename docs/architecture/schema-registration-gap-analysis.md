@@ -6,7 +6,7 @@ Weaver should move from key/value-oriented schema registration toward a path-anc
 
 | Area | AS-IS | TO-BE |
 |------|-------|-------|
-| Addressing | APIs and docs mix `key`, `namespace`, `prefix`, and `serviceId`; `namespace` often acts like a path prefix. | Use `path` as the canonical term for a config tree location. Remove `namespace` from the target contract. `serviceId` maps to the derived root path `/<serviceId>`, so serviceId `lynx` maps to `/lynx`. |
+| Addressing | APIs and docs mix `key`, `namespace`, `prefix`, and `serviceId`; `namespace` often acts like a path prefix. | Use canonical slash paths for registration and registered operations. The client method `namespace<T>(path)` is only a compile-time typed local-state view over the existing storage-prefix grammar; it is not a schema or registration authority. `serviceId` maps to `/<serviceId>`. |
 | Schema unit | Schemas are mostly registered against fully qualified keys or service-like identifiers. | External services register object schemas at root paths derived from `serviceId`, such as `/lynx`. |
 | Extension model | Plugin-oriented naming leaks into generic configuration contracts. | Use generic `fragment`; plugin is one fragment provider type. Services declare fragment slots that accept independently registered fragment schemas. |
 | Identity | Registration identity and accountability are not separated; `ownerId` can imply authorization even when usage is closer to declaration source identity. | Use `owner` only for accountable contact metadata, `providerId` for declaration source identity, and authenticated `subject` for authorization. Do not include `ownerId` in the target model. |
@@ -14,7 +14,7 @@ Weaver should move from key/value-oriented schema registration toward a path-anc
 | Validation | Client-side validation exists, but server-side full-object validation and transport consistency are incomplete. | Primary enforcement is schema validation of write/patch inputs and effective merged objects. Write authorization enforcement is secondary/future. |
 | Layering | Layer writes can behave like sparse key/value overrides, creating ambiguity for nested object schemas. | Prefer partial override objects per layer, plus completeness validation of the effective object before fetch, deploy, or runtime use. |
 
-Recommended decision: amend the original namespace/key design into a path-first schema registration model with fragment slots. Make this a breaking cleanup by removing legacy `namespace` and dot-key APIs from the target model. If active branches need temporary continuity, keep that support only as explicitly scoped transitional adapters outside the canonical contract.
+Recommended decision: amend the original schema declaration design into a path-first JSON Schema registration model with fragment slots. Remove Zod namespace declarations and schema conversion. The generic client namespace accessor may remain as compile-time-only key/value ergonomics; it does not participate in registration or runtime validation.
 
 ## Purpose and Terminology
 
@@ -25,7 +25,7 @@ Terminology for new contracts:
 - **`serviceId`**: Stable external service identifier that maps to a derived root config path. For example, serviceId `lynx` maps to `/lynx`.
 - **`path`**: Canonical term for a config tree location, expressed as slash-separated examples in this document such as `/lynx/plugins`. Request paths may be derived; response and metadata paths must show the derived canonical value.
 - **Service-relative slot path**: A slash path under the derived service root, such as `/plugins` for service `lynx`. It is not global-root-relative; Weaver resolves it to canonical path `/lynx/plugins` in metadata and responses.
-- **`namespace`**: Legacy and ambiguous term. Current code often treats it as a path prefix. New contracts should remove it. Transitional adapters may translate it only when explicitly needed for active branch continuity.
+- **`namespace`**: In registration contracts this legacy term is removed in favor of canonical slash paths. In the client accessor `namespace<TConfig>(path)`, it names only a typed local-state view and has no schema authority.
 - **`fragment`**: Independently registered schema unit below a service-declared extension point. A plugin is one possible fragment provider type, but the schema model should not be plugin-specific.
 - **Fragment slot / extension point**: A service-declared service-relative or canonical path that accepts independently registered fragment schemas.
 - **`owner`**: Accountable team/person/contact metadata for follow-up and stewardship. It is not an authorization field.
@@ -116,7 +116,7 @@ MVP registration should favor approved bootstrap or CI/deployment registration, 
 
 Cleanup recommendation:
 
-- Remove `namespace` from new HTTP, SCOMP, and client contracts.
+- Remove `namespace` from HTTP, SCOMP, and schema-registration contracts. The client accessor remains compile-time-only and accepts a storage path string.
 - Normalize all slot, patch, and derived target-model paths to canonical slash `path` values in registry metadata and responses.
 - Remove dot-key registration and write APIs from the target model.
 - Do not accept both `serviceId` and an independently settable root `path` for service registration; derive the service path from `serviceId`.
@@ -223,7 +223,7 @@ This is an explicit amendment to a simpler “complete object per layer” desig
 |------------|-------------|-------------------|
 | Types and schemas | Introduce path-first registration request/result types with Zod schemas at package boundaries. | New contracts use derived paths in results/metadata; target contract types do not include `namespace` or independently settable service root paths. |
 | Path normalization | Add one normalization layer for canonical slash paths. | `/lynx/plugins/ghost.settings.panel` round-trips with `ghost.settings.panel` as one literal segment. |
-| Contract removal | Remove or replace namespace and dot-key registration/write APIs in HTTP, SCOMP, and clients. | New examples and public target-model APIs use slash `path` only. |
+| Contract removal | Remove namespace-derived registration, Zod conversion, and dot-key registration APIs. | Registration accepts only canonical service/fragment JSON Schema requests; generic client access has no registration side effect. |
 | Transitional adapters | Add scoped adapters only for named active branches that cannot switch immediately. | Any adapter normalizes to `path` before core logic and is not required for the target model. |
 
 ### Phase 2: Path-Anchored Schema Registry
@@ -249,7 +249,7 @@ This is an explicit amendment to a simpler “complete object per layer” desig
 |------------|-------------|-------------------|
 | Persistence providers | Align filesystem, Git, MongoDB, memory, and session providers on nested object persistence for registered paths. | Providers no longer disagree on whether object writes are flattened or nested. Git appears closer to the intended nested behavior; MongoDB is a known current risk to verify and migrate. |
 | Existing key writes | Remove flattened leaf-record behavior below registered objects unless a scoped adapter is approved. | Target-model callers use object writes or specific patches under registered paths. |
-| Client APIs | Replace namespace helpers with path-first APIs. | Examples use `path` and `fragment`; namespace helpers are absent from the target model. |
+| Client APIs | Replace Zod-backed namespace declarations with `namespace<TConfig>(path)` and `instance<TConfig>(basePath, instanceId)`. | Key/value typing is compile-time-only; runtime validation delegates to config-engine and the server remains authoritative. |
 
 ### Phase 5: Future Authorization Enforcement
 
@@ -320,4 +320,4 @@ The package-boundary implementation should replace `unknown` with validated JSON
 
 ## Conclusion
 
-Weaver should amend the original schema registration design before expanding implementation. The path-first object schema model is a better fit for layered nested JSON storage, fragment extension points, and server-side validation. Since Weaver is pre-1.0 and not in production, the recommended path is a breaking cleanup: remove `namespace` and dot-key APIs from the target model, derive service paths from `serviceId`, derive fragment paths from slots and `providerId`, and use `path` and `fragment` consistently. Transitional adapters are optional implementation scaffolding for active branches, not part of the target contract.
+Weaver should use path-first object schemas for layered nested JSON storage, fragment extension points, and server-side validation. The breaking cleanup removes namespace-derived schema authority and conversion, derives service paths from `serviceId`, derives fragment paths from slots and `providerId`, and uses `path` and `fragment` consistently in runtime contracts. Generic client namespace/instance views are erased compile-time ergonomics, not an alternate schema path.

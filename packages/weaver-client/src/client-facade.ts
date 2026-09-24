@@ -1,6 +1,5 @@
 import { deepGet } from "@weaver-conf/config-engine";
 import type { ScopeInstance } from "@weaver-conf/config-types";
-import type { ZodRawShape } from "zod";
 import { applyNamespace } from "./client-helpers";
 import type { ClientRuntime } from "./client-runtime";
 import type { WeaverClient } from "./client-types";
@@ -10,20 +9,14 @@ import {
   unsupportedWrite,
 } from "./client-unsupported";
 import { createInstanceClient } from "./instance-client";
-import type {
-  NamespaceDefinition,
-  TypedNamespaceClient,
-  UntypedNamespaceClient,
-} from "./namespace";
+import { createNamespaceClient } from "./namespace-client";
 import type { ValidationResult } from "./schema-registry";
 import type { WriteOptions, WriteResult } from "./transport";
-import { createTypedNamespaceClient } from "./typed-namespace-client";
 import type {
   ConfigDelta,
   ConfigurationInspection,
   Unsubscribe,
 } from "./types";
-import { createUntypedNamespaceClient } from "./untyped-namespace-client";
 import { validateOnRead, validateOnWrite } from "./validation";
 
 type ClientReference = () => WeaverClient;
@@ -168,7 +161,7 @@ function validationFailure(errors: ValidationResult["errors"]): WriteResult {
     error: {
       code: "VALIDATION_ERROR",
       message:
-        errors?.map((error) => error.message).join(", ") ?? "Validation failed",
+        errors.map((error) => error.message).join(", ") || "Validation failed",
       details: { errors },
     },
   };
@@ -254,7 +247,12 @@ function validationMethods(
   return {
     validate(key, value) {
       const resolvedKey = applyNamespace(runtime.namespace, key);
-      return runtime.registry?.validate(resolvedKey, value) ?? { valid: true };
+      return (
+        runtime.registry?.validate(resolvedKey, value) ?? {
+          valid: true,
+          errors: [],
+        }
+      );
     },
     isSensitive(key) {
       const resolvedKey = applyNamespace(runtime.namespace, key);
@@ -280,9 +278,9 @@ function instanceMethods(
   client: ClientReference,
 ): Pick<WeaverClient, "instance"> {
   return {
-    instance(basePath, instanceId) {
+    instance<TConfig extends object>(basePath: string, instanceId: string) {
       const resolvedBase = applyNamespace(runtime.namespace, basePath);
-      return createInstanceClient(resolvedBase, instanceId, {
+      return createInstanceClient<TConfig>(resolvedBase, instanceId, {
         getState: () => runtime.baseState,
         set: (key, value, options) =>
           runtime.transport.set(key, value, options),
@@ -297,23 +295,14 @@ function namespaceMethods(
   runtime: ClientRuntime,
   client: ClientReference,
 ): Pick<WeaverClient, "namespace"> {
-  function namespace<TShape extends ZodRawShape>(
-    definition: NamespaceDefinition<string, TShape>,
-  ): TypedNamespaceClient<TShape>;
-  function namespace(prefix: string): UntypedNamespaceClient;
-  function namespace(definition: NamespaceDefinition | string) {
-    if (typeof definition === "string") {
-      return createUntypedNamespaceClient(
-        applyNamespace(runtime.namespace, definition),
+  return {
+    namespace<TConfig extends object>(path: string) {
+      return createNamespaceClient<TConfig>(
+        applyNamespace(runtime.namespace, path),
         namespaceDeps(runtime, client),
       );
-    }
-    return createTypedNamespaceClient(
-      definition,
-      namespaceDeps(runtime, client),
-    );
-  }
-  return { namespace };
+    },
+  };
 }
 
 function namespaceDeps(runtime: ClientRuntime, client: ClientReference) {

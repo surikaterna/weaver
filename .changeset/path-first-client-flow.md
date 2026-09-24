@@ -2,4 +2,4 @@
 "@weaver-conf/weaver-client": major
 ---
 
-Replace namespace-derived schema registration with the path-first registration and registered object operations, validate registered HTTP contracts at runtime, and prevent mutation replay while preserving caller cancellation through safe retries.
+Register canonical JSON Schema requests directly, replace Zod-backed namespace authority with compile-time generic path access, validate registered HTTP contracts at runtime, and prevent mutation replay while preserving caller cancellation through safe retries.

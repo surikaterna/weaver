@@ -5,13 +5,7 @@ import type {
   ScopeDefinition,
   ScopeInstance,
 } from "@weaver-conf/config-types";
-import type { ZodRawShape } from "zod";
-import type {
-  InstanceClient,
-  NamespaceDefinition,
-  TypedNamespaceClient,
-  UntypedNamespaceClient,
-} from "./namespace";
+import type { InstanceClient, NamespaceClient } from "./namespace";
 import type { WeaverClientPersistence } from "./persistence";
 import type { ValidationResult } from "./schema-registry";
 import type { ScopeLoadingMode } from "./scope-manager";
@@ -126,10 +120,9 @@ export interface WeaverClient {
   isSensitive(key: string): boolean;
 
   // ── Namespaces ──
-  namespace<TShape extends ZodRawShape>(
-    definition: NamespaceDefinition<string, TShape>,
-  ): TypedNamespaceClient<TShape>;
-  namespace(prefix: string): UntypedNamespaceClient;
+  namespace<TConfig extends object = Record<string, unknown>>(
+    path: string,
+  ): NamespaceClient<TConfig>;
 
   // ── Registration ──
   registerSchema(
@@ -137,7 +130,10 @@ export interface WeaverClient {
   ): Promise<SchemaRegistrationResponse>;
 
   // ── Instances ──
-  instance(basePath: string, instanceId: string): InstanceClient;
+  instance<TConfig extends object = Record<string, unknown>>(
+    basePath: string,
+    instanceId: string,
+  ): InstanceClient<TConfig>;
 
   // ── Lifecycle ──
   close(): Promise<void>;

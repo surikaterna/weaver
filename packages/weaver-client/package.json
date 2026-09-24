@@ -32,14 +32,11 @@
     "@weaver-conf/config-engine": "workspace:*",
     "@weaver-conf/config-runtime": "workspace:*",
     "@weaver-conf/config-sync": "workspace:*",
-    "@weaver-conf/config-types": "workspace:*"
-  },
-  "peerDependencies": {
+    "@weaver-conf/config-types": "workspace:*",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "26.5.1",
-    "typescript": "^5.8.3",
-    "zod": "^4.0.0"
+    "typescript": "^5.8.3"
   }
 }

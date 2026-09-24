@@ -561,11 +561,88 @@ describe("registered HTTP request contracts", () => {
     );
   });
 
+  it("preserves complete canonical schemas for service and fragment registration", async () => {
+    const schema: ServiceSchemaRegistrationRequest["schema"] = {
+      type: "object",
+      required: ["servers", "mode"],
+      additionalProperties: false,
+      minProperties: 2,
+      properties: {
+        servers: {
+          type: "array",
+          minItems: 1,
+          maxItems: 4,
+          uniqueItems: true,
+          default: [{ host: "localhost", port: 443 }],
+          items: {
+            type: "object",
+            required: ["host", "port"],
+            additionalProperties: false,
+            properties: {
+              host: { type: "string", minLength: 1, pattern: "^[a-z.]+$" },
+              port: { type: "integer", minimum: 1, maximum: 65535 },
+            },
+          },
+        },
+        mode: {
+          type: "string",
+          oneOf: [
+            { type: "string", const: "safe" },
+            { type: "string", enum: ["fast", "turbo"] },
+          ],
+          "x-weaver": {
+            sensitive: false,
+            reloadBehavior: "restart-required",
+            visibility: "platform",
+          },
+        },
+      },
+      allOf: [{ type: "object", minProperties: 1 }],
+      "x-weaver": { changePolicy: "staging-gate" },
+    };
+    const requests = [
+      { ...serviceRequest, schema },
+      { ...fragmentRequest, schema },
+    ];
+    const mock = sequenceFetch([
+      response(201, registrationResponse),
+      response(201, registrationResponse),
+    ]);
+    const transport = transportFor(mock.fetch);
+
+    await requireResult(transport.registerSchema?.(requests[0]));
+    await requireResult(transport.registerSchema?.(requests[1]));
+
+    expect(mock.requests).toHaveLength(2);
+    for (const [index, request] of requests.entries()) {
+      expect(JSON.parse(String(mock.requests[index]?.init?.body))).toEqual(
+        request,
+      );
+    }
+  });
+
   it("validates registration and write requests before fetch", async () => {
     const mock = sequenceFetch([]);
     const transport = transportFor(mock.fetch);
     await expect(
       transport.registerSchema?.({ ...serviceRequest, serviceId: "Bad/id" }),
+    ).rejects.toBeInstanceOf(ZodError);
+    await expect(
+      transport.registerSchema?.({
+        ...serviceRequest,
+        schema: {
+          type: "object",
+          properties: {
+            enabled: { type: "boolean", unsupportedKeyword: true },
+          },
+        },
+      } as ServiceSchemaRegistrationRequest),
+    ).rejects.toBeInstanceOf(ZodError);
+    await expect(
+      transport.registerSchema?.({
+        ...fragmentRequest,
+        schema: { type: "object", $ref: "#/$defs/config" },
+      } as unknown as FragmentSchemaRegistrationRequest),
     ).rejects.toBeInstanceOf(ZodError);
     await expect(
       transport.setRegisteredObject?.("checkout", { enabled: true }),

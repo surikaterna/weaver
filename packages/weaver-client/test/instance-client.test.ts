@@ -4,6 +4,11 @@ import {
 } from "../src/instance-client.js";
 import type { WriteResult } from "../src/transport.js";
 
+interface EditorConfig {
+  theme: string;
+  missing: number;
+}
+
 function makeDeps(
   state: Record<string, unknown>,
   overrides?: Partial<InstanceClientDeps>,
@@ -40,31 +45,47 @@ describe("createInstanceClient", () => {
     const state = {
       editor: { instances: { vim: { theme: "dark" } }, theme: "light" },
     };
-    const client = createInstanceClient("editor", "vim", makeDeps(state));
+    const client = createInstanceClient<EditorConfig>(
+      "editor",
+      "vim",
+      makeDeps(state),
+    );
     expect(client.get("theme")).toBe("dark");
   });
 
   it("get() falls back to base path when no override", () => {
     const state = { editor: { instances: { vim: {} }, theme: "light" } };
-    const client = createInstanceClient("editor", "vim", makeDeps(state));
+    const client = createInstanceClient<EditorConfig>(
+      "editor",
+      "vim",
+      makeDeps(state),
+    );
     expect(client.get("theme")).toBe("light");
   });
 
   it("get() returns undefined when neither exists", () => {
     const state = { editor: { instances: { vim: {} } } };
-    const client = createInstanceClient("editor", "vim", makeDeps(state));
+    const client = createInstanceClient<EditorConfig>(
+      "editor",
+      "vim",
+      makeDeps(state),
+    );
     expect(client.get("missing")).toBe(undefined);
   });
 
   it("getOrDefault() returns default when missing", () => {
     const state = { editor: { instances: { vim: {} } } };
-    const client = createInstanceClient("editor", "vim", makeDeps(state));
+    const client = createInstanceClient<EditorConfig>(
+      "editor",
+      "vim",
+      makeDeps(state),
+    );
     expect(client.getOrDefault("missing", 42)).toBe(42);
   });
 
   it("set() writes to instance path", async () => {
     const deps = makeDeps({});
-    const client = createInstanceClient("editor", "vim", deps);
+    const client = createInstanceClient<EditorConfig>("editor", "vim", deps);
     await client.set("theme", "dark");
     expect(deps.calls.set.length).toBe(1);
     expect(deps.calls.set[0][0]).toBe("editor.instances.vim.theme");
@@ -94,24 +115,40 @@ describe("createInstanceClient", () => {
       defaultWriteLayer: "user",
       calls,
     };
-    const client = createInstanceClient("editor", "vim", deps);
-    await client.set("theme", "dark");
-    expect(calls.set[0][2]).toEqual({ layer: "user" });
+    const client = createInstanceClient<EditorConfig>("editor", "vim", deps);
+    await client.set("theme", "dark", { environment: "prod" });
+    expect(calls.set[0][2]).toEqual({ layer: "user", environment: "prod" });
   });
 
   it("reset() removes the entire instance prefix", async () => {
     const deps = makeDeps({});
-    const client = createInstanceClient("editor", "vim", deps);
-    await client.reset();
+    const client = createInstanceClient<EditorConfig>("editor", "vim", deps);
+    await client.reset({ layer: "tenant" });
     expect(deps.calls.remove.length).toBe(1);
     expect(deps.calls.remove[0][0]).toBe("editor.instances.vim");
+    expect(deps.calls.remove[0][1]).toEqual({ layer: "tenant" });
   });
 
   it("onChange subscribes to instance-prefixed pattern", () => {
     const deps = makeDeps({});
-    const handler = () => {};
-    const client = createInstanceClient("editor", "vim", deps);
-    client.onChange("theme", handler);
+    const values: Array<string | undefined> = [];
+    const client = createInstanceClient<EditorConfig>("editor", "vim", deps);
+    client.onChange("theme", (value) => values.push(value));
     expect(deps.calls.onChange[0][0]).toBe("editor.instances.vim.theme");
+    const handler = deps.calls.onChange[0][1];
+    if (typeof handler !== "function") throw new Error("Missing handler");
+    handler([
+      {
+        action: "set",
+        key: "editor.instances.vim.theme",
+        value: "dark",
+      },
+      {
+        action: "remove",
+        key: "editor.instances.vim.theme",
+        value: null,
+      },
+    ]);
+    expect(values).toEqual(["dark", undefined]);
   });
 });

@@ -1,18 +1,18 @@
 import { deepGet } from "@weaver-conf/config-engine";
-import type { ZodType } from "zod";
 import type { InstanceClient } from "./namespace";
 import type { WriteOptions, WriteResult } from "./transport";
 import type { ConfigDelta, Unsubscribe } from "./types";
 
-/** Dependencies injected into an instance client for state access and writes. */
+type ConfigKey<TConfig extends object> = Extract<keyof TConfig, string>;
+
 export interface InstanceClientDeps {
   getState: () => Record<string, unknown>;
   set: (
     key: string,
     value: unknown,
-    opts?: WriteOptions,
+    options?: WriteOptions,
   ) => Promise<WriteResult>;
-  remove: (key: string, opts?: WriteOptions) => Promise<WriteResult>;
+  remove: (key: string, options?: WriteOptions) => Promise<WriteResult>;
   onChange: (
     pattern: string,
     handler: (deltas: ConfigDelta[]) => void,
@@ -20,58 +20,71 @@ export interface InstanceClientDeps {
   defaultWriteLayer?: string;
 }
 
-/**
- * Reads from instance path first, falls back to base config.
- * Writes always target the instance path.
- */
-export function createInstanceClient(
+export function createInstanceClient<
+  TConfig extends object = Record<string, unknown>,
+>(
   basePath: string,
   instanceId: string,
   deps: InstanceClientDeps,
-): InstanceClient {
-  const instancePrefix = `${basePath}.instances.${instanceId}`;
+): InstanceClient<TConfig> {
+  const instancePath = `${basePath}.instances.${instanceId}`;
 
-  function getInstanceValue(key: string): unknown {
-    const state = deps.getState();
-    const instanceValue = deepGet(state, `${instancePrefix}.${key}`);
-    if (instanceValue !== undefined) return instanceValue;
-    return deepGet(state, `${basePath}.${key}`);
+  function get<K extends ConfigKey<TConfig>>(key: K): TConfig[K] | undefined {
+    return readInstanceValue<TConfig, K>(basePath, instancePath, key, deps);
   }
 
   return {
-    get<T = unknown>(key: string, schema?: ZodType<T>): T | undefined {
-      const raw = getInstanceValue(key);
-      if (raw === undefined) return undefined;
-      if (schema) {
-        const result = schema.safeParse(raw);
-        return result.success ? result.data : undefined;
-      }
-      return raw as T; // SAFETY: caller asserts type via generic parameter
+    get,
+    getOrDefault(key, defaultValue) {
+      return get(key) ?? defaultValue;
     },
-
-    getOrDefault<T = unknown>(key: string, defaultValue: T): T {
-      const value = getInstanceValue(key);
-      return value !== undefined ? (value as T) : defaultValue; // SAFETY: caller asserts type via generic parameter
+    async set(key, value, options) {
+      return deps.set(
+        `${instancePath}.${key}`,
+        value,
+        instanceWriteOptions(deps, options),
+      );
     },
-
-    async set<T = unknown>(key: string, value: T): Promise<WriteResult> {
-      const fullKey = `${instancePrefix}.${key}`;
-      const opts: WriteOptions = {};
-      if (deps.defaultWriteLayer) opts.layer = deps.defaultWriteLayer;
-      return deps.set(fullKey, value, opts);
+    async reset(options) {
+      return deps.remove(instancePath, instanceWriteOptions(deps, options));
     },
-
-    async reset(): Promise<WriteResult> {
-      const opts: WriteOptions = {};
-      if (deps.defaultWriteLayer) opts.layer = deps.defaultWriteLayer;
-      return deps.remove(instancePrefix, opts);
-    },
-
-    onChange(
-      pattern: string,
-      handler: (deltas: ConfigDelta[]) => void,
-    ): Unsubscribe {
-      return deps.onChange(`${instancePrefix}.${pattern}`, handler);
+    onChange(key, handler) {
+      const fullKey = `${instancePath}.${key}`;
+      return deps.onChange(fullKey, (deltas) => {
+        for (const delta of deltas) {
+          if (delta.key !== fullKey) continue;
+          const value = delta.action === "remove" ? undefined : delta.value;
+          // Delta values are trusted only through the consumer-selected generic.
+          handler(value as TConfig[typeof key] | undefined);
+        }
+      });
     },
   };
+}
+
+function readInstanceValue<
+  TConfig extends object,
+  K extends ConfigKey<TConfig>,
+>(
+  basePath: string,
+  instancePath: string,
+  key: K,
+  deps: InstanceClientDeps,
+): TConfig[K] | undefined {
+  const state = deps.getState();
+  const instanceValue = deepGet(state, `${instancePath}.${key}`);
+  const value =
+    instanceValue === undefined
+      ? deepGet(state, `${basePath}.${key}`)
+      : instanceValue;
+  // The consumer-supplied generic is compile-time-only; server validation is authoritative.
+  return value as TConfig[K] | undefined;
+}
+
+function instanceWriteOptions(
+  deps: InstanceClientDeps,
+  options?: WriteOptions,
+): WriteOptions | undefined {
+  if (deps.defaultWriteLayer === undefined) return options;
+  return { layer: deps.defaultWriteLayer, ...options };
 }

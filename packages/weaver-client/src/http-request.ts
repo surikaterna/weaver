@@ -1,4 +1,4 @@
-import { weaverErrorSchema } from "@weaver-conf/config-types";
+import { type WeaverError, weaverErrorSchema } from "@weaver-conf/config-types";
 import { z } from "zod";
 import { serializeHttpJsonValue } from "./http-json-value";
 import { fetchWithRetry, type RetryOptions } from "./http-retry";
@@ -55,7 +55,7 @@ const tokenCharacterPattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]$/;
 const quotedTextPattern = /^[\t !#-[\]-~]$/;
 const quotedPairPattern = /^[\t !-~]$/;
 
-export type HttpServerError = z.infer<typeof serverErrorSchema>;
+export type HttpServerError = WeaverError;
 
 export class HttpServerResponseError extends Error {
   readonly code: HttpServerError["code"];

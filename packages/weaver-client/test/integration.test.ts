@@ -1,6 +1,4 @@
-import { z } from "zod";
 import { createWeaverClient } from "../src/client.js";
-import { defineNamespace } from "../src/namespace.js";
 import type { WeaverTransport } from "../src/transport.js";
 import type { ConfigDelta, Unsubscribe } from "../src/types.js";
 
@@ -65,12 +63,11 @@ describe("Integration: WeaverClient full flow", () => {
     });
     const client = await createWeaverClient({ transport });
 
-    const editorNs = defineNamespace("editor", {
-      fontSize: z.number(),
-      theme: z.string(),
-    });
-
-    const editor = client.namespace(editorNs);
+    interface EditorConfig {
+      fontSize: number;
+      theme: string;
+    }
+    const editor = client.namespace<EditorConfig>("editor");
     expect(editor.get("fontSize")).toBe(14);
     expect(editor.get("theme")).toBe("dark");
 
@@ -80,7 +77,7 @@ describe("Integration: WeaverClient full flow", () => {
     await client.close();
   });
 
-  it("untyped namespace works with string prefix", async () => {
+  it("default generic namespace works with a string path", async () => {
     const transport = createMockTransport({ editor: { fontSize: 14 } });
     const client = await createWeaverClient({ transport });
 

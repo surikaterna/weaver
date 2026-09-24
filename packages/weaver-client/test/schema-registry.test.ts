@@ -54,7 +54,10 @@ describe("ClientSchemaRegistry", () => {
   it("validate — valid string passes", () => {
     const reg = createClientSchemaRegistry();
     reg.load({ "app.name": { type: "string", minLength: 1 } });
-    expect(reg.validate("app.name", "hello")).toEqual({ valid: true });
+    expect(reg.validate("app.name", "hello")).toEqual({
+      valid: true,
+      errors: [],
+    });
   });
 
   it("validate — wrong type fails", () => {
@@ -82,7 +85,10 @@ describe("ClientSchemaRegistry", () => {
 
   it("validate — unknown key returns valid", () => {
     const reg = createClientSchemaRegistry();
-    expect(reg.validate("no.schema", "anything")).toEqual({ valid: true });
+    expect(reg.validate("no.schema", "anything")).toEqual({
+      valid: true,
+      errors: [],
+    });
   });
 
   it("validate — pattern constraint works", () => {
@@ -90,5 +96,60 @@ describe("ClientSchemaRegistry", () => {
     reg.load({ "app.id": { type: "string", pattern: "^[a-z]+$" } });
     expect(reg.validate("app.id", "hello").valid).toBe(true);
     expect(reg.validate("app.id", "Hello123").valid).toBe(false);
+  });
+
+  it("delegates nested object and composition validation to config-engine", () => {
+    const reg = createClientSchemaRegistry();
+    reg.load({
+      "app.settings": {
+        type: "object",
+        required: ["mode", "servers"],
+        additionalProperties: false,
+        properties: {
+          mode: {
+            type: "string",
+            enum: ["safe", "fast"],
+          },
+          servers: {
+            type: "array",
+            minItems: 1,
+            items: {
+              type: "object",
+              required: ["host"],
+              properties: { host: { type: "string", minLength: 1 } },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      reg.validate("app.settings", {
+        mode: "safe",
+        servers: [{ host: "db.internal" }],
+      }),
+    ).toEqual({ valid: true, errors: [] });
+    const invalid = reg.validate("app.settings", {
+      mode: "unknown",
+      servers: [{ host: "", extra: true }],
+    });
+    expect(invalid.valid).toBe(false);
+    expect(invalid.errors.some(({ code }) => code === "unknown-property")).toBe(
+      true,
+    );
+    expect(
+      invalid.errors.every(({ segments }) => Array.isArray(segments)),
+    ).toBe(true);
+
+    reg.load({
+      "app.composed": {
+        type: "string",
+        oneOf: [{ type: "string", const: "safe" }],
+      },
+    });
+    expect(reg.validate("app.composed", "safe").errors[0]?.code).toBe(
+      "invalid-schema",
+    );
   });
 });

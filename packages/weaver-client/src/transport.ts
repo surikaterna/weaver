@@ -26,6 +26,12 @@ export interface WriteOptions {
 
 export type { WriteResult };
 
+export interface EffectiveValidationOptions {
+  readonly anchorPath: string;
+  readonly environment?: string | undefined;
+  readonly scopePath?: readonly ScopeInstance[] | undefined;
+}
+
 const forbiddenOptionKeys = new Set(["__proto__", "constructor", "prototype"]);
 const optionRecordSchema = z.unknown().superRefine(validateOptionRecord);
 const scopeWirePartSchema = z
@@ -41,17 +47,14 @@ const httpScopeInstanceSchema = optionRecordSchema.pipe(
   }),
 );
 
-export const effectiveValidationOptionsSchema = optionRecordSchema.pipe(
-  z.strictObject({
-    anchorPath: publicConfigPathSchema,
-    environment: z.string().min(1).optional(),
-    scopePath: z.array(httpScopeInstanceSchema).readonly().optional(),
-  }),
-);
-
-export type EffectiveValidationOptions = z.infer<
-  typeof effectiveValidationOptionsSchema
->;
+export const effectiveValidationOptionsSchema: z.ZodType<EffectiveValidationOptions> =
+  optionRecordSchema.pipe(
+    z.strictObject({
+      anchorPath: publicConfigPathSchema,
+      environment: z.string().min(1).optional(),
+      scopePath: z.array(httpScopeInstanceSchema).readonly().optional(),
+    }),
+  );
 
 function validateOptionRecord(value: unknown, context: RefinementCtx): void {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {

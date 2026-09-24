@@ -62,9 +62,6 @@ importers:
       '@weaver-conf/weaver-client':
         specifier: workspace:*
         version: link:../../packages/weaver-client
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
     devDependencies:
       typescript:
         specifier: ^5.8.3
@@ -84,9 +81,6 @@ importers:
       '@weaver-conf/weaver-server':
         specifier: workspace:*
         version: link:../../packages/weaver-server
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^26.5.1
@@ -292,6 +286,9 @@ importers:
       '@weaver-conf/config-types':
         specifier: workspace:*
         version: link:../config-types
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: 26.5.1
@@ -299,9 +296,6 @@ importers:
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
-      zod:
-        specifier: ^4.0.0
-        version: 4.4.3
 
   packages/weaver-server:
     dependencies:
