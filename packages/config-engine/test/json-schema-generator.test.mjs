@@ -123,6 +123,35 @@ describe("generateSinglePropertySchema", () => {
     expect(result.minimum).toBe(10);
   });
 
+  it("emits all composition keywords recursively without mutation", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        choice: {
+          type: "string",
+          anyOf: [{ type: "string", const: "a" }],
+          oneOf: [{ type: "string", minLength: 1 }],
+          allOf: [{ type: "string", maxLength: 2 }],
+          not: { type: "string", const: "blocked" },
+        },
+      },
+      additionalProperties: false,
+    };
+    const before = JSON.stringify(schema);
+    const result = generateSinglePropertySchema(
+      "ghost.shell.choice",
+      entry("ghost.shell", schema),
+    );
+
+    expect(result.properties.choice).toMatchObject({
+      anyOf: [{ type: "string", const: "a" }],
+      oneOf: [{ type: "string", minLength: 1 }],
+      allOf: [{ type: "string", maxLength: 2 }],
+      not: { type: "string", const: "blocked" },
+    });
+    expect(JSON.stringify(schema)).toBe(before);
+  });
+
   it("populates x-weaver extension object", () => {
     const result = generateSinglePropertySchema(
       "ghost.shell.theme",

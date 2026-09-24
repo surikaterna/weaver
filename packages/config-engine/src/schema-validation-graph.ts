@@ -1,8 +1,14 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 
 import {
+  getCompositionEntries,
+  isSupportedSchema,
+  validateCompositionShape,
+} from "./schema-validation-composition";
+import {
   addContextError,
   appendValidationPath,
+  compileSchemaPattern,
   isSchemaArray,
   type SchemaValidationPathSegment,
   type ValidationContext,
@@ -11,6 +17,7 @@ import {
 
 interface SchemaInspection {
   readonly cyclic: boolean;
+  readonly valid: boolean;
   readonly nodes: readonly ConfigurationPropertySchema[];
 }
 
@@ -31,7 +38,8 @@ export function validateSchemaGraph(
   path: ValidationPath,
   context: ValidationContext,
 ): boolean {
-  const inspection = inspectSchemaGraph(schema);
+  const inspection = inspectSchemaGraph(schema, path, context);
+  if (!inspection.valid) return false;
   const constraintCycle = hasObjectCycle(
     schemaConstraintRoots(inspection.nodes),
   );
@@ -59,6 +67,8 @@ export function validateValueGraph(
 
 function inspectSchemaGraph(
   root: ConfigurationPropertySchema,
+  path: ValidationPath,
+  context: ValidationContext,
 ): SchemaInspection {
   const active = new WeakSet<object>();
   const completed = new WeakSet<object>();
@@ -74,14 +84,17 @@ function inspectSchemaGraph(
       completed.add(frame.value);
       continue;
     }
-    if (active.has(frame.value)) return { cyclic: true, nodes };
+    if (active.has(frame.value)) return { cyclic: true, valid: true, nodes };
     if (completed.has(frame.value)) continue;
+    if (!validateSchemaNode(frame.value, path, context)) {
+      return { cyclic: false, valid: false, nodes };
+    }
     active.add(frame.value);
     nodes.push(frame.value);
     pending.push({ kind: "exit", value: frame.value });
     pushSchemaChildren(frame.value, pending);
   }
-  return { cyclic: false, nodes };
+  return { cyclic: false, valid: true, nodes };
 }
 
 function pushSchemaChildren(
@@ -89,22 +102,106 @@ function pushSchemaChildren(
   pending: GraphFrame<ConfigurationPropertySchema>[],
 ): void {
   const children: ConfigurationPropertySchema[] = [];
-  children.push(...Object.values(schema.properties ?? {}));
-  children.push(...Object.values(schema.patternProperties ?? {}));
-  if (typeof schema.additionalProperties === "object") {
-    children.push(schema.additionalProperties);
+  pushSchemaMapChildren(schema, "properties", children);
+  pushSchemaMapChildren(schema, "patternProperties", children);
+  const additional = Object.hasOwn(schema, "additionalProperties")
+    ? schema.additionalProperties
+    : undefined;
+  if (isSupportedSchema(additional)) children.push(additional);
+  pushItemChildren(schema, children);
+  for (const entry of getCompositionEntries(schema)) {
+    children.push(...entry.branches);
   }
-  if (schema.items !== undefined) {
-    if (isSchemaArray(schema.items)) children.push(...schema.items);
-    else children.push(schema.items);
-  }
-  children.push(...(schema.oneOf ?? []), ...(schema.anyOf ?? []));
-  children.push(...(schema.allOf ?? []));
-  if (schema.not !== undefined) children.push(schema.not);
   for (let index = children.length - 1; index >= 0; index--) {
     const child = children[index];
     if (child !== undefined) pending.push({ kind: "enter", value: child });
   }
+}
+
+function pushSchemaMapChildren(
+  schema: ConfigurationPropertySchema,
+  key: "properties" | "patternProperties",
+  children: ConfigurationPropertySchema[],
+): void {
+  if (!Object.hasOwn(schema, key)) return;
+  const map = schema[key];
+  if (map === undefined) return;
+  for (const child of Object.values(map)) {
+    if (isSupportedSchema(child)) children.push(child);
+  }
+}
+
+function pushItemChildren(
+  schema: ConfigurationPropertySchema,
+  children: ConfigurationPropertySchema[],
+): void {
+  if (!Object.hasOwn(schema, "items") || schema.items === undefined) return;
+  if (!isSchemaArray(schema.items)) {
+    if (isSupportedSchema(schema.items)) children.push(schema.items);
+    return;
+  }
+  for (const child of schema.items) {
+    if (isSupportedSchema(child)) children.push(child);
+  }
+}
+
+function validateSchemaNode(
+  schema: ConfigurationPropertySchema,
+  path: ValidationPath,
+  context: ValidationContext,
+): boolean {
+  if (!isSupportedSchema(schema)) {
+    addContextError(context, "invalid-schema", path, {
+      message: "Schema must have a supported non-empty type",
+    });
+    return false;
+  }
+  if (!validateCompositionShape(schema, path, context)) return false;
+  if (!validateMultipleOfDefinition(schema, path, context)) return false;
+  if (!validatePatternDefinition(schema, path, context)) return false;
+  return validatePatternProperties(schema, path, context);
+}
+
+function validateMultipleOfDefinition(
+  schema: ConfigurationPropertySchema,
+  path: ValidationPath,
+  context: ValidationContext,
+): boolean {
+  if (!Object.hasOwn(schema, "multipleOf")) return true;
+  const divisor = schema.multipleOf;
+  if (divisor === undefined || (Number.isFinite(divisor) && divisor > 0)) {
+    return true;
+  }
+  addContextError(context, "invalid-schema", path, {
+    message: "multipleOf must be positive and finite",
+  });
+  return false;
+}
+
+function validatePatternDefinition(
+  schema: ConfigurationPropertySchema,
+  path: ValidationPath,
+  context: ValidationContext,
+): boolean {
+  if (!Object.hasOwn(schema, "pattern") || schema.pattern === undefined) {
+    return true;
+  }
+  return compileSchemaPattern(schema.pattern, path, context) !== undefined;
+}
+
+function validatePatternProperties(
+  schema: ConfigurationPropertySchema,
+  path: ValidationPath,
+  context: ValidationContext,
+): boolean {
+  if (!Object.hasOwn(schema, "patternProperties")) return true;
+  const patterns = schema.patternProperties;
+  if (patterns === undefined) return true;
+  for (const pattern of Object.keys(patterns)) {
+    if (compileSchemaPattern(pattern, path, context) === undefined)
+      return false;
+  }
+  return true;
 }
 
 function schemaConstraintRoots(
@@ -112,9 +209,12 @@ function schemaConstraintRoots(
 ): readonly unknown[] {
   const roots: unknown[] = [];
   for (const schema of nodes) {
-    if (schema.default !== undefined) roots.push(schema.default);
-    if (schema.const !== undefined) roots.push(schema.const);
-    if (schema.enum !== undefined) roots.push(schema.enum);
+    if (Object.hasOwn(schema, "default") && schema.default !== undefined)
+      roots.push(schema.default);
+    if (Object.hasOwn(schema, "const") && schema.const !== undefined)
+      roots.push(schema.const);
+    if (Object.hasOwn(schema, "enum") && schema.enum !== undefined)
+      roots.push(schema.enum);
   }
   return roots;
 }

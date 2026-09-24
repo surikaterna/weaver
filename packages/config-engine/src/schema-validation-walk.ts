@@ -5,7 +5,14 @@ import {
   validateObjectSize,
   validateUniqueItems,
 } from "./schema-validation-cardinality";
-import { rejectUnsupportedComposition } from "./schema-validation-composition";
+import {
+  addCompositionResult,
+  type CompositionEntry,
+  type CompositionMemo,
+  getCompositionEntries,
+  getMemoizedCompositionMatch,
+  memoizeCompositionMatch,
+} from "./schema-validation-composition";
 import { validateValueConstraints } from "./schema-validation-constraints";
 import { collectMemberSchemas } from "./schema-validation-paths";
 import {
@@ -25,6 +32,9 @@ import {
 
 type WalkFrame =
   | { readonly kind: "value"; readonly state: ValidationState }
+  | { readonly kind: "ordinary"; readonly state: ValidationState }
+  | CompositionFrame
+  | BranchCompleteFrame
   | RequiredFrame
   | MemberFrame
   | ArrayItemFrame;
@@ -49,11 +59,32 @@ interface ArrayItemFrame {
   readonly index: number;
 }
 
+interface CompositionFrame {
+  readonly kind: "composition";
+  readonly state: ValidationState;
+  readonly entry: CompositionEntry;
+  readonly progress: { matched: number };
+  readonly index: number;
+}
+
+interface BranchCompleteFrame {
+  readonly kind: "branch-complete";
+  readonly schema: ConfigurationPropertySchema;
+  readonly value: unknown;
+  readonly context: ValidationState["context"];
+  readonly progress: { matched: number };
+}
+
+interface WalkRuntime {
+  readonly memo: CompositionMemo;
+}
+
 export function validateValuesIteratively(
   states: readonly ValidationState[],
+  memo: CompositionMemo,
 ): void {
   const pending: WalkFrame[] = [];
-  const visited = new WeakMap<object, WeakSet<object>>();
+  const runtime: WalkRuntime = { memo };
   for (let index = states.length - 1; index >= 0; index--) {
     const state = states[index];
     if (state !== undefined) pending.push({ kind: "value", state });
@@ -61,14 +92,14 @@ export function validateValuesIteratively(
   while (pending.length > 0) {
     const frame = pending.pop();
     if (frame === undefined) continue;
-    processWalkFrame(frame, pending, visited);
+    processWalkFrame(frame, pending, runtime);
   }
 }
 
 function processWalkFrame(
   frame: WalkFrame,
   pending: WalkFrame[],
-  visited: WeakMap<object, WeakSet<object>>,
+  runtime: WalkRuntime,
 ): void {
   if (frame.kind === "required") {
     processRequiredFrame(frame, pending);
@@ -76,23 +107,44 @@ function processWalkFrame(
     processMemberFrame(frame, pending);
   } else if (frame.kind === "array-item") {
     processArrayItemFrame(frame, pending);
+  } else if (frame.kind === "composition") {
+    processCompositionFrame(frame, pending, runtime);
+  } else if (frame.kind === "branch-complete") {
+    processBranchComplete(frame, runtime);
+  } else if (frame.kind === "ordinary") {
+    processOrdinaryFrame(frame.state, pending);
   } else {
-    processValueFrame(frame.state, pending, visited);
+    processValueFrame(frame.state, pending);
   }
 }
 
-function processValueFrame(
-  state: ValidationState,
-  pending: WalkFrame[],
-  visited: WeakMap<object, WeakSet<object>>,
-): void {
-  if (rejectUnsupportedComposition(state.schema, state.path, state.context))
-    return;
+function processValueFrame(state: ValidationState, pending: WalkFrame[]): void {
   const value = getEffectiveValue(
     state.schema,
     state.value,
     state.context.mode,
   );
+  const effectiveState = { ...state, value };
+  pending.push({ kind: "ordinary", state: effectiveState });
+  const entries = getCompositionEntries(state.schema);
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (entry === undefined) continue;
+    pending.push({
+      kind: "composition",
+      state: effectiveState,
+      entry,
+      progress: { matched: 0 },
+      index: 0,
+    });
+  }
+}
+
+function processOrdinaryFrame(
+  state: ValidationState,
+  pending: WalkFrame[],
+): void {
+  const value = state.value;
   if (value === undefined) {
     addError(state, "invalid-type", "Value must be defined", {
       expected: describeTypes(state.schema),
@@ -107,12 +159,74 @@ function processValueFrame(
     });
     return;
   }
-  if (isObjectValue(value) && pairWasVisited(state.schema, value, visited))
+  validateValueConstraints(state);
+  if (Array.isArray(value)) queueArrayFrames(state, value, pending);
+  else if (isRecord(value)) queueObjectFrames(state, value, pending);
+}
+
+function processCompositionFrame(
+  frame: CompositionFrame,
+  pending: WalkFrame[],
+  runtime: WalkRuntime,
+): void {
+  const branch = frame.entry.branches[frame.index];
+  if (branch === undefined) {
+    addCompositionResult(
+      frame.entry,
+      frame.progress.matched,
+      frame.state.path,
+      frame.state.context,
+    );
     return;
-  const effectiveState = { ...state, value };
-  validateValueConstraints(effectiveState);
-  if (Array.isArray(value)) queueArrayFrames(effectiveState, value, pending);
-  else if (isRecord(value)) queueObjectFrames(effectiveState, value, pending);
+  }
+  pending.push({ ...frame, index: frame.index + 1 });
+  queueCompositionBranch(frame, branch, pending, runtime);
+}
+
+function queueCompositionBranch(
+  frame: CompositionFrame,
+  schema: ConfigurationPropertySchema,
+  pending: WalkFrame[],
+  runtime: WalkRuntime,
+): void {
+  const { mode } = frame.state.context;
+  const cached = getMemoizedCompositionMatch(
+    runtime.memo,
+    schema,
+    frame.state.value,
+    mode,
+  );
+  if (cached !== undefined) {
+    if (cached) frame.progress.matched++;
+    return;
+  }
+  const context = { mode, errors: [] };
+  pending.push({
+    kind: "branch-complete",
+    schema,
+    value: frame.state.value,
+    context,
+    progress: frame.progress,
+  });
+  pending.push({
+    kind: "value",
+    state: { ...frame.state, schema, context },
+  });
+}
+
+function processBranchComplete(
+  frame: BranchCompleteFrame,
+  runtime: WalkRuntime,
+): void {
+  const matches = frame.context.errors.length === 0;
+  memoizeCompositionMatch(
+    runtime.memo,
+    frame.schema,
+    frame.value,
+    frame.context.mode,
+    matches,
+  );
+  if (matches) frame.progress.matched++;
 }
 
 function queueObjectFrames(
@@ -129,7 +243,9 @@ function queueObjectFrames(
     }
   }
   if (state.context.mode !== "effective") return;
-  const required = state.schema.required ?? [];
+  const required = Object.hasOwn(state.schema, "required")
+    ? (state.schema.required ?? [])
+    : [];
   for (let index = required.length - 1; index >= 0; index--) {
     const key = required[index];
     if (key !== undefined) pending.push({ kind: "required", state, key });
@@ -143,7 +259,9 @@ function processRequiredFrame(
   if (!isRecord(frame.state.value) || hasOwn(frame.state.value, frame.key))
     return;
   const path = appendValidationPath(frame.state.path, frame.key);
-  const properties = frame.state.schema.properties;
+  const properties = Object.hasOwn(frame.state.schema, "properties")
+    ? frame.state.schema.properties
+    : undefined;
   const propertySchema =
     properties !== undefined && Object.hasOwn(properties, frame.key)
       ? properties[frame.key]
@@ -189,7 +307,9 @@ function queueAdditionalProperty(
   path: ValidationPath,
   pending: WalkFrame[],
 ): void {
-  const additional = frame.state.schema.additionalProperties;
+  const additional = Object.hasOwn(frame.state.schema, "additionalProperties")
+    ? frame.state.schema.additionalProperties
+    : undefined;
   if (additional === true) return;
   if (additional === undefined || additional === false) {
     addContextError(frame.state.context, "unknown-property", path, {
@@ -243,23 +363,7 @@ function arrayItemSchema(
   schema: ConfigurationPropertySchema,
   index: number,
 ): ConfigurationPropertySchema | undefined {
-  const items = schema.items;
+  const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
   if (items === undefined) return undefined;
   return isSchemaArray(items) ? items[index] : items;
-}
-
-function pairWasVisited(
-  schema: object,
-  value: object,
-  visited: WeakMap<object, WeakSet<object>>,
-): boolean {
-  const values = visited.get(schema);
-  if (values?.has(value) === true) return true;
-  if (values === undefined) visited.set(schema, new WeakSet([value]));
-  else values.add(value);
-  return false;
-}
-
-function isObjectValue(value: unknown): value is object {
-  return typeof value === "object" && value !== null;
 }
