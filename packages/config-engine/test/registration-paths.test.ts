@@ -66,35 +66,47 @@ describe("schema registration paths", () => {
   });
 
   it("derives stable service root paths from serviceId", () => {
-    expect(deriveServicePath("lynx")).toEqual({
-      serviceId: "lynx",
-      servicePath: "/lynx",
+    expect(deriveServicePath("example-service")).toEqual({
+      serviceId: "example-service",
+      servicePath: "/example-service",
     });
   });
 
   it("resolves service-relative slot paths under the service root", () => {
-    expect(deriveCanonicalSlotPath("lynx", "/plugins")).toBe("/lynx/plugins");
+    expect(deriveCanonicalSlotPath("example-service", "/plugins")).toBe(
+      "/example-service/plugins",
+    );
   });
 
   it("derives fragment path from canonical slot path and providerId", () => {
     expect(
-      deriveFragmentPath("lynx", "/plugins", "ghost.settings.panel"),
+      deriveFragmentPath("example-service", "/plugins", "ghost.settings.panel"),
     ).toEqual({
-      serviceId: "lynx",
-      servicePath: "/lynx",
-      canonicalSlotPath: "/lynx/plugins",
+      serviceId: "example-service",
+      servicePath: "/example-service",
+      canonicalSlotPath: "/example-service/plugins",
       providerId: "ghost.settings.panel",
-      fragmentPath: "/lynx/plugins/ghost.settings.panel",
+      fragmentPath: "/example-service/plugins/ghost.settings.panel",
     });
   });
 
   it("rejects invalid serviceId, providerId, and slot paths", () => {
     expect(() => deriveServicePath("_weaver")).toThrow();
-    expect(() => deriveFragmentPath("lynx", "/plugins", "bad/id")).toThrow();
-    expect(() => deriveFragmentPath("lynx", "/plugins", " bad")).toThrow();
-    expect(() => deriveCanonicalSlotPath("lynx", "plugins")).toThrow();
-    expect(() => deriveCanonicalSlotPath("lynx", "/lynx/plugins")).toThrow();
-    expect(() => deriveCanonicalSlotPath("lynx", "/_weaver")).toThrow();
+    expect(() =>
+      deriveFragmentPath("example-service", "/plugins", "bad/id"),
+    ).toThrow();
+    expect(() =>
+      deriveFragmentPath("example-service", "/plugins", " bad"),
+    ).toThrow();
+    expect(() =>
+      deriveCanonicalSlotPath("example-service", "plugins"),
+    ).toThrow();
+    expect(() =>
+      deriveCanonicalSlotPath("example-service", "/example-service/plugins"),
+    ).toThrow();
+    expect(() =>
+      deriveCanonicalSlotPath("example-service", "/_weaver"),
+    ).toThrow();
   });
 
   it("rejects dangerous service, slot, fragment, and canonical path segments", () => {

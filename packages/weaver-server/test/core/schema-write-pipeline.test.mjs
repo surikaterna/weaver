@@ -253,6 +253,81 @@ describe("schema-registered config writes", () => {
     expect(await service.get("billing.limit")).toBe(5);
   });
 
+  test("prototype-colliding properties persist under open registered schemas", async () => {
+    const openProvider = createTestProvider("open", "platform", { service: {} });
+    const openService = await createWeaverConfigService({
+      providers: [openProvider],
+      environment: "test",
+    });
+    const openRegistry = createSchemaRegistry({ configService: openService });
+    await openRegistry.register(
+      serviceRegistration(
+        { type: "object", properties: {}, additionalProperties: true },
+        [],
+        "service",
+      ),
+    );
+
+    const openResult = await patchRegistered(
+      openService,
+      openRegistry,
+      "/service/toString",
+      "allowed",
+    );
+    const stored = (await providerEntries(openProvider)).service;
+
+    expect(openResult).toEqual({ success: true });
+    expect(openProvider.writes).toHaveLength(1);
+    expect(openProvider.writes[0].key).toBe("service");
+    expect(Object.keys(stored)).toEqual(["toString"]);
+    expect(Object.getOwnPropertyDescriptor(stored, "toString")).toEqual({
+      configurable: true,
+      enumerable: true,
+      value: "allowed",
+      writable: true,
+    });
+  });
+
+  test("prototype-colliding properties have zero effects under closed schemas", async () => {
+    const closedEntries = { closed: {} };
+    const closedProvider = createTestProvider("closed", "platform", closedEntries);
+    const closedService = await createWeaverConfigService({
+      providers: [closedProvider],
+      environment: "test",
+    });
+    const closedRegistry = createSchemaRegistry({ configService: closedService });
+    await closedRegistry.register(
+      serviceRegistration(
+        { type: "object", properties: {}, additionalProperties: false },
+        [],
+        "closed",
+      ),
+    );
+    const closedRevision = closedService.revision;
+
+    const closedResult = await patchRegistered(
+      closedService,
+      closedRegistry,
+      "/closed/toString",
+      "blocked",
+    );
+
+    expect(closedResult).toEqual(
+      schemaFailure("/closed/toString", "/closed", {
+        code: "unknown-property",
+        path: "$.closed.toString",
+        segments: ["closed", "toString"],
+        message: 'Unknown property "toString" is not allowed',
+      }),
+    );
+    await expectNoEffects(
+      closedProvider,
+      closedService,
+      closedEntries,
+      closedRevision,
+    );
+  });
+
   test("invalid type, unknown property, enum, and nested shape patches are rejected", async () => {
     const { provider, registry, service } = await makeRegisteredService({
       billing: { mode: "test" },

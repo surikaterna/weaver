@@ -143,7 +143,11 @@ function processRequiredFrame(
   if (!isRecord(frame.state.value) || hasOwn(frame.state.value, frame.key))
     return;
   const path = appendValidationPath(frame.state.path, frame.key);
-  const propertySchema = frame.state.schema.properties?.[frame.key];
+  const properties = frame.state.schema.properties;
+  const propertySchema =
+    properties !== undefined && Object.hasOwn(properties, frame.key)
+      ? properties[frame.key]
+      : undefined;
   if (propertySchema?.default !== undefined) {
     pending.push({
       kind: "value",
