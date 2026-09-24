@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "base": "4fe70d70762460d6656641bfa775121c4ffae058",
+  "branch": "feature/standard-validator-spike",
+  "node": "v24.21.0",
+  "pnpm": "11.13.0",
+  "os": "linux 7.1.9-arch1-2",
+  "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+  "cpuCount": 16,
+  "lockfileSha256": "bb2a72d5693889135db75255e6571fcffc6e75ad0c479911beae5024ef061d65",
+  "packages": {
+    "@cfworker/json-schema": "4.1.1",
+    "ajv": "8.20.0",
+    "esbuild": "0.28.2"
+  },
+  "integrities": {
+    "@cfworker/json-schema": "sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==",
+    "ajv": "sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA==",
+    "esbuild": "sha512-HKVLS8dvII+xoKW9kmqxbRKrnWEXfJJr/FZhhJmiqIB0e053QNYFqOBouTMO/k5sID4MvCiUCvv8b9M4h32wIA=="
+  }
+}

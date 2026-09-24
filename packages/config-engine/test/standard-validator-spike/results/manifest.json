@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256",
+  "base": "4fe70d70762460d6656641bfa775121c4ffae058",
+  "files": {
+    "REPORT.md": "19874e91204710ae9bf93a3e3379b7c8cc2e633fb9296fb66cc40a2d64f34e23",
+    "adapters/ajv-runtime.ts": "2707ac59cd9bc0ab9e18710dd171ea08f9fe228eaea5ea2d46d282238b4cd7a1",
+    "adapters/ajv-standalone.ts": "e5437e4b51fb0a0e950c449720728bda183dcac0c38555fbc6a7d5afa08e2962",
+    "adapters/baseline.ts": "c39a06bf1ea8da37f638dffa91643a9d273988cacf6de6ab9b3ed8c7802dc930",
+    "adapters/cfworker.ts": "35ffc6e72cef45a89ca65f79a3b95cfc8fd25af9d90ae65bf6380b10d00cbd0b",
+    "adversarial.test.ts": "990acfed6344ac79282adaf04bdc1712a34663574de8b7ec98cbd6b302d50dd2",
+    "benchmark.ts": "020896a9a2e3fbc54b3711b102c6fe7ee1482a82e76a5dd9c1513c055772747b",
+    "bundle.ts": "477f01b71c2d834a64da4e1619fc548298c08e865ccebdf966b12342ee84c651",
+    "defaults-shadow.ts": "8cc3289129fab780dcfda890272b7a3b13f56b6cacc2a11e52e2d8cb11aed310",
+    "fixtures.ts": "ffe1811b68c25768b7c53cbacd11cc4c34e3573758d58ab379470e1922572eae",
+    "loc.ts": "e3528fc62e981b1f0ba7cc843cd4a85641358a53016fffc7b8483480e9ef25bd",
+    "lower-schema.ts": "dbb3b7ee29f348d09f8f3e9e16135270d55df9305fd4ca9bd68b0705ed2fc47d",
+    "matrix.test.ts": "0b190b52f678c2eed0ae77157efed64f2e649463c0abb8576eeae2158dae5a09",
+    "normalize.ts": "cbdbea066e4898572e8b85aea222e5acc1a285945afe7a7cf44b69d6f0d3f073",
+    "preflight.ts": "539544e4cb3542c62e062ce58400fa8fa929c6662ae7ca5fb39d36d9770c2e98",
+    "report.ts": "4b018b919b1abfc95c506ce368cc8051add7a6eed314f9958445c6e7b367a7c9",
+    "run-matrix.ts": "c99edea7463d5ded27275ea9fc334e021c8b58d587e8b0f0b37634242bf65d54",
+    "tsconfig.json": "1054bd163311c5eb40a553fb7e2415ef2c53e6352152e8b1ae76d8ce90926957",
+    "types.ts": "ac3a8da92971a44b01a481f7f7e6829f78c7e40f11f28f4c74bd3a99361b966f",
+    "benchmark.json": "93c00bc372b41c6d87f869c2e5420ca6cfb33f7fc94afdb00271c3ca8ba5c16e",
+    "bundle.json": "3dd9214c0daa2d8e2b3022c750a7abafab5bc32b0e2878e06137a6978c70d93a",
+    "dependencies.json": "bef2091c5c9320bdb07bdf677215731812ec4e62bb46923f6acba6436ab700b7",
+    "environment.json": "dc820cc08819fe58025db7e8ff7d7f075fbf1e7508c532c362a62dd300169d90",
+    "loc.json": "5ff1a314c64181664ce4baec182a01036e9715e48c079778ecb52c62bcc34a6a",
+    "matrix.json": "8c59331890cd578a23825f170317f117ecc486ac0d35d5ae6ff6490d674f4c90"
+  },
+  "commands": [
+    "pnpm install --frozen-lockfile",
+    "pnpm exec tsc -p packages/config-engine/test/standard-validator-spike/tsconfig.json --noEmit",
+    "pnpm exec node --import tsx --test packages/config-engine/test/standard-validator-spike/*.test.ts",
+    "pnpm exec tsx packages/config-engine/test/standard-validator-spike/run-matrix.ts",
+    "pnpm exec tsx packages/config-engine/test/standard-validator-spike/bundle.ts",
+    "pnpm exec tsx packages/config-engine/test/standard-validator-spike/benchmark.ts",
+    "pnpm exec tsx packages/config-engine/test/standard-validator-spike/loc.ts",
+    "pnpm exec tsx packages/config-engine/test/standard-validator-spike/report.ts"
+  ]
+}

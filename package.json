@@ -27,9 +27,12 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.13",
+    "@cfworker/json-schema": "4.1.1",
     "@changesets/changelog-github": "0.6.0",
     "@changesets/cli": "2.30.0",
     "@eslint/js": "10.0.1",
+    "ajv": "8.20.0",
+    "esbuild": "0.28.2",
     "eslint": "10.2.0",
     "tsup": "^8.5.1",
     "tsx": "^4.20.6",

@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "countingRule": "nonblank physical lines; comments retained",
+  "baseline": {
+    "groups": {
+      "ordinaryKeyword": 456,
+      "retainedPreflight": 246,
+      "retainedPaths": 135,
+      "retainedSupport": 544
+    },
+    "total": 1381,
+    "eliminableOrdinaryKeyword": 456,
+    "retained": 925
+  },
+  "spike": {
+    "groups": {
+      "adapterBaseline": 61,
+      "adapterCfworker": 146,
+      "adapterAjvRuntime": 148,
+      "adapterAjvStandalone": 100,
+      "normalization": 141,
+      "lowering": 151,
+      "defaultsShadow": 116,
+      "preflightWrapper": 66
+    },
+    "sharedRetainedLayerTotal": 474
+  },
+  "projections": {
+    "cfworker": {
+      "projectedProductionLoc": 1545,
+      "netReductionLoc": -164,
+      "reductionPercent": -11.9
+    },
+    "ajv-runtime": {
+      "projectedProductionLoc": 1547,
+      "netReductionLoc": -166,
+      "reductionPercent": -12
+    },
+    "ajv-standalone": {
+      "projectedProductionLoc": 1499,
+      "netReductionLoc": -118,
+      "reductionPercent": -8.5
+    }
+  },
+  "bounds": {
+    "handwrittenFiles": 18,
+    "handwrittenNonblankLoc": 2485,
+    "investigate": {
+      "files": 12,
+      "loc": 1800
+    },
+    "stop": {
+      "files": 18,
+      "loc": 2500
+    },
+    "adapterCeiling": 250,
+    "sharedLayerCeiling": 500
+  }
+}

@@ -1,0 +1,6515 @@
+{
+  "schemaVersion": 1,
+  "fixtureCount": 64,
+  "deterministicRuns": 100,
+  "rows": [
+    {
+      "id": "primitive-null",
+      "category": "primitive",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "primitive-boolean",
+      "category": "primitive",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "primitive-string",
+      "category": "primitive",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "primitive-number",
+      "category": "primitive",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "primitive-integer",
+      "category": "primitive",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "primitive-union",
+      "category": "primitive",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "type-invalid",
+      "category": "primitive",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-type",
+            "path": "$",
+            "segments": [],
+            "message": "Value does not match schema type",
+            "expected": "boolean",
+            "actual": "string"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-type",
+              "path": "$",
+              "segments": [],
+              "message": "Value does not match schema type",
+              "expected": "boolean",
+              "actual": "string"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$",
+                "segments": [],
+                "message": "Value does not match schema type",
+                "expected": "boolean",
+                "actual": "string"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "type",
+              "keywordLocation": "#/type",
+              "error": "Instance type \"string\" is invalid. Expected \"boolean\"."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$",
+                "segments": [],
+                "message": "Value does not match schema type",
+                "expected": "boolean",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/type",
+              "keyword": "type",
+              "params": {
+                "type": "boolean"
+              },
+              "message": "must be boolean"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$",
+                "segments": [],
+                "message": "Value does not match schema type",
+                "expected": "boolean",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "object-valid",
+      "category": "object",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "required-effective",
+      "category": "required",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "missing-required",
+            "path": "$.name",
+            "segments": ["name"],
+            "message": "Required property \"name\" is missing"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "missing-required",
+              "path": "$.name",
+              "segments": ["name"],
+              "message": "Required property \"name\" is missing"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "missing-required",
+                "path": "$.name",
+                "segments": ["name"],
+                "message": "Required property \"name\" is missing"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "required",
+              "keywordLocation": "#/required",
+              "error": "Instance does not have required property \"name\"."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "missing-required",
+                "path": "$",
+                "segments": [],
+                "message": "Required property is missing: Instance does not have required property \"name\"."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/required",
+              "keyword": "required",
+              "params": {
+                "missingProperty": "name"
+              },
+              "message": "must have required property 'name'"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "missing-required",
+                "path": "$.name",
+                "segments": ["name"],
+                "message": "Required property is missing: must have required property 'name'"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "required-partial",
+      "category": "required",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "closed-default",
+      "category": "additionalProperties",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "unknown-property",
+            "path": "$.other",
+            "segments": ["other"],
+            "message": "Unknown property \"other\" is not allowed"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "unknown-property",
+              "path": "$.other",
+              "segments": ["other"],
+              "message": "Unknown property \"other\" is not allowed"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "unknown-property",
+                "path": "$.other",
+                "segments": ["other"],
+                "message": "Unknown property \"other\" is not allowed"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "additionalProperties",
+              "keywordLocation": "#/additionalProperties",
+              "error": "Property \"other\" does not match additional properties schema."
+            },
+            {
+              "instanceLocation": "#/other",
+              "keyword": "false",
+              "keywordLocation": "#/other",
+              "error": "False boolean schema."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "unknown-property",
+                "path": "$",
+                "segments": [],
+                "message": "Unknown property is not allowed: Property \"other\" does not match additional properties schema."
+              },
+              {
+                "code": "invalid-value",
+                "path": "$.other",
+                "segments": ["other"],
+                "message": "false: False boolean schema."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/additionalProperties",
+              "keyword": "additionalProperties",
+              "params": {
+                "additionalProperty": "other"
+              },
+              "message": "must NOT have additional properties"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "unknown-property",
+                "path": "$.other",
+                "segments": ["other"],
+                "message": "Unknown property is not allowed: must NOT have additional properties"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "additional-true",
+      "category": "additionalProperties",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "additional-typed",
+      "category": "additionalProperties",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "additional-typed-invalid",
+      "category": "additionalProperties",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-type",
+            "path": "$.x",
+            "segments": ["x"],
+            "message": "Value does not match schema type",
+            "expected": "string",
+            "actual": "number"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-type",
+              "path": "$.x",
+              "segments": ["x"],
+              "message": "Value does not match schema type",
+              "expected": "string",
+              "actual": "number"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "Value does not match schema type",
+                "expected": "string",
+                "actual": "number"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "additionalProperties",
+              "keywordLocation": "#/additionalProperties",
+              "error": "Property \"x\" does not match additional properties schema."
+            },
+            {
+              "instanceLocation": "#/x",
+              "keyword": "type",
+              "keywordLocation": "#/additionalProperties/type",
+              "error": "Instance type \"number\" is invalid. Expected \"string\"."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "unknown-property",
+                "path": "$",
+                "segments": [],
+                "message": "Unknown property is not allowed: Property \"x\" does not match additional properties schema."
+              },
+              {
+                "code": "invalid-type",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "Value does not match schema type",
+                "expected": "object",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "/x",
+              "schemaPath": "#/additionalProperties/type",
+              "keyword": "type",
+              "params": {
+                "type": "string"
+              },
+              "message": "must be string"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "Value does not match schema type",
+                "expected": "object",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "pattern-properties-overlap",
+      "category": "patternProperties",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "pattern-properties-overlap-invalid",
+      "category": "patternProperties",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$.x",
+            "segments": ["x"],
+            "message": "minLength requires 1 >= 2"
+          },
+          {
+            "code": "invalid-value",
+            "path": "$.x",
+            "segments": ["x"],
+            "message": "String must match pattern \"^a\""
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$.x",
+              "segments": ["x"],
+              "message": "minLength requires 1 >= 2"
+            },
+            {
+              "code": "invalid-value",
+              "path": "$.x",
+              "segments": ["x"],
+              "message": "String must match pattern \"^a\""
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "minLength requires 1 >= 2"
+              },
+              {
+                "code": "invalid-value",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "String must match pattern \"^a\""
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "patternProperties",
+              "keywordLocation": "#/patternProperties",
+              "error": "Property \"x\" matches pattern \"^x\" but does not match associated schema."
+            },
+            {
+              "instanceLocation": "#/x",
+              "keyword": "minLength",
+              "keywordLocation": "#/patternProperties/%5Ex/minLength",
+              "error": "String is too short (1 < 2)."
+            },
+            {
+              "instanceLocation": "#",
+              "keyword": "patternProperties",
+              "keywordLocation": "#/patternProperties",
+              "error": "Property \"x\" matches pattern \"x$\" but does not match associated schema."
+            },
+            {
+              "instanceLocation": "#/x",
+              "keyword": "pattern",
+              "keywordLocation": "#/patternProperties/x$/pattern",
+              "error": "String does not match pattern."
+            },
+            {
+              "instanceLocation": "#",
+              "keyword": "additionalProperties",
+              "keywordLocation": "#/additionalProperties",
+              "error": "Property \"x\" does not match additional properties schema."
+            },
+            {
+              "instanceLocation": "#/x",
+              "keyword": "false",
+              "keywordLocation": "#/x",
+              "error": "False boolean schema."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "patternProperties: Property \"x\" matches pattern \"^x\" but does not match associated schema."
+              },
+              {
+                "code": "invalid-value",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "minLength: String is too short (1 < 2)."
+              },
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "patternProperties: Property \"x\" matches pattern \"x$\" but does not match associated schema."
+              },
+              {
+                "code": "invalid-value",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "pattern: String does not match pattern."
+              },
+              {
+                "code": "unknown-property",
+                "path": "$",
+                "segments": [],
+                "message": "Unknown property is not allowed: Property \"x\" does not match additional properties schema."
+              },
+              {
+                "code": "invalid-value",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "false: False boolean schema."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "/x",
+              "schemaPath": "#/patternProperties/%5Ex/minLength",
+              "keyword": "minLength",
+              "params": {
+                "limit": 2
+              },
+              "message": "must NOT have fewer than 2 characters"
+            },
+            {
+              "instancePath": "/x",
+              "schemaPath": "#/patternProperties/x%24/pattern",
+              "keyword": "pattern",
+              "params": {
+                "pattern": "^a"
+              },
+              "message": "must match pattern \"^a\""
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "minLength: must NOT have fewer than 2 characters"
+              },
+              {
+                "code": "invalid-value",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "pattern: must match pattern \"^a\""
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "array-items",
+      "category": "items",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "array-items-invalid",
+      "category": "items",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-type",
+            "path": "$[1]",
+            "segments": [1],
+            "message": "Value does not match schema type",
+            "expected": "integer",
+            "actual": "string"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-type",
+              "path": "$[1]",
+              "segments": [1],
+              "message": "Value does not match schema type",
+              "expected": "integer",
+              "actual": "string"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$[1]",
+                "segments": [1],
+                "message": "Value does not match schema type",
+                "expected": "integer",
+                "actual": "string"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "items",
+              "keywordLocation": "#/items",
+              "error": "Items did not match schema."
+            },
+            {
+              "instanceLocation": "#/1",
+              "keyword": "type",
+              "keywordLocation": "#/items/type",
+              "error": "Instance type \"string\" is invalid. Expected \"integer\"."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "items: Items did not match schema."
+              },
+              {
+                "code": "invalid-type",
+                "path": "$[1]",
+                "segments": [1],
+                "message": "Value does not match schema type",
+                "expected": "array",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "/1",
+              "schemaPath": "#/items/type",
+              "keyword": "type",
+              "params": {
+                "type": "integer"
+              },
+              "message": "must be integer"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$[1]",
+                "segments": [1],
+                "message": "Value does not match schema type",
+                "expected": "array",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "tuple-items",
+      "category": "items",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "const",
+      "category": "const",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "const-invalid",
+      "category": "const",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "Value does not match const constraint"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "Value does not match const constraint"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "Value does not match const constraint"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "const",
+              "keywordLocation": "#/const",
+              "error": "Instance does not match \"x\"."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "const: Instance does not match \"x\"."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/const",
+              "keyword": "const",
+              "params": {
+                "allowedValue": "x"
+              },
+              "message": "must be equal to constant"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "const: must be equal to constant"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "enum",
+      "category": "enum",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "enum-invalid",
+      "category": "enum",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "Value is not in the allowed enum values"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "Value is not in the allowed enum values"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "Value is not in the allowed enum values"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "enum",
+              "keywordLocation": "#/enum",
+              "error": "Instance does not match any of [\"x\",\"y\"]."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "enum: Instance does not match any of [\"x\",\"y\"]."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/enum",
+              "keyword": "enum",
+              "params": {
+                "allowedValues": ["x", "y"]
+              },
+              "message": "must be equal to one of the allowed values"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "enum: must be equal to one of the allowed values"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "pattern",
+      "category": "pattern",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "pattern-invalid",
+      "category": "pattern",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "String must match pattern \"^[a-z]+$\""
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "String must match pattern \"^[a-z]+$\""
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "String must match pattern \"^[a-z]+$\""
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "pattern",
+              "keywordLocation": "#/pattern",
+              "error": "String does not match pattern."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "pattern: String does not match pattern."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/pattern",
+              "keyword": "pattern",
+              "params": {
+                "pattern": "^[a-z]+$"
+              },
+              "message": "must match pattern \"^[a-z]+$\""
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "pattern: must match pattern \"^[a-z]+$\""
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "unicode-length",
+      "category": "string-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "min-length",
+      "category": "string-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "minLength requires 1 >= 2"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "minLength requires 1 >= 2"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "minLength requires 1 >= 2"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "minLength",
+              "keywordLocation": "#/minLength",
+              "error": "String is too short (1 < 2)."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "minLength: String is too short (1 < 2)."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/minLength",
+              "keyword": "minLength",
+              "params": {
+                "limit": 2
+              },
+              "message": "must NOT have fewer than 2 characters"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "minLength: must NOT have fewer than 2 characters"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "max-length",
+      "category": "string-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "maxLength requires 2 <= 1"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "maxLength requires 2 <= 1"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "maxLength requires 2 <= 1"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "maxLength",
+              "keywordLocation": "#/maxLength",
+              "error": "String is too long (2 > 1)."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "maxLength: String is too long (2 > 1)."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/maxLength",
+              "keyword": "maxLength",
+              "params": {
+                "limit": 1
+              },
+              "message": "must NOT have more than 1 characters"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "maxLength: must NOT have more than 1 characters"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "numeric-bounds",
+      "category": "numeric-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "minimum",
+      "category": "numeric-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "minimum requires 0 >= 1"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "minimum requires 0 >= 1"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "minimum requires 0 >= 1"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "minimum",
+              "keywordLocation": "#/minimum",
+              "error": "0 is less than 1."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "minimum: 0 is less than 1."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/minimum",
+              "keyword": "minimum",
+              "params": {
+                "comparison": ">=",
+                "limit": 1
+              },
+              "message": "must be >= 1"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "minimum: must be >= 1"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "maximum",
+      "category": "numeric-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "maximum requires 4 <= 3"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "maximum requires 4 <= 3"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "maximum requires 4 <= 3"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "maximum",
+              "keywordLocation": "#/maximum",
+              "error": "4 is greater than 3."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "maximum: 4 is greater than 3."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/maximum",
+              "keyword": "maximum",
+              "params": {
+                "comparison": "<=",
+                "limit": 3
+              },
+              "message": "must be <= 3"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "maximum: must be <= 3"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "exclusive-minimum",
+      "category": "numeric-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "exclusiveMinimum requires 1 > 1"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "exclusiveMinimum requires 1 > 1"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "exclusiveMinimum requires 1 > 1"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "exclusiveMinimum",
+              "keywordLocation": "#/exclusiveMinimum",
+              "error": "1 is less than 1."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "exclusiveMinimum: 1 is less than 1."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/exclusiveMinimum",
+              "keyword": "exclusiveMinimum",
+              "params": {
+                "comparison": ">",
+                "limit": 1
+              },
+              "message": "must be > 1"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "exclusiveMinimum: must be > 1"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "exclusive-maximum",
+      "category": "numeric-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "exclusiveMaximum requires 3 < 3"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "exclusiveMaximum requires 3 < 3"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "exclusiveMaximum requires 3 < 3"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "exclusiveMaximum",
+              "keywordLocation": "#/exclusiveMaximum",
+              "error": "3 is greater than or equal to 3."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "exclusiveMaximum: 3 is greater than or equal to 3."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/exclusiveMaximum",
+              "keyword": "exclusiveMaximum",
+              "params": {
+                "comparison": "<",
+                "limit": 3
+              },
+              "message": "must be < 3"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "exclusiveMaximum: must be < 3"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "multiple-decimal",
+      "category": "multipleOf",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/multipleOf",
+              "keyword": "multipleOf",
+              "params": {
+                "multipleOf": 0.1
+              },
+              "message": "must be multiple of 0.1"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "multipleOf: must be multiple of 0.1"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "multiple-decimal-003",
+      "category": "multipleOf",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "multiple-scientific",
+      "category": "multipleOf",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "multiple-nonmultiple",
+      "category": "multipleOf",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "Number must be a multiple of 0.1"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "Number must be a multiple of 0.1"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "Number must be a multiple of 0.1"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "multipleOf",
+              "keywordLocation": "#/multipleOf",
+              "error": "0.31 is not a multiple of 0.1."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "multipleOf: 0.31 is not a multiple of 0.1."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/multipleOf",
+              "keyword": "multipleOf",
+              "params": {
+                "multipleOf": 0.1
+              },
+              "message": "must be multiple of 0.1"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "multipleOf: must be multiple of 0.1"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "multiple-invalid-schema",
+      "category": "multipleOf",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-schema",
+            "path": "$",
+            "segments": [],
+            "message": "multipleOf must be positive and finite"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-schema",
+              "path": "$",
+              "segments": [],
+              "message": "multipleOf must be positive and finite"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "multipleOf must be positive and finite"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-schema",
+              "path": "$",
+              "segments": [],
+              "message": "multipleOf must be positive and finite"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "multipleOf must be positive and finite"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": ["Error: schema is invalid: data/multipleOf must be > 0"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Error: schema is invalid: data/multipleOf must be > 0"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Error: schema is invalid: data/multipleOf must be > 0"
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "array-cardinality",
+      "category": "array-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "min-items",
+      "category": "array-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "minItems requires 0 >= 1"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "minItems requires 0 >= 1"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "minItems requires 0 >= 1"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "minItems",
+              "keywordLocation": "#/minItems",
+              "error": "Array has too few items (0 < 1)."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "minItems: Array has too few items (0 < 1)."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/minItems",
+              "keyword": "minItems",
+              "params": {
+                "limit": 1
+              },
+              "message": "must NOT have fewer than 1 items"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "minItems: must NOT have fewer than 1 items"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "max-items",
+      "category": "array-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "maxItems requires 2 <= 1"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "maxItems requires 2 <= 1"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "maxItems requires 2 <= 1"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "maxItems",
+              "keywordLocation": "#/maxItems",
+              "error": "Array has too many items (2 > 1)."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "maxItems: Array has too many items (2 > 1)."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/maxItems",
+              "keyword": "maxItems",
+              "params": {
+                "limit": 1
+              },
+              "message": "must NOT have more than 1 items"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "maxItems: must NOT have more than 1 items"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "unique-items",
+      "category": "array-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$[1]",
+            "segments": [1],
+            "message": "Array item must be unique"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$[1]",
+              "segments": [1],
+              "message": "Array item must be unique"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$[1]",
+                "segments": [1],
+                "message": "Array item must be unique"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "uniqueItems",
+              "keywordLocation": "#/uniqueItems",
+              "error": "Duplicate items at indexes 0 and 1."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "uniqueItems: Duplicate items at indexes 0 and 1."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/uniqueItems",
+              "keyword": "uniqueItems",
+              "params": {
+                "i": 1,
+                "j": 0
+              },
+              "message": "must NOT have duplicate items (items ## 0 and 1 are identical)"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "uniqueItems: must NOT have duplicate items (items ## 0 and 1 are identical)"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "object-cardinality",
+      "category": "object-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "min-properties",
+      "category": "object-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "minProperties requires 0 >= 1"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "minProperties requires 0 >= 1"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "minProperties requires 0 >= 1"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "minProperties",
+              "keywordLocation": "#/minProperties",
+              "error": "Instance does not have at least 1 properties."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "minProperties: Instance does not have at least 1 properties."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/minProperties",
+              "keyword": "minProperties",
+              "params": {
+                "limit": 1
+              },
+              "message": "must NOT have fewer than 1 properties"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "minProperties: must NOT have fewer than 1 properties"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "min-properties-partial",
+      "category": "object-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "max-properties",
+      "category": "object-constraints",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$",
+            "segments": [],
+            "message": "maxProperties requires 2 <= 1"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$",
+              "segments": [],
+              "message": "maxProperties requires 2 <= 1"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "maxProperties requires 2 <= 1"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "maxProperties",
+              "keywordLocation": "#/maxProperties",
+              "error": "Instance does not have at least 1 properties."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "maxProperties: Instance does not have at least 1 properties."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/maxProperties",
+              "keyword": "maxProperties",
+              "params": {
+                "limit": 1
+              },
+              "message": "must NOT have more than 1 properties"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "maxProperties: must NOT have more than 1 properties"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "root-patch",
+      "category": "patch",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone cannot resolve an unseen runtime patch schema"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone cannot resolve an unseen runtime patch schema"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone cannot resolve an unseen runtime patch schema"
+        }
+      ]
+    },
+    {
+      "id": "member-patch",
+      "category": "patch",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-type",
+            "path": "$.name",
+            "segments": ["name"],
+            "message": "Value does not match schema type",
+            "expected": "string",
+            "actual": "number"
+          }
+        ]
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-type",
+              "path": "$.name",
+              "segments": ["name"],
+              "message": "Value does not match schema type",
+              "expected": "string",
+              "actual": "number"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$.name",
+                "segments": ["name"],
+                "message": "Value does not match schema type",
+                "expected": "string",
+                "actual": "number"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "type",
+              "keywordLocation": "#/type",
+              "error": "Instance type \"number\" is invalid. Expected \"string\"."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$.name",
+                "segments": ["name"],
+                "message": "Value does not match schema type",
+                "expected": "string",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/type",
+              "keyword": "type",
+              "params": {
+                "type": "string"
+              },
+              "message": "must be string"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$.name",
+                "segments": ["name"],
+                "message": "Value does not match schema type",
+                "expected": "string",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone cannot resolve an unseen runtime patch schema"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone cannot resolve an unseen runtime patch schema"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone cannot resolve an unseen runtime patch schema"
+        }
+      ]
+    },
+    {
+      "id": "member-patch-base",
+      "category": "patch",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-type",
+            "path": "$.settings.name",
+            "segments": ["settings", "name"],
+            "message": "Value does not match schema type",
+            "expected": "string",
+            "actual": "number"
+          }
+        ]
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-type",
+              "path": "$.settings.name",
+              "segments": ["settings", "name"],
+              "message": "Value does not match schema type",
+              "expected": "string",
+              "actual": "number"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$.settings.name",
+                "segments": ["settings", "name"],
+                "message": "Value does not match schema type",
+                "expected": "string",
+                "actual": "number"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "type",
+              "keywordLocation": "#/type",
+              "error": "Instance type \"number\" is invalid. Expected \"string\"."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$.settings.name",
+                "segments": ["settings", "name"],
+                "message": "Value does not match schema type",
+                "expected": "string",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/type",
+              "keyword": "type",
+              "params": {
+                "type": "string"
+              },
+              "message": "must be string"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$.settings.name",
+                "segments": ["settings", "name"],
+                "message": "Value does not match schema type",
+                "expected": "string",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone cannot resolve an unseen runtime patch schema"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone cannot resolve an unseen runtime patch schema"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone cannot resolve an unseen runtime patch schema"
+        }
+      ]
+    },
+    {
+      "id": "default-effective",
+      "category": "defaults",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "default-partial",
+      "category": "defaults",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-type",
+            "path": "$",
+            "segments": [],
+            "message": "Value must be defined",
+            "expected": "string",
+            "actual": "undefined"
+          }
+        ]
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-type",
+              "path": "$",
+              "segments": [],
+              "message": "Value must be defined",
+              "expected": "string",
+              "actual": "undefined"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$",
+                "segments": [],
+                "message": "Value must be defined",
+                "expected": "string",
+                "actual": "undefined"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Error: Instances of \"undefined\" type are not supported."],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Error: Instances of \"undefined\" type are not supported."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Error: Instances of \"undefined\" type are not supported."
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/type",
+              "keyword": "type",
+              "params": {
+                "type": "string"
+              },
+              "message": "must be string"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$",
+                "segments": [],
+                "message": "Value does not match schema type",
+                "expected": "string",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "required-default-effective",
+      "category": "defaults",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "prototype-own",
+      "category": "prototype-safety",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "inherited-value-member",
+      "category": "getter-safety",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "additionalProperties",
+              "keywordLocation": "#/additionalProperties",
+              "error": "Property \"inherited\" does not match additional properties schema."
+            },
+            {
+              "instanceLocation": "#/inherited",
+              "keyword": "false",
+              "keywordLocation": "#/inherited",
+              "error": "False boolean schema."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "unknown-property",
+                "path": "$",
+                "segments": [],
+                "message": "Unknown property is not allowed: Property \"inherited\" does not match additional properties schema."
+              },
+              {
+                "code": "invalid-value",
+                "path": "$.inherited",
+                "segments": ["inherited"],
+                "message": "false: False boolean schema."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/additionalProperties",
+              "keyword": "additionalProperties",
+              "params": {
+                "additionalProperty": "inherited"
+              },
+              "message": "must NOT have additional properties"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "unknown-property",
+                "path": "$.inherited",
+                "segments": ["inherited"],
+                "message": "Unknown property is not allowed: must NOT have additional properties"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "mutation-valid",
+      "category": "mutation",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "mutation-invalid",
+      "category": "mutation",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-type",
+            "path": "$.x",
+            "segments": ["x"],
+            "message": "Value does not match schema type",
+            "expected": "integer",
+            "actual": "string"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-type",
+              "path": "$.x",
+              "segments": ["x"],
+              "message": "Value does not match schema type",
+              "expected": "integer",
+              "actual": "string"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "Value does not match schema type",
+                "expected": "integer",
+                "actual": "string"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "properties",
+              "keywordLocation": "#/properties",
+              "error": "Property \"x\" does not match schema."
+            },
+            {
+              "instanceLocation": "#/x",
+              "keyword": "type",
+              "keywordLocation": "#/properties/x/type",
+              "error": "Instance type \"string\" is invalid. Expected \"integer\"."
+            },
+            {
+              "instanceLocation": "#",
+              "keyword": "additionalProperties",
+              "keywordLocation": "#/additionalProperties",
+              "error": "Property \"x\" does not match additional properties schema."
+            },
+            {
+              "instanceLocation": "#/x",
+              "keyword": "false",
+              "keywordLocation": "#/x",
+              "error": "False boolean schema."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "properties: Property \"x\" does not match schema."
+              },
+              {
+                "code": "invalid-type",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "Value does not match schema type",
+                "expected": "object",
+                "actual": "candidate-value"
+              },
+              {
+                "code": "unknown-property",
+                "path": "$",
+                "segments": [],
+                "message": "Unknown property is not allowed: Property \"x\" does not match additional properties schema."
+              },
+              {
+                "code": "invalid-value",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "false: False boolean schema."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "/x",
+              "schemaPath": "#/properties/x/type",
+              "keyword": "type",
+              "params": {
+                "type": "integer"
+              },
+              "message": "must be integer"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "Value does not match schema type",
+                "expected": "object",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "deterministic-error-order",
+      "category": "error-order",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-type",
+            "path": "$.a",
+            "segments": ["a"],
+            "message": "Value does not match schema type",
+            "expected": "integer",
+            "actual": "string"
+          },
+          {
+            "code": "invalid-type",
+            "path": "$.b",
+            "segments": ["b"],
+            "message": "Value does not match schema type",
+            "expected": "integer",
+            "actual": "string"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-type",
+              "path": "$.a",
+              "segments": ["a"],
+              "message": "Value does not match schema type",
+              "expected": "integer",
+              "actual": "string"
+            },
+            {
+              "code": "invalid-type",
+              "path": "$.b",
+              "segments": ["b"],
+              "message": "Value does not match schema type",
+              "expected": "integer",
+              "actual": "string"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$.a",
+                "segments": ["a"],
+                "message": "Value does not match schema type",
+                "expected": "integer",
+                "actual": "string"
+              },
+              {
+                "code": "invalid-type",
+                "path": "$.b",
+                "segments": ["b"],
+                "message": "Value does not match schema type",
+                "expected": "integer",
+                "actual": "string"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "properties",
+              "keywordLocation": "#/properties",
+              "error": "Property \"a\" does not match schema."
+            },
+            {
+              "instanceLocation": "#/a",
+              "keyword": "type",
+              "keywordLocation": "#/properties/a/type",
+              "error": "Instance type \"string\" is invalid. Expected \"integer\"."
+            },
+            {
+              "instanceLocation": "#",
+              "keyword": "properties",
+              "keywordLocation": "#/properties",
+              "error": "Property \"b\" does not match schema."
+            },
+            {
+              "instanceLocation": "#/b",
+              "keyword": "type",
+              "keywordLocation": "#/properties/b/type",
+              "error": "Instance type \"string\" is invalid. Expected \"integer\"."
+            },
+            {
+              "instanceLocation": "#",
+              "keyword": "additionalProperties",
+              "keywordLocation": "#/additionalProperties",
+              "error": "Property \"a\" does not match additional properties schema."
+            },
+            {
+              "instanceLocation": "#/a",
+              "keyword": "false",
+              "keywordLocation": "#/a",
+              "error": "False boolean schema."
+            },
+            {
+              "instanceLocation": "#",
+              "keyword": "additionalProperties",
+              "keywordLocation": "#/additionalProperties",
+              "error": "Property \"b\" does not match additional properties schema."
+            },
+            {
+              "instanceLocation": "#/b",
+              "keyword": "false",
+              "keywordLocation": "#/b",
+              "error": "False boolean schema."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "properties: Property \"a\" does not match schema."
+              },
+              {
+                "code": "invalid-type",
+                "path": "$.a",
+                "segments": ["a"],
+                "message": "Value does not match schema type",
+                "expected": "object",
+                "actual": "candidate-value"
+              },
+              {
+                "code": "invalid-value",
+                "path": "$",
+                "segments": [],
+                "message": "properties: Property \"b\" does not match schema."
+              },
+              {
+                "code": "invalid-type",
+                "path": "$.b",
+                "segments": ["b"],
+                "message": "Value does not match schema type",
+                "expected": "object",
+                "actual": "candidate-value"
+              },
+              {
+                "code": "unknown-property",
+                "path": "$",
+                "segments": [],
+                "message": "Unknown property is not allowed: Property \"a\" does not match additional properties schema."
+              },
+              {
+                "code": "invalid-value",
+                "path": "$.a",
+                "segments": ["a"],
+                "message": "false: False boolean schema."
+              },
+              {
+                "code": "unknown-property",
+                "path": "$",
+                "segments": [],
+                "message": "Unknown property is not allowed: Property \"b\" does not match additional properties schema."
+              },
+              {
+                "code": "invalid-value",
+                "path": "$.b",
+                "segments": ["b"],
+                "message": "false: False boolean schema."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "/a",
+              "schemaPath": "#/properties/a/type",
+              "keyword": "type",
+              "params": {
+                "type": "integer"
+              },
+              "message": "must be integer"
+            },
+            {
+              "instancePath": "/b",
+              "schemaPath": "#/properties/b/type",
+              "keyword": "type",
+              "params": {
+                "type": "integer"
+              },
+              "message": "must be integer"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-type",
+                "path": "$.a",
+                "segments": ["a"],
+                "message": "Value does not match schema type",
+                "expected": "object",
+                "actual": "candidate-value"
+              },
+              {
+                "code": "invalid-type",
+                "path": "$.b",
+                "segments": ["b"],
+                "message": "Value does not match schema type",
+                "expected": "object",
+                "actual": "candidate-value"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "shared-reference",
+      "category": "graph-safety",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "sparse-array",
+      "category": "graph-safety",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$[0]",
+            "segments": [0],
+            "message": "Array item must be present"
+          }
+        ]
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$[0]",
+              "segments": [0],
+              "message": "Array item must be present"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$[0]",
+                "segments": [0],
+                "message": "Array item must be present"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$[0]",
+              "segments": [0],
+              "message": "Array item must be present"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$[0]",
+                "segments": [0],
+                "message": "Array item must be present"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$[0]",
+              "segments": [0],
+              "message": "Array item must be present"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$[0]",
+                "segments": [0],
+                "message": "Array item must be present"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "cyclic-value",
+      "category": "graph-safety",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-value",
+            "path": "$.self",
+            "segments": ["self"],
+            "message": "Configuration values must not contain cycles"
+          }
+        ]
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$.self",
+              "segments": ["self"],
+              "message": "Configuration values must not contain cycles"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$.self",
+                "segments": ["self"],
+                "message": "Configuration values must not contain cycles"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$.self",
+              "segments": ["self"],
+              "message": "Configuration values must not contain cycles"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$.self",
+                "segments": ["self"],
+                "message": "Configuration values must not contain cycles"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-value",
+              "path": "$.self",
+              "segments": ["self"],
+              "message": "Configuration values must not contain cycles"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-value",
+                "path": "$.self",
+                "segments": ["self"],
+                "message": "Configuration values must not contain cycles"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "cyclic-schema",
+      "category": "graph-safety",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-schema",
+            "path": "$",
+            "segments": [],
+            "message": "Schema must not contain cycles"
+          }
+        ]
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-schema",
+              "path": "$",
+              "segments": [],
+              "message": "Schema must not contain cycles"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Schema must not contain cycles"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-schema",
+              "path": "$",
+              "segments": [],
+              "message": "Schema must not contain cycles"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Schema must not contain cycles"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-schema",
+              "path": "$",
+              "segments": [],
+              "message": "Schema must not contain cycles"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Schema must not contain cycles"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "depth-5000",
+      "category": "graph-safety",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["RangeError: Maximum call stack size exceeded"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "RangeError: Maximum call stack size exceeded"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "RangeError: Maximum call stack size exceeded"
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["RangeError: Maximum call stack size exceeded"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "RangeError: Maximum call stack size exceeded"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "RangeError: Maximum call stack size exceeded"
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "composition-admission",
+      "category": "composition",
+      "admitted": false,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "invalid-schema",
+            "path": "$",
+            "segments": [],
+            "message": "Unsupported composition keyword(s): oneOf"
+          }
+        ]
+      },
+      "owner": "weaver-profile-admission",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-schema",
+              "path": "$",
+              "segments": [],
+              "message": "Unsupported composition keyword(s): oneOf"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Unsupported composition keyword(s): oneOf"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-schema",
+              "path": "$",
+              "segments": [],
+              "message": "Unsupported composition keyword(s): oneOf"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Unsupported composition keyword(s): oneOf"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "invalid-schema",
+              "path": "$",
+              "segments": [],
+              "message": "Unsupported composition keyword(s): oneOf"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Unsupported composition keyword(s): oneOf"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "dynamic-unseen-schema",
+      "category": "dynamic-registration",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "engine",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone cannot register unseen runtime schemas"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone cannot register unseen runtime schemas"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone cannot register unseen runtime schemas"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "total": 64,
+      "parity": 64,
+      "admittedTotal": 63,
+      "admittedParity": 63,
+      "throws": 0,
+      "eligible": true,
+      "failures": []
+    },
+    "cfworker": {
+      "total": 64,
+      "parity": 53,
+      "admittedTotal": 63,
+      "admittedParity": 52,
+      "throws": 2,
+      "eligible": false,
+      "failures": [
+        "required-effective",
+        "closed-default",
+        "additional-typed-invalid",
+        "pattern-properties-overlap-invalid",
+        "array-items-invalid",
+        "unique-items",
+        "default-partial",
+        "inherited-value-member",
+        "mutation-invalid",
+        "deterministic-error-order",
+        "depth-5000"
+      ]
+    },
+    "ajv-runtime": {
+      "total": 64,
+      "parity": 60,
+      "admittedTotal": 63,
+      "admittedParity": 59,
+      "throws": 2,
+      "eligible": false,
+      "failures": [
+        "multiple-decimal",
+        "multiple-invalid-schema",
+        "unique-items",
+        "inherited-value-member",
+        "depth-5000"
+      ]
+    },
+    "ajv-standalone": {
+      "total": 64,
+      "parity": 3,
+      "admittedTotal": 63,
+      "admittedParity": 2,
+      "throws": 64,
+      "eligible": false,
+      "failures": [
+        "primitive-null",
+        "primitive-boolean",
+        "primitive-string",
+        "primitive-number",
+        "primitive-integer",
+        "primitive-union",
+        "type-invalid",
+        "object-valid",
+        "required-effective",
+        "required-partial",
+        "closed-default",
+        "additional-true",
+        "additional-typed",
+        "additional-typed-invalid",
+        "pattern-properties-overlap",
+        "pattern-properties-overlap-invalid",
+        "array-items",
+        "array-items-invalid",
+        "tuple-items",
+        "const",
+        "const-invalid",
+        "enum",
+        "enum-invalid",
+        "pattern",
+        "pattern-invalid",
+        "unicode-length",
+        "min-length",
+        "max-length",
+        "numeric-bounds",
+        "minimum",
+        "maximum",
+        "exclusive-minimum",
+        "exclusive-maximum",
+        "multiple-decimal",
+        "multiple-decimal-003",
+        "multiple-scientific",
+        "multiple-nonmultiple",
+        "multiple-invalid-schema",
+        "array-cardinality",
+        "min-items",
+        "max-items",
+        "unique-items",
+        "object-cardinality",
+        "min-properties",
+        "min-properties-partial",
+        "max-properties",
+        "root-patch",
+        "member-patch",
+        "member-patch-base",
+        "default-effective",
+        "default-partial",
+        "required-default-effective",
+        "prototype-own",
+        "inherited-value-member",
+        "mutation-valid",
+        "mutation-invalid",
+        "deterministic-error-order",
+        "shared-reference",
+        "sparse-array",
+        "cyclic-value",
+        "cyclic-schema",
+        "depth-5000",
+        "dynamic-unseen-schema"
+      ]
+    }
+  }
+}

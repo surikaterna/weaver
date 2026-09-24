@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "seed": 1592636971,
+  "nodeFlags": [],
+  "configuration": {
+    "compile": {
+      "warmups": 20,
+      "samples": 100,
+      "freshEngine": true
+    },
+    "hotSmallRepresentative": {
+      "warmupBatches": 5,
+      "samples": 30,
+      "operationsPerSample": 1000
+    },
+    "hotLargeDepth": {
+      "warmupBatches": 5,
+      "samples": 30,
+      "operationsPerSample": 100
+    },
+    "adapterOrder": ["baseline", "cfworker", "ajv-runtime", "ajv-standalone"]
+  },
+  "series": [],
+  "skipped": {
+    "cfworker": {
+      "eligible": false,
+      "reason": "correctness/security hard-gate failures: required-effective, closed-default, additional-typed-invalid, pattern-properties-overlap-invalid, array-items-invalid, unique-items, default-partial, inherited-value-member, mutation-invalid, deterministic-error-order, depth-5000"
+    },
+    "ajv-runtime": {
+      "eligible": false,
+      "reason": "correctness/security hard-gate failures: multiple-decimal, multiple-invalid-schema, unique-items, inherited-value-member, depth-5000"
+    },
+    "ajv-standalone": {
+      "eligible": false,
+      "reason": "correctness/security hard-gate failures: primitive-null, primitive-boolean, primitive-string, primitive-number, primitive-integer, primitive-union, type-invalid, object-valid, required-effective, required-partial, closed-default, additional-true, additional-typed, additional-typed-invalid, pattern-properties-overlap, pattern-properties-overlap-invalid, array-items, array-items-invalid, tuple-items, const, const-invalid, enum, enum-invalid, pattern, pattern-invalid, unicode-length, min-length, max-length, numeric-bounds, minimum, maximum, exclusive-minimum, exclusive-maximum, multiple-decimal, multiple-decimal-003, multiple-scientific, multiple-nonmultiple, multiple-invalid-schema, array-cardinality, min-items, max-items, unique-items, object-cardinality, min-properties, min-properties-partial, max-properties, root-patch, member-patch, member-patch-base, default-effective, default-partial, required-default-effective, prototype-own, inherited-value-member, mutation-valid, mutation-invalid, deterministic-error-order, shared-reference, sparse-array, cyclic-value, cyclic-schema, depth-5000, dynamic-unseen-schema"
+    }
+  },
+  "gatePolicy": "Performance is intentionally not measured after a correctness/security hard-gate failure.",
+  "bundleEvidenceLoaded": true
+}

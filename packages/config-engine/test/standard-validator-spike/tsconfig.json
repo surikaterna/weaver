@@ -1,0 +1,11 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "../../../..",
+    "paths": {
+      "@weaver-conf/config-types": ["packages/config-types/src/index.ts"]
+    },
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"]
+}
