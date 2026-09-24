@@ -71,36 +71,35 @@ await writeJson("manifest.json", manifest);
 formatResults(["manifest.json"]);
 
 async function dependencyEvidence(): Promise<unknown> {
-  const packages = await Promise.all([
-    packageEvidence(
-      "@cfworker/json-schema",
-      "4.1.1",
-      "sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==",
-      [],
-    ),
-    packageEvidence(
-      "ajv",
-      "8.20.0",
-      "sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA==",
-      [
-        "fast-deep-equal@3.1.3",
-        "fast-uri@3.1.8",
-        "json-schema-traverse@1.0.0",
-        "require-from-string@2.0.2",
-      ],
-    ),
-    packageEvidence(
-      "esbuild",
-      "0.28.2",
-      "sha512-HKVLS8dvII+xoKW9kmqxbRKrnWEXfJJr/FZhhJmiqIB0e053QNYFqOBouTMO/k5sID4MvCiUCvv8b9M4h32wIA==",
-      ["@esbuild/linux-x64@0.28.2"],
-    ),
-  ]);
   return {
     schemaVersion: 1,
     directCount: 3,
     candidateRuntimeClosure: { cfworker: 1, ajv: 5, esbuildTooling: 2 },
-    packages,
+    packages: await Promise.all([
+      packageEvidence(
+        "@cfworker/json-schema",
+        "4.1.1",
+        "sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==",
+        [],
+      ),
+      packageEvidence(
+        "ajv",
+        "8.20.0",
+        "sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA==",
+        [
+          "fast-deep-equal@3.1.3",
+          "fast-uri@3.1.8",
+          "json-schema-traverse@1.0.0",
+          "require-from-string@2.0.2",
+        ],
+      ),
+      packageEvidence(
+        "esbuild",
+        "0.28.2",
+        "sha512-HKVLS8dvII+xoKW9kmqxbRKrnWEXfJJr/FZhhJmiqIB0e053QNYFqOBouTMO/k5sID4MvCiUCvv8b9M4h32wIA==",
+        ["@esbuild/linux-x64@0.28.2"],
+      ),
+    ]),
     licenses: {
       MIT: [
         "@cfworker/json-schema",

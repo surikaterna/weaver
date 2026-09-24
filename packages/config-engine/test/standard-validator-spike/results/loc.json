@@ -44,14 +44,14 @@
   },
   "bounds": {
     "handwrittenFiles": 18,
-    "handwrittenNonblankLoc": 2480,
+    "handwrittenNonblankLoc": 2479,
     "investigate": {
       "files": 18,
-      "loc": 2550
+      "loc": 2485
     },
     "stop": {
       "files": 18,
-      "loc": 2600
+      "loc": 2500
     },
     "adapterCeiling": 250,
     "sharedLayerCeiling": 500

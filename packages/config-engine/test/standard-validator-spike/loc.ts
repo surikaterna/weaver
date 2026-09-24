@@ -66,7 +66,7 @@ const adapterMaximum = Math.max(
   spike.adapterAjvRuntime ?? 0,
   spike.adapterAjvStandalone ?? 0,
 );
-if (handwrittenFiles.length > 18 || handwrittenLoc > 2_600)
+if (handwrittenFiles.length > 18 || handwrittenLoc > 2_500)
   throw new Error("Spike stop bound exceeded");
 if (adapterMaximum > 250 || sharedNew > 500)
   throw new Error("Adapter/shared-layer LOC ceiling exceeded");
@@ -84,8 +84,8 @@ const artifact = {
   bounds: {
     handwrittenFiles: handwrittenFiles.length,
     handwrittenNonblankLoc: handwrittenLoc,
-    investigate: { files: 18, loc: 2_550 },
-    stop: { files: 18, loc: 2_600 },
+    investigate: { files: 18, loc: 2_485 },
+    stop: { files: 18, loc: 2_500 },
     adapterCeiling: 250,
     sharedLayerCeiling: 500,
   },
