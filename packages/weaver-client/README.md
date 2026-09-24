@@ -126,7 +126,7 @@ const productionClient = await createWeaverClient({
 - `client.registerSchema(request)` — registers a service or fragment JSON Schema request
 - `createHttpTransport(options)` and `createLocalTransport(options)` — provide HTTP or in-memory transport
 - `createFileSystemPersistence(options)` and `createIndexedDbPersistence(options)` — provide offline cache persistence
-- `client.close()` — releases subscriptions, monitors, persistence, and transport resources
+- `client.close()` — unsubscribes, disposes the staleness monitor, and closes the transport
 
 ## License
 

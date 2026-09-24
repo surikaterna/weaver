@@ -74,7 +74,7 @@ import { createFileSystemPersistence } from "@weaver-conf/weaver-client";
 
 const client = await createWeaverClient({
   transport: createHttpTransport({ baseUrl: "http://weaver-server:3399" }),
-  persistence: createFileSystemPersistence({ dir: "./.config-cache" }),
+  persistence: createFileSystemPersistence({ directory: "./.config-cache" }),
   schemas: true,
 });
 ```
