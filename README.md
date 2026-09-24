@@ -1,41 +1,75 @@
 # 🧶 Weaver
 
-> Layered configuration management for TypeScript — nested JSON, typed namespaces, hierarchical scopes.
+> Layered configuration management for TypeScript — nested JSON, compile-time typed views, and hierarchical scopes.
 
 ## Features
 
-- **Typed namespaces** — `defineNamespace()` with Zod schemas for compile-time and runtime safety
-- **Nested JSON storage model** — canonical nested objects, resolved via `deepGet`/`deepSet`/`deepMerge`
+- **Typed client views** — generic namespace and instance access without a second runtime schema
+- **Nested JSON storage model** — canonical nested objects resolved with bracket-aware storage keys
 - **Hierarchical scopes** — region → tenant → user resolution via scope stacks
-- **Schema governance** — ceiling enforcement, change policies, one-way ratchets
+- **Schema governance** — JSON Schema validation, ceiling enforcement, and change policies
 - **Offline-first sync** — conflict resolution with LWW fallback and queue management
 - **Multiple transports** — HTTP/SSE or SCOMP (multiplexed RPC)
 - **Layered storage backends** — file system, Git, MongoDB, in-memory, env-overlay
-- **Secret management** — provider abstraction with caching (e.g. Azure Key Vault)
+- **Secret management** — provider abstraction with caching (for example, Azure Key Vault)
 
 ## Quick Start
 
-```ts
-import { createWeaverClient, createHttpTransport, defineNamespace } from "@weaver-conf/weaver-client";
-import { z } from "zod";
+Register the service's JSON Schema before schema-enabled consumers start:
 
-// Define a typed namespace
-const uiConfig = defineNamespace("ui", {
-  theme: z.enum(["light", "dark"]),
-  density: z.enum(["comfortable", "compact"]),
-  sidebarOpen: z.boolean(),
-});
+```typescript
+import type {
+  ConfigurationPropertySchema,
+  SchemaRegistrationRequest,
+} from "@weaver-conf/config-types";
+import {
+  createHttpTransport,
+  createWeaverClient,
+} from "@weaver-conf/weaver-client";
 
-// Create client with HTTP transport
-const client = await createWeaverClient({
+const schema = {
+  type: "object",
+  required: ["theme"],
+  properties: {
+    theme: { type: "string", enum: ["light", "dark"] },
+    sidebarOpen: { type: "boolean" },
+  },
+  additionalProperties: false,
+} satisfies ConfigurationPropertySchema;
+
+const request: SchemaRegistrationRequest = {
+  serviceId: "my-service",
+  environment: "default",
+  owner: { name: "My Service", contact: "team@example.com" },
+  schema,
+  fragmentSlots: [],
+};
+
+const registrationClient = await createWeaverClient({
   transport: createHttpTransport({ baseUrl: "http://localhost:3000/config" }),
 });
+await registrationClient.registerSchema(request);
+await registrationClient.close();
 
-// Get a typed namespace client
-const ui = client.namespace(uiConfig);
-const theme = ui.get("theme"); // type: "light" | "dark" | undefined
-await ui.set("theme", "dark"); // type-checked!
+interface MyConfig {
+  theme: "light" | "dark";
+  sidebarOpen: boolean;
+}
+
+const client = await createWeaverClient({
+  transport: createHttpTransport({ baseUrl: "http://localhost:3000/config" }),
+  schemas: true,
+});
+const config = client.namespace<MyConfig>("my-service");
+const theme = config.get("theme"); // "light" | "dark" | undefined
+await config.set("theme", "dark");
 ```
+
+`ConfigurationPropertySchema` is Weaver's sole runtime schema model. Generic client types are erased compile-time assertions: they do not validate or parse values, and server validation remains authoritative. Write the interfaces by hand or generate them with external tooling; Weaver ships no type generator or Zod adapter for this flow.
+
+Registration uses canonical slash anchors. The request above owns `/my-service`; a fragment can own an anchor such as `/my-service/plugins/analytics`. Client reads and writes instead use dotted or bracket-aware storage keys such as `my-service.theme` and `my-service[feature.flag]`. Slash anchors are not accepted as client storage-key aliases.
+
+`schemas: true` loads the `default` schema environment for client preflight validation and metadata. Use `schemas: { environment: "production" }` to select the `production` schema environment.
 
 ## Architecture
 
@@ -52,53 +86,27 @@ Weaver resolves configuration by merging layers bottom-to-top across hierarchica
   Deep merge: objects recurse, arrays replace, null clears.
 ```
 
-Configuration is stored as **nested JSON objects** (not flat dot-paths). The resolution engine uses `deepGet`/`deepSet`/`deepMerge` to compose values across layers and scopes. Clients access config through typed namespaces with Zod validation.
+Configuration is stored as nested JSON objects. The resolution engine composes values across layers and scopes, while clients address members through storage keys.
 
 ## Packages
 
 | Package | Description |
 | --- | --- |
-| [`@weaver-conf/config-types`](./packages/config-types) | Core types, `defineWeaver()` builder, `Layers.*` factories, Zod schemas |
-| [`@weaver-conf/config-engine`](./packages/config-engine) | Resolution engine: `deepGet`, `deepSet`, `deepMerge`, ceiling enforcement |
-| [`@weaver-conf/config-runtime`](./packages/config-runtime) | Pure state container: in-memory state machine, snapshot management |
-| [`@weaver-conf/config-sync`](./packages/config-sync) | Offline-first sync orchestrator with conflict resolution (LWW fallback) |
-| [`@weaver-conf/config-secrets`](./packages/config-secrets) | SecretProvider, SecretCache, SecretResolutionService |
-| [`@weaver-conf/config-policy`](./packages/config-policy) | Change policy evaluation, validation, one-way ratchet rules |
-| [`@weaver-conf/config-sessions`](./packages/config-sessions) | Override session provider for time-limited emergency overrides |
-| [`@weaver-conf/storage-providers`](./packages/storage-providers) | Storage provider abstractions + implementations (FS, Git, MongoDB, memory, env-overlay) |
-| [`@weaver-conf/weaver-client`](./packages/weaver-client) | Unified client SDK: `defineNamespace`, schema validation, offline boot |
-| [`@weaver-conf/weaver-server`](./packages/weaver-server) | Server: REST adapter, SSE streaming, SCOMP transport, schema registry |
-
-## Key Concepts
-
-### Layer Types
-
-| Type | Purpose | Example |
-| --- | --- | --- |
-| **Static** | Immutable defaults loaded at startup | Platform defaults, app defaults |
-| **Dynamic** | Mutable overrides scoped to a context | Tenant/org configuration |
-| **Personal** | User-specific preferences | Theme, locale, layout |
-| **Ephemeral** | Temporary overrides with automatic expiry | Emergency sessions, feature flags |
-
-### Resolution & Deep Merge
-
-The engine walks the layer stack top-to-bottom and deep-merges values. Objects recurse into nested keys, arrays replace wholesale, and `null` clears a key (removing the override so lower layers show through).
-
-### Schema Governance
-
-Each configuration property can declare schema metadata:
-
-- **`maxOverrideLayer`** — ceiling that prevents higher layers from overriding
-- **`changePolicy`** — rules like one-way ratchets constraining value evolution
-- **`visibility`** — controls which roles or contexts can read a key
-- **`sessionMode`** — whether a key participates in override sessions
-
-### Typed Namespaces
-
-`defineNamespace()` creates a typed accessor bound to a Zod shape. The client validates reads and writes at runtime while providing full TypeScript inference for keys and value types.
+| [`@weaver-conf/config-types`](./packages/config-types) | Core types, runtime contracts, and schema registration types |
+| [`@weaver-conf/config-engine`](./packages/config-engine) | Resolution engine, validation, and deep object operations |
+| [`@weaver-conf/config-runtime`](./packages/config-runtime) | Pure state container and snapshot management |
+| [`@weaver-conf/config-sync`](./packages/config-sync) | Offline-first sync orchestrator with conflict resolution |
+| [`@weaver-conf/config-secrets`](./packages/config-secrets) | Secret provider abstraction and caching |
+| [`@weaver-conf/config-policy`](./packages/config-policy) | Change policy evaluation and one-way ratchet rules |
+| [`@weaver-conf/config-sessions`](./packages/config-sessions) | Time-limited override sessions |
+| [`@weaver-conf/storage-providers`](./packages/storage-providers) | File, Git, MongoDB, memory, and environment-overlay storage |
+| [`@weaver-conf/weaver-client`](./packages/weaver-client) | Unified client SDK with generic views, validation, and offline boot |
+| [`@weaver-conf/weaver-server`](./packages/weaver-server) | REST/SSE and SCOMP server with the authoritative schema registry |
 
 ## Guides
 
+- [Browser Client](./docs/guides/browser-client.md)
+- [Backend Client](./docs/guides/backend-client.md)
 - [Server Quickstart](./docs/guides/server-quickstart.md)
 - [Bootstrap Config Repository](./docs/guides/bootstrap-config-repo.md)
 
