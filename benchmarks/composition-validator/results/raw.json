@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "seed": "0xD6615EED",
+  "methodology": {
+    "processIsolation": "one case/run per child",
+    "gc": "before each measured sample",
+    "calibration": "100-250ms and >=100 operations",
+    "warmup": ">=5 batches and >=2 seconds",
+    "runs": 3,
+    "samplesPerRun": 25,
+    "order": "paired ABBAAB; seeded case shuffle",
+    "stability": "reject set when any run CV or first/last-five median drift >5%; at most two replacements"
+  },
+  "thresholds": {
+    "ordinary": {
+      "geomeanPass": 1.1,
+      "p50Pass": 1.15,
+      "p95Pass": 1.2,
+      "geomeanFail": 1.2,
+      "p50Fail": 1.3,
+      "p95Fail": 1.4
+    },
+    "scaling": {
+      "pass": 1.5,
+      "fail": 2.5
+    },
+    "server": {
+      "pass": 2,
+      "fail": 4
+    },
+    "memory": {
+      "investigatePostGcBytes": 134217728,
+      "failRssBytes": 1073741824
+    }
+  },
+  "sources": {
+    "base": {
+      "root": "/home/sprawl/projects/weaver/worktrees/pr152-b-write-validation",
+      "sha": "4fe70d70762460d6656641bfa775121c4ffae058",
+      "tree": "6e4bae87cb18f314580dc2f15802926d80b0bd59",
+      "packagesTree": "311d2073aae0e764ccd69b00d21f34f51b5c8cc1",
+      "clean": true
+    },
+    "tip": {
+      "root": "/home/sprawl/projects/weaver/worktrees/bound-schema-registration",
+      "sha": "e2e79332572261ec526475f40f2ebf08a7f17cdd",
+      "tree": "92db6672620a61efc8e57b6c129ff292605ef928",
+      "packagesTree": "670fe3413a87666349492e417b7266016d8fddf3",
+      "clean": true
+    }
+  },
+  "lockfileHash": "9851bf580c5e8bdefa5f0e475219308fe20f8b3fd8d49dcd41d6b00bb5f29e8e",
+  "fixtureManifestHash": "34416e2f5b0b14e3202bb901f2461b92acf289944577e1ceaaa188084357d485",
+  "environment": {
+    "capturedAt": "2026-09-24T20:43:19.130Z",
+    "platform": "linux",
+    "arch": "x64",
+    "release": "7.1.9-arch1-2",
+    "hostname": "andreas26",
+    "node": "v24.21.0",
+    "v8": "13.6.233.17-node.53",
+    "pnpm": "11.13.0",
+    "turbo": "2.9.6",
+    "cpu": {
+      "model": "AMD Ryzen 7 9800X3D 8-Core Processor",
+      "speedMHz": 5061,
+      "logicalCount": 16,
+      "selectedCore": "0",
+      "affinity": "pid 3708793's current affinity list: 0-15",
+      "topology": "0,8",
+      "cache": "98304K",
+      "governor": "performance",
+      "frequencyKHz": "5235488",
+      "boost": "1"
+    },
+    "memory": {
+      "total": 64934862848,
+      "free": 13756981248,
+      "swap": "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n/swap/swapfile                          file\t\t63415328\t0\t\t0\n/dev/zram0                              partition\t63412220\t32941836\t100"
+    },
+    "loadAverage": [1.62, 1.78, 1.7],
+    "nodeOptions": "--max-old-space-size=1024",
+    "container": null,
+    "thermal": null,
+    "acOnline": null,
+    "commandLine": [
+      "/home/sprawl/.local/share/mise/installs/node/24.21.0/bin/node",
+      "/home/sprawl/projects/weaver/worktrees/composition-validator-benchmark-rerun/benchmarks/composition-validator/runner.mjs",
+      "--base",
+      "/home/sprawl/projects/weaver/worktrees/pr152-b-write-validation",
+      "--tip",
+      "/home/sprawl/projects/weaver/worktrees/bound-schema-registration",
+      "--seed",
+      "0xD6615EED",
+      "--core",
+      "auto",
+      "--output",
+      "benchmarks/composition-validator/results/raw.json",
+      "--base-install-ms",
+      "211",
+      "--tip-install-ms",
+      "213",
+      "--base-engine-build-ms",
+      "3263",
+      "--tip-engine-build-ms",
+      "3269",
+      "--base-server-build-ms",
+      "6469",
+      "--tip-server-build-ms",
+      "6408"
+    ]
+  },
+  "buildEvidence": {
+    "commands": [
+      "pnpm install --frozen-lockfile",
+      "pnpm exec turbo run build --filter=@weaver-conf/config-engine... --force --output-logs=errors-only",
+      "pnpm exec turbo run build --filter=@weaver-conf/weaver-server... --force --output-logs=errors-only"
+    ],
+    "milliseconds": {
+      "baseInstall": 211,
+      "tipInstall": 213,
+      "baseEngine": 3263,
+      "tipEngine": 3269,
+      "baseServer": 6469,
+      "tipServer": 6408
+    }
+  },
+  "sets": [],
+  "acceptedSet": null,
+  "correctnessFailures": [],
+  "stop": {
+    "matrixComplete": false,
+    "verdict": "FAIL",
+    "case": "patch:shared:20",
+    "variant": "tip",
+    "phase": "child setup or measurement",
+    "reason": "patch:shared:20/tip exited 1",
+    "observedAt": "2026-09-24T21:03:53.246Z",
+    "stableRuns": 0,
+    "completedSamples": 5100
+  }
+}
