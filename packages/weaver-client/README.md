@@ -40,10 +40,10 @@ const request: SchemaRegistrationRequest = {
   fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }],
 };
 
-const registrationClient = await createWeaverClient({
+const client = await createWeaverClient({
   transport: createHttpTransport({ baseUrl: "http://localhost:3399" }),
 });
-await registrationClient.registerSchema(request);
+await client.registerSchema(request);
 ```
 
 The service request derives the canonical registration anchor `/my-service`. A plugin can register its fragment directly too:
@@ -62,8 +62,8 @@ const pluginRequest: SchemaRegistrationRequest = {
   },
 };
 
-await registrationClient.registerSchema(pluginRequest);
-await registrationClient.close();
+await client.registerSchema(pluginRequest);
+await client.close();
 ```
 
 That fragment's canonical anchor is `/my-service/plugins/analytics`. Canonical slash paths belong to registration. Client access uses storage prefixes and member keys instead: `my-service`, `my-service.enabled`, `my-service.plugins.analytics`, or bracket notation such as `my-service[feature.flag]` for one segment containing a literal dot. Do not pass a slash anchor to `namespace()`, `get()`, or `set()`.

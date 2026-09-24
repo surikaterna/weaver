@@ -41,16 +41,16 @@ const request: SchemaRegistrationRequest = {
   fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }],
 };
 
-const registrationClient = await createWeaverClient({
+const client = await createWeaverClient({
   transport: createHttpTransport({ baseUrl: "http://weaver-server:3399" }),
 });
-await registrationClient.registerSchema(request);
+await client.registerSchema(request);
 ```
 
 This request derives the canonical registration anchor `/billing-service`. A plugin provider can register a fragment at the declared slot:
 
 ```typescript
-await registrationClient.registerSchema({
+await client.registerSchema({
   serviceId: "billing-service",
   providerId: "fraud-check",
   slotPath: "/plugins",
@@ -62,7 +62,7 @@ await registrationClient.registerSchema({
     additionalProperties: false,
   },
 });
-await registrationClient.close();
+await client.close();
 ```
 
 The fragment anchor is `/billing-service/plugins/fraud-check`. These canonical slash paths are registration identities. Reads and writes use storage keys such as `billing-service.retryLimit`, `billing-service.plugins.fraud-check.threshold`, or `billing-service[feature.flag]` for a literal-dot segment. Client access APIs do not accept slash paths as aliases.
