@@ -48,6 +48,8 @@ function shadowChild(
   value: unknown,
   pending: ShadowFrame[],
 ): unknown {
+  if (value === undefined && schema?.default !== undefined)
+    return cloneJsonGraph(schema.default);
   if (!isContainer(value)) return value;
   const target = emptyContainer(value);
   pending.push({ schema: schema ?? openSchema(value), source: value, target });

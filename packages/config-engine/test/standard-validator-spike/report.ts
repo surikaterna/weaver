@@ -203,11 +203,9 @@ function renderReport(
   loc: unknown,
   artifactHashes: Readonly<Record<string, string>>,
 ): string {
-  const { m, summaries, b, projections, bounds } = reportInputs(
-    matrix,
-    bundle,
-    loc,
-  );
+  const inputs = reportInputs(matrix, bundle, loc);
+  const { m, summaries, b, projections, bounds } = inputs;
+  const hashes = renderArtifactHashes(artifactHashes);
   return (
     `# RETAIN — no qualifying standard validator\n\n` +
     `Neither candidate clears the frozen correctness/security gates. Keep the verified Weaver validator at base \`4fe70d70762460d6656641bfa775121c4ffae058\`; do not implement a production replacement from this spike.\n\n` +
@@ -234,20 +232,26 @@ function renderReport(
     `- Ajv standalone validates one build-time fixture under a no-code-generation VM, but the dynamic unseen-schema row fails by construction.\n` +
     `- Composition capability is separately proven for oneOf without admitting composition into Weaver's current profile.\n\n` +
     `## Ownership boundary\n\n` +
-    `Candidates were credited only for ordinary keyword evaluation. Weaver-retained layers are profile/mode lowering, closed-default policy, effective default shadow, patch/member resolution, schema/value graph and sparse checks, regex policy, exact-decimal policy, x-weaver policy, and deterministic error normalization. Raw candidate errors remain beside normalized results.\n\n` +
+    `Candidates were credited only for ordinary keyword evaluation. Weaver-retained layers are profile/mode lowering, closed-default policy, effective default shadow, patch/member resolution, schema/value graph and sparse checks, regex policy, exact-decimal policy, x-weaver policy, and deterministic error normalization. Lowering preserves absent, boolean, and schema-valued additionalProperties; the explicit-false row rejects an unknown own member across the baseline and applicable candidates. Raw candidate errors remain beside normalized results.\n\n` +
     `## Performance, bundles, dependencies, and LOC\n\n` +
     `The benchmark configuration discloses seed 1592636971, 20/100 compile warmup/samples and 5/30 hot batches, but all candidates are marked ineligible before timing. Bundle sizes and metafile contributions are in \`results/bundle.json\`. Dependency closure is 1 package for cfworker and 5 for Ajv; all licenses are MIT or BSD-3-Clause, with no attributable high/critical advisory. LOC projections are ${projectionText(projections)}.\n\n` +
     `## Defaults, mutation, and adversarial evidence\n\n` +
-    `Ajv mutation options and equivalent behavior are disabled. Annotation-only partial runs do not materialize defaults. The candidate-neutral iterative effective shadow supplies only Weaver-consulted defaults while descriptor/identity checks preserve originals. Sparse arrays and cycles are rejected by the retained B preflight. Child probes run with 5s and 512 MiB limits.\n\n` +
+    `Ajv mutation options and equivalent behavior are disabled. Annotation-only partial runs do not materialize defaults. The candidate-neutral iterative effective shadow supplies Weaver-consulted absent and own-undefined child defaults while descriptor/identity checks preserve originals. Sparse arrays and cycles are rejected by the retained B preflight. Child probes run with 5s and 512 MiB limits.\n\n` +
     `## Limitations\n\n` +
     `This is a bounded decision spike, not a full JSON Schema Test Suite run. The shared corpus has ${String(m.fixtureCount)} explicit rows and compares deterministic public validity/code/path/order while retaining full raw and normalized messages. Candidate error vocabularies do not always expose enough parameters for exact Weaver paths. Browser execution uses Node's VM with string/wasm generation disabled rather than a physical browser. Timing is intentionally absent after hard-gate failure.\n\n` +
     `## Bounds and test impact\n\n` +
-    `Handwritten scope is ${String(bounds.handwrittenFiles)} files / ${String(bounds.handwrittenNonblankLoc)} nonblank LOC: the 12-file/1800-LOC investigation marker was reached, but the 18-file/2500-LOC stop was not exceeded. Existing 73 config-engine and 24 server write-pipeline tests remain necessary because no candidate qualifies. No production source, existing test, public contract, changeset, or PR was changed.\n\n` +
-    `## Artifact SHA-256\n\n${Object.entries(artifactHashes)
-      .map(([name, hash]) => `- \`${name}\`: \`${hash}\``)
-      .join("\n")}\n\n` +
+    `Handwritten scope is ${String(bounds.handwrittenFiles)} files / ${String(bounds.handwrittenNonblankLoc)} nonblank LOC, within the 18-file limit and below the 2550-LOC investigation marker and 2600-LOC stop. Existing 73 config-engine and 24 server write-pipeline tests remain necessary because no candidate qualifies. Changeset status intentionally exits 1 with "Some packages have been changed but no changesets were found" because this non-mergeable test-only evidence lives under config-engine; no changeset is appropriate. No production source, existing test, public contract, changeset, or PR was changed.\n\n` +
+    `## Artifact SHA-256\n\n${hashes}\n\n` +
     `## Recommended production decision\n\nRetain B unchanged and unblock its existing release flow after independent audit of this evidence. If reconsidered later, investigate an iterative interpreter with richer structured errors; do not use Ajv runtime under Weaver's no-eval dynamic-registration requirement or standalone as a universal registry.\n`
   );
+}
+
+function renderArtifactHashes(
+  hashes: Readonly<Record<string, string>>,
+): string {
+  return Object.entries(hashes)
+    .map(([name, hash]) => `- \`${name}\`: \`${hash}\``)
+    .join("\n");
 }
 
 function reportInputs(matrix: unknown, bundle: unknown, loc: unknown) {

@@ -90,6 +90,10 @@ function copyAdditional(
   clones: WeakMap<object, Record<string, unknown>>,
 ): void {
   const child = frame.source.additionalProperties;
+  if (typeof child === "boolean") {
+    frame.target.additionalProperties = child;
+    return;
+  }
   if (typeof child === "object" && child !== null) {
     frame.target.additionalProperties = cloneChild(child, pending, clones);
   }

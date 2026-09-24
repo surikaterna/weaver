@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "fixtureCount": 64,
+  "fixtureCount": 66,
   "deterministicRuns": 100,
   "rows": [
     {
@@ -900,6 +900,138 @@
                 "code": "unknown-property",
                 "path": "$.other",
                 "segments": ["other"],
+                "message": "Unknown property is not allowed: must NOT have additional properties"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
+      "id": "additional-false",
+      "category": "additionalProperties",
+      "admitted": true,
+      "expected": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "unknown-property",
+            "path": "$.x",
+            "segments": ["x"],
+            "message": "Unknown property \"x\" is not allowed"
+          }
+        ]
+      },
+      "owner": "candidate-ordinary-keyword",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "code": "unknown-property",
+              "path": "$.x",
+              "segments": ["x"],
+              "message": "Unknown property \"x\" is not allowed"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "unknown-property",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "Unknown property \"x\" is not allowed"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": [
+            {
+              "instanceLocation": "#",
+              "keyword": "additionalProperties",
+              "keywordLocation": "#/additionalProperties",
+              "error": "Property \"x\" does not match additional properties schema."
+            },
+            {
+              "instanceLocation": "#/x",
+              "keyword": "false",
+              "keywordLocation": "#/x",
+              "error": "False boolean schema."
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "unknown-property",
+                "path": "$",
+                "segments": [],
+                "message": "Unknown property is not allowed: Property \"x\" does not match additional properties schema."
+              },
+              {
+                "code": "invalid-value",
+                "path": "$.x",
+                "segments": ["x"],
+                "message": "false: False boolean schema."
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": false,
+          "normalizedParity": true,
+          "raw": [
+            {
+              "instancePath": "",
+              "schemaPath": "#/additionalProperties",
+              "keyword": "additionalProperties",
+              "params": {
+                "additionalProperty": "x"
+              },
+              "message": "must NOT have additional properties"
+            }
+          ],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "unknown-property",
+                "path": "$.x",
+                "segments": ["x"],
                 "message": "Unknown property is not allowed: must NOT have additional properties"
               }
             ]
@@ -5034,6 +5166,74 @@
       ]
     },
     {
+      "id": "own-undefined-default-effective",
+      "category": "defaults",
+      "admitted": true,
+      "expected": {
+        "valid": true,
+        "errors": []
+      },
+      "owner": "weaver-retained-policy",
+      "actual": [
+        {
+          "adapter": "baseline",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "cfworker",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-runtime",
+          "valid": true,
+          "normalizedParity": true,
+          "raw": [],
+          "normalized": {
+            "valid": true,
+            "errors": []
+          },
+          "compileMs": 0,
+          "elapsedMs": 0
+        },
+        {
+          "adapter": "ajv-standalone",
+          "valid": false,
+          "normalizedParity": false,
+          "raw": ["Standalone requires build-time schema generation"],
+          "normalized": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "invalid-schema",
+                "path": "$",
+                "segments": [],
+                "message": "Standalone requires build-time schema generation"
+              }
+            ]
+          },
+          "compileMs": 0,
+          "elapsedMs": 0,
+          "threw": "Standalone requires build-time schema generation"
+        }
+      ]
+    },
+    {
       "id": "prototype-own",
       "category": "prototype-safety",
       "admitted": true,
@@ -6394,24 +6594,25 @@
   ],
   "summary": {
     "baseline": {
-      "total": 64,
-      "parity": 64,
-      "admittedTotal": 63,
-      "admittedParity": 63,
+      "total": 66,
+      "parity": 66,
+      "admittedTotal": 65,
+      "admittedParity": 65,
       "throws": 0,
       "eligible": true,
       "failures": []
     },
     "cfworker": {
-      "total": 64,
-      "parity": 53,
-      "admittedTotal": 63,
-      "admittedParity": 52,
+      "total": 66,
+      "parity": 54,
+      "admittedTotal": 65,
+      "admittedParity": 53,
       "throws": 2,
       "eligible": false,
       "failures": [
         "required-effective",
         "closed-default",
+        "additional-false",
         "additional-typed-invalid",
         "pattern-properties-overlap-invalid",
         "array-items-invalid",
@@ -6424,10 +6625,10 @@
       ]
     },
     "ajv-runtime": {
-      "total": 64,
-      "parity": 60,
-      "admittedTotal": 63,
-      "admittedParity": 59,
+      "total": 66,
+      "parity": 62,
+      "admittedTotal": 65,
+      "admittedParity": 61,
       "throws": 2,
       "eligible": false,
       "failures": [
@@ -6439,11 +6640,11 @@
       ]
     },
     "ajv-standalone": {
-      "total": 64,
+      "total": 66,
       "parity": 3,
-      "admittedTotal": 63,
+      "admittedTotal": 65,
       "admittedParity": 2,
-      "throws": 64,
+      "throws": 66,
       "eligible": false,
       "failures": [
         "primitive-null",
@@ -6457,6 +6658,7 @@
         "required-effective",
         "required-partial",
         "closed-default",
+        "additional-false",
         "additional-true",
         "additional-typed",
         "additional-typed-invalid",
@@ -6498,6 +6700,7 @@
         "default-effective",
         "default-partial",
         "required-default-effective",
+        "own-undefined-default-effective",
         "prototype-own",
         "inherited-value-member",
         "mutation-valid",

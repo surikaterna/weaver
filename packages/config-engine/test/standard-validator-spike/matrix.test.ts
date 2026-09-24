@@ -4,8 +4,10 @@ import { type Schema, Validator } from "@cfworker/json-schema";
 import Ajv from "ajv";
 import { schemaValidationResultSchema } from "../../src/schema-validation-schemas.js";
 import { createAjvRuntimeAdapter } from "./adapters/ajv-runtime.js";
+import { createBaselineAdapter } from "./adapters/baseline.js";
 import { createCfworkerAdapter } from "./adapters/cfworker.js";
 import { effectiveShadow } from "./defaults-shadow.js";
+import { lowerSchema } from "./lower-schema.js";
 import { buildMatrix } from "./run-matrix.js";
 
 test("shared matrix reproduces baseline and emits public result contracts", async () => {
@@ -46,6 +48,52 @@ test("effective defaults use a non-mutating shadow and partial mode does not", (
       .normalized.valid,
     true,
   );
+});
+
+test("lowering preserves additionalProperties forms and closed-object parity", () => {
+  const closed = { type: "object", additionalProperties: false } as const;
+  assert.equal(lowerSchema(closed, "partial").additionalProperties, false);
+  for (const adapter of [
+    createBaselineAdapter(),
+    createCfworkerAdapter(),
+    createAjvRuntimeAdapter(),
+  ]) {
+    const result = adapter.compile(closed, "partial").validate({ own: 1 });
+    assert.equal(result.normalized.valid, false, adapter.id);
+    assert.equal(
+      result.normalized.errors[0]?.code,
+      "unknown-property",
+      adapter.id,
+    );
+  }
+});
+
+test("own undefined members receive effective defaults without mutation", () => {
+  const schema = {
+    type: "object",
+    properties: { x: { type: "string", default: "ok" } },
+  } as const;
+  const value = { x: undefined };
+  const identity = value;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  assert.deepEqual(effectiveShadow(schema, value), { x: "ok" });
+  assert.equal(value, identity);
+  assert.equal(value.x, undefined);
+  assert.deepEqual(Object.getOwnPropertyDescriptors(value), descriptors);
+  for (const adapter of [
+    createBaselineAdapter(),
+    createCfworkerAdapter(),
+    createAjvRuntimeAdapter(),
+  ]) {
+    assert.equal(
+      adapter.compile(schema, "effective").validate(value).normalized.valid,
+      true,
+      adapter.id,
+    );
+    adapter.compile(schema, "partial").validate(value);
+    assert.equal(value.x, undefined, adapter.id);
+    assert.deepEqual(Object.getOwnPropertyDescriptors(value), descriptors);
+  }
 });
 
 test("candidate raw composition capability is separate from Weaver admission", () => {

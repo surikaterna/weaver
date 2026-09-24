@@ -19,39 +19,39 @@
       "adapterAjvRuntime": 148,
       "adapterAjvStandalone": 100,
       "normalization": 141,
-      "lowering": 151,
-      "defaultsShadow": 116,
+      "lowering": 155,
+      "defaultsShadow": 118,
       "preflightWrapper": 66
     },
-    "sharedRetainedLayerTotal": 474
+    "sharedRetainedLayerTotal": 480
   },
   "projections": {
     "cfworker": {
-      "projectedProductionLoc": 1545,
-      "netReductionLoc": -164,
-      "reductionPercent": -11.9
+      "projectedProductionLoc": 1551,
+      "netReductionLoc": -170,
+      "reductionPercent": -12.3
     },
     "ajv-runtime": {
-      "projectedProductionLoc": 1547,
-      "netReductionLoc": -166,
-      "reductionPercent": -12
+      "projectedProductionLoc": 1553,
+      "netReductionLoc": -172,
+      "reductionPercent": -12.5
     },
     "ajv-standalone": {
-      "projectedProductionLoc": 1499,
-      "netReductionLoc": -118,
-      "reductionPercent": -8.5
+      "projectedProductionLoc": 1505,
+      "netReductionLoc": -124,
+      "reductionPercent": -9
     }
   },
   "bounds": {
     "handwrittenFiles": 18,
-    "handwrittenNonblankLoc": 2485,
+    "handwrittenNonblankLoc": 2542,
     "investigate": {
-      "files": 12,
-      "loc": 1800
+      "files": 18,
+      "loc": 2550
     },
     "stop": {
       "files": 18,
-      "loc": 2500
+      "loc": 2600
     },
     "adapterCeiling": 250,
     "sharedLayerCeiling": 500

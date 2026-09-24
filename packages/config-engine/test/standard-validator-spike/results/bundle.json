@@ -123,14 +123,14 @@
     },
     "cfworker": {
       "esm": {
-        "minifiedBytes": 383123,
-        "gzipBytes": 80201,
-        "combinedBytes": 463324
+        "minifiedBytes": 383242,
+        "gzipBytes": 80230,
+        "combinedBytes": 463472
       },
       "iife": {
-        "minifiedBytes": 383516,
-        "gzipBytes": 80388,
-        "combinedBytes": 463904
+        "minifiedBytes": 383635,
+        "gzipBytes": 80397,
+        "combinedBytes": 464032
       },
       "nodeBuiltins": [],
       "evalTokens": [],
@@ -237,8 +237,8 @@
         "packages/config-engine/src/schema-validation-walk.ts": 2653,
         "packages/config-engine/src/schema-validation.ts": 879,
         "packages/config-engine/test/standard-validator-spike/adapters/cfworker.ts": 1663,
-        "packages/config-engine/test/standard-validator-spike/defaults-shadow.ts": 1363,
-        "packages/config-engine/test/standard-validator-spike/lower-schema.ts": 1761,
+        "packages/config-engine/test/standard-validator-spike/defaults-shadow.ts": 1419,
+        "packages/config-engine/test/standard-validator-spike/lower-schema.ts": 1824,
         "packages/config-engine/test/standard-validator-spike/normalize.ts": 1985,
         "packages/config-engine/test/standard-validator-spike/preflight.ts": 478,
         "packages/config-types/dist/chunk-AHMJZNA7.js": 639,
@@ -247,20 +247,20 @@
         "packages/config-types/dist/chunk-XGT5W7KA.js": 3784,
         "packages/config-types/dist/index.js": 2091
       },
-      "incrementalCombinedBytes": 35951,
+      "incrementalCombinedBytes": 36099,
       "thresholdBytes": 76800,
       "bundlePass": true
     },
     "ajv-runtime": {
       "esm": {
-        "minifiedBytes": 485520,
-        "gzipBytes": 112766,
-        "combinedBytes": 598286
+        "minifiedBytes": 485639,
+        "gzipBytes": 112796,
+        "combinedBytes": 598435
       },
       "iife": {
-        "minifiedBytes": 485623,
-        "gzipBytes": 112812,
-        "combinedBytes": 598435
+        "minifiedBytes": 485742,
+        "gzipBytes": 112822,
+        "combinedBytes": 598564
       },
       "nodeBuiltins": [],
       "evalTokens": ["new Function", "Function("],
@@ -426,8 +426,8 @@
         "packages/config-engine/src/schema-validation-walk.ts": 2656,
         "packages/config-engine/src/schema-validation.ts": 879,
         "packages/config-engine/test/standard-validator-spike/adapters/ajv-runtime.ts": 1777,
-        "packages/config-engine/test/standard-validator-spike/defaults-shadow.ts": 1363,
-        "packages/config-engine/test/standard-validator-spike/lower-schema.ts": 1761,
+        "packages/config-engine/test/standard-validator-spike/defaults-shadow.ts": 1419,
+        "packages/config-engine/test/standard-validator-spike/lower-schema.ts": 1824,
         "packages/config-engine/test/standard-validator-spike/normalize.ts": 1985,
         "packages/config-engine/test/standard-validator-spike/preflight.ts": 478,
         "packages/config-types/dist/chunk-AHMJZNA7.js": 639,
@@ -436,7 +436,7 @@
         "packages/config-types/dist/chunk-XGT5W7KA.js": 3784,
         "packages/config-types/dist/index.js": 2091
       },
-      "incrementalCombinedBytes": 170913,
+      "incrementalCombinedBytes": 171062,
       "thresholdBytes": 76800,
       "bundlePass": false
     },
