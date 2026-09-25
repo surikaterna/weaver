@@ -4,8 +4,8 @@ import {
   validateConfigurationPatch,
   validateEffectiveConfiguration,
   validatePartialConfiguration,
-} from "../src/schema-validation.js";
-import { schemaValidationResultSchema } from "../src/schema-validation-schemas.js";
+} from "../../src/validation/index.js";
+import { schemaValidationResultSchema } from "../../src/validation/schemas.js";
 
 const keywordCases = ["anyOf", "oneOf", "allOf"] as const;
 

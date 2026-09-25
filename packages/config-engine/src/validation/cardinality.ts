@@ -1,13 +1,13 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 
-import { deepEqual } from "./deep-equal";
+import { deepEqual } from "../deep-equal";
 import {
   addBoundedContextError,
   addContextError,
   appendValidationPath,
   type ValidationContext,
   type ValidationPath,
-} from "./schema-validation-support";
+} from "./support";
 
 export function validateObjectSize(
   schema: ConfigurationPropertySchema,

@@ -1,6 +1,7 @@
 // @weaver-conf/config-engine — Configuration resolution engine (iteration 1)
 
 // contract-derivation.ts — Package.json contract metadata extraction
+// biome-ignore assist/source/organizeImports: Preserve the existing public export order.
 export type {
   ContractMetadata,
   PackageJsonInput,
@@ -66,18 +67,18 @@ export type {
   SchemaValidationOptions,
   SchemaValidationPathSegment,
   SchemaValidationResult,
-} from "./schema-validation";
+} from "./validation/index";
 export {
   validateConfigurationPatch,
   validateEffectiveConfiguration,
   validatePartialConfiguration,
-} from "./schema-validation";
+} from "./validation/index";
 export {
   schemaValidationErrorCodeSchema,
   schemaValidationErrorSchema,
   schemaValidationPathSegmentSchema,
   schemaValidationResultSchema,
-} from "./schema-validation-schemas";
+} from "./validation/schemas";
 // scope.ts — Scope chain builder
 export type { BuildScopeChainResult, ScopeChainEntry } from "./scope";
 // utils — shared utilities (formerly @weaver-conf/storage-provider-core)
