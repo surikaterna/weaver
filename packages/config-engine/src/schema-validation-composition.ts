@@ -30,48 +30,48 @@ export function createCompositionMemo(): CompositionMemo {
   return new Map();
 }
 
-const SUPPORTED_TYPES = new Set([
-  "array",
-  "boolean",
-  "integer",
-  "null",
-  "number",
-  "object",
-  "string",
-]);
+export function hasComposition(schema: ConfigurationPropertySchema): boolean {
+  return (
+    Object.hasOwn(schema, "anyOf") ||
+    Object.hasOwn(schema, "oneOf") ||
+    Object.hasOwn(schema, "allOf") ||
+    Object.hasOwn(schema, "not")
+  );
+}
+
+export function getCompositionBranches(
+  schema: ConfigurationPropertySchema,
+  keyword: CompositionKeyword,
+): readonly ConfigurationPropertySchema[] {
+  if (keyword === "not") {
+    return schema.not === undefined ? [] : [schema.not];
+  }
+  const branches = schema[keyword];
+  return Array.isArray(branches) ? branches : [];
+}
 
 export function validateCompositionShape(
   schema: ConfigurationPropertySchema,
   path: ValidationErrorPath,
   context: ValidationContext,
+  supportsSchema: (value: unknown) => boolean,
 ): boolean {
   for (const keyword of COMPOSITION_KEYWORDS) {
     if (!Object.hasOwn(schema, keyword)) continue;
     const value = schema[keyword];
     const valid =
       keyword === "not"
-        ? validateNotShape(value, path, context)
-        : validateBranchArrayShape(keyword, value, path, context);
+        ? validateNotShape(value, path, context, supportsSchema)
+        : validateBranchArrayShape(
+            keyword,
+            value,
+            path,
+            context,
+            supportsSchema,
+          );
     if (!valid) return false;
   }
   return true;
-}
-
-export function getCompositionEntries(
-  schema: ConfigurationPropertySchema,
-): readonly CompositionEntry[] {
-  const entries: CompositionEntry[] = [];
-  for (const keyword of COMPOSITION_KEYWORDS) {
-    if (!Object.hasOwn(schema, keyword)) continue;
-    const value = schema[keyword];
-    if (keyword === "not") {
-      if (isSupportedSchema(value))
-        entries.push({ keyword, branches: [value] });
-    } else if (Array.isArray(value)) {
-      entries.push({ keyword, branches: value });
-    }
-  }
-  return entries;
 }
 
 export function addCompositionResult(
@@ -81,6 +81,10 @@ export function addCompositionResult(
   context: ValidationContext,
 ): void {
   if (compositionPassed(entry, matched)) return;
+  if (context.predicateOnly === true) {
+    context.failed = true;
+    return;
+  }
   addContextError(context, "invalid-value", path, {
     message: compositionMessage(entry, matched),
   });
@@ -119,19 +123,31 @@ export function isSupportedSchema(
     return false;
   }
   const type = ownDataValue(value, "type");
-  if (typeof type === "string") return SUPPORTED_TYPES.has(type);
+  if (typeof type === "string") return isSupportedType(type);
   if (!Array.isArray(type) || type.length === 0) return false;
   for (let index = 0; index < type.length; index++) {
     const member: unknown = type[index];
     if (
       !Object.hasOwn(type, index) ||
       typeof member !== "string" ||
-      !SUPPORTED_TYPES.has(member)
+      !isSupportedType(member)
     ) {
       return false;
     }
   }
   return true;
+}
+
+function isSupportedType(value: string): boolean {
+  return (
+    value === "array" ||
+    value === "boolean" ||
+    value === "integer" ||
+    value === "null" ||
+    value === "number" ||
+    value === "object" ||
+    value === "string"
+  );
 }
 
 function ownDataValue(value: object, key: PropertyKey): unknown {
@@ -145,8 +161,9 @@ function validateNotShape(
   value: unknown,
   path: ValidationErrorPath,
   context: ValidationContext,
+  supportsSchema: (value: unknown) => boolean,
 ): boolean {
-  if (isSupportedSchema(value)) return true;
+  if (supportsSchema(value)) return true;
   addContextError(context, "invalid-schema", path, {
     message: "not must be a schema object with a supported non-empty type",
   });
@@ -158,12 +175,13 @@ function validateBranchArrayShape(
   value: unknown,
   path: ValidationErrorPath,
   context: ValidationContext,
+  supportsSchema: (value: unknown) => boolean,
 ): boolean {
   if (!Array.isArray(value) || value.length === 0) {
     return invalidBranchArray(keyword, path, context);
   }
   for (let index = 0; index < value.length; index++) {
-    if (!Object.hasOwn(value, index) || !isSupportedSchema(value[index])) {
+    if (!Object.hasOwn(value, index) || !supportsSchema(value[index])) {
       addContextError(context, "invalid-schema", path, {
         message: `${keyword} branch ${String(index)} must be a schema object with a supported non-empty type`,
       });

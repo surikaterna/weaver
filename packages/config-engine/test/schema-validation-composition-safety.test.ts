@@ -382,6 +382,34 @@ describe("composition iterative and adversarial safety", () => {
     });
   });
 
+  it("does not retain shared-branch memo results across calls", () => {
+    const shared: ConfigurationPropertySchema = {
+      type: "string",
+      const: "first",
+    };
+    const schema: ConfigurationPropertySchema = {
+      type: "string",
+      oneOf: [shared, shared],
+    };
+
+    expect(validatePartialConfiguration(schema, "first").errors).toEqual([
+      expect.objectContaining({
+        message: "Value must match exactly one oneOf branch (matched 2)",
+      }),
+    ]);
+    shared.const = "second";
+    expect(validatePartialConfiguration(schema, "first").errors).toEqual([
+      expect.objectContaining({
+        message: "Value must match exactly one oneOf branch (matched 0)",
+      }),
+    ]);
+    expect(validatePartialConfiguration(schema, "second").errors).toEqual([
+      expect.objectContaining({
+        message: "Value must match exactly one oneOf branch (matched 2)",
+      }),
+    ]);
+  });
+
   it.each([
     30, 40,
   ])("projects a depth-%i shared allOf diamond once per identity", (depth) => {
