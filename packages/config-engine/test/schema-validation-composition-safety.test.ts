@@ -5,7 +5,12 @@ import {
   validateEffectiveConfiguration,
   validatePartialConfiguration,
 } from "../src/schema-validation.js";
+import {
+  captureSchemaStability,
+  schemaStabilityMatches,
+} from "../src/schema-validation-schema-stability.js";
 import { schemaValidationResultSchema } from "../src/schema-validation-schemas.js";
+import { createConfigurationValidationSession } from "../src/schema-validation-session.js";
 
 const keywordCases = ["anyOf", "oneOf", "allOf"] as const;
 
@@ -334,6 +339,392 @@ describe("composition schema preflight", () => {
         message: "Schema must not contain cycles",
       }),
     ]);
+  });
+});
+
+describe("call-local validation sessions", () => {
+  it("creates fresh value-graph and composition runtimes for every validation", () => {
+    const shared: ConfigurationPropertySchema = {
+      type: "object",
+      properties: { item: { type: "string" } },
+      additionalProperties: true,
+    };
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      anyOf: [shared, shared],
+      additionalProperties: true,
+    };
+    const value: Record<string, unknown> = { item: "valid" };
+    const session = createConfigurationValidationSession(schema, {
+      path: ["service"],
+    });
+
+    expect(session.validatePartial(value)).toEqual({ valid: true, errors: [] });
+    value.item = 1;
+    expect(session.validatePartial(value).errors).toEqual([
+      {
+        code: "invalid-value",
+        path: "$.service",
+        segments: ["service"],
+        message: "Value must match at least one anyOf branch",
+      },
+    ]);
+    value.item = "valid";
+    value.self = value;
+    expect(session.validatePartial(value).errors[0]).toMatchObject({
+      code: "invalid-value",
+      path: "$.service.self",
+      message: "Configuration values must not contain cycles",
+    });
+  });
+
+  it("rejects malformed and cyclic schemas through the prepared boundary", () => {
+    const malformed = runtimeSchema("object", "properties", { child: null });
+    const cyclic: ConfigurationPropertySchema = { type: "object" };
+    cyclic.properties = { self: cyclic };
+
+    expect(
+      createConfigurationValidationSession(malformed).validatePartial({}),
+    ).toEqual(validatePartialConfiguration(malformed, {}));
+    expect(
+      createConfigurationValidationSession(cyclic).validatePartial({}),
+    ).toEqual(validatePartialConfiguration(cyclic, {}));
+  });
+
+  it("observes schema changes in a new operation without mutating inputs", () => {
+    const member: ConfigurationPropertySchema = { type: "string" };
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: { value: member },
+      additionalProperties: false,
+    };
+    const value = { value: "text" };
+    const schemaPrototype = Object.getPrototypeOf(schema);
+    const valuePrototype = Object.getPrototypeOf(value);
+
+    expect(
+      createConfigurationValidationSession(schema).validatePartial(value),
+    ).toEqual({ valid: true, errors: [] });
+    member.type = "number";
+    expect(
+      createConfigurationValidationSession(schema).validatePartial(value)
+        .errors[0],
+    ).toMatchObject({ code: "invalid-type", path: "$.value" });
+    expect(Object.getPrototypeOf(schema)).toBe(schemaPrototype);
+    expect(Object.getPrototypeOf(value)).toBe(valuePrototype);
+    expect(value).toEqual({ value: "text" });
+  });
+
+  it("keeps a private base path copy across schema invalidation", () => {
+    const member: ConfigurationPropertySchema = { type: "string" };
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: { value: member },
+    };
+    const callerPath = ["original"];
+    const session = createConfigurationValidationSession(schema, {
+      path: callerPath,
+    });
+
+    expect(session.validatePartial({ value: "valid" })).toEqual({
+      valid: true,
+      errors: [],
+    });
+    callerPath[0] = "mutated";
+    member.type = "number";
+
+    expect(session.validatePartial({ value: "invalid" })).toEqual({
+      valid: false,
+      errors: [
+        {
+          code: "invalid-type",
+          path: "$.original.value",
+          segments: ["original", "value"],
+          message: "Value does not match schema type",
+          expected: "number",
+          actual: "string",
+        },
+      ],
+    });
+  });
+
+  it("refreshes for root, nested, and composition-array topology changes", () => {
+    const nested: ConfigurationPropertySchema = { type: "string" };
+    const branches: ConfigurationPropertySchema[] = [
+      { type: "object", properties: { value: nested } },
+    ];
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: { value: nested },
+    };
+    const session = createConfigurationValidationSession(schema);
+    const value = { value: 1 };
+    const expectFresh = () =>
+      expect(session.validatePartial(value)).toEqual(
+        validatePartialConfiguration(schema, value),
+      );
+
+    schema.anyOf = branches;
+    expectFresh();
+    schema.anyOf = [{ type: "object", maxProperties: 0 }];
+    expectFresh();
+    delete schema.anyOf;
+    expectFresh();
+    schema.anyOf = branches;
+    nested.anyOf = [{ type: "string" }];
+    expectFresh();
+    nested.anyOf = [{ type: "number" }];
+    expectFresh();
+    delete nested.anyOf;
+    expectFresh();
+    branches.push({ type: "object", additionalProperties: true });
+    expectFresh();
+    branches.splice(0, 1);
+    expectFresh();
+    branches.unshift({ type: "object", maxProperties: 0 });
+    branches.reverse();
+    expectFresh();
+    delete branches[0];
+    expectFresh();
+  });
+
+  it("refreshes for maps, items, additional properties, and type mutations", () => {
+    const terminal: ConfigurationPropertySchema = { type: "string" };
+    const types: ("array" | "object" | "string")[] = ["object", "array"];
+    const properties: Record<string, ConfigurationPropertySchema> = {
+      value: terminal,
+    };
+    const patterns: Record<string, ConfigurationPropertySchema> = {};
+    const items: ConfigurationPropertySchema[] = [{ type: "string" }];
+    const schema: ConfigurationPropertySchema = {
+      type: types,
+      properties,
+      patternProperties: patterns,
+      additionalProperties: true,
+      items,
+    };
+    const session = createConfigurationValidationSession(schema);
+    const value = { value: 1 };
+    const expectFresh = () =>
+      expect(session.validatePartial(value)).toEqual(
+        validatePartialConfiguration(schema, value),
+      );
+
+    terminal.type = "number";
+    expectFresh();
+    properties.value = { type: "number" };
+    expectFresh();
+    properties.extra = { type: "boolean" };
+    expectFresh();
+    delete properties.extra;
+    patterns["^value$"] = { type: "integer" };
+    expectFresh();
+    patterns["^value$"] = { type: "number" };
+    expectFresh();
+    delete patterns["^value$"];
+    schema.additionalProperties = { type: "number" };
+    expectFresh();
+    items[0] = { type: "number" };
+    expectFresh();
+    schema.items = { type: "boolean" };
+    expectFresh();
+    types[0] = "string";
+    expectFresh();
+  });
+
+  it("refreshes for shared-DAG rewiring and schema-cycle introduction", () => {
+    const shared: ConfigurationPropertySchema = { type: "number" };
+    const branches: ConfigurationPropertySchema[] = [shared, shared];
+    const schema: ConfigurationPropertySchema = {
+      type: "number",
+      allOf: branches,
+    };
+    const session = createConfigurationValidationSession(schema);
+
+    branches[1] = { type: "number", minimum: 2 };
+    expect(session.validatePartial(1)).toEqual(
+      validatePartialConfiguration(schema, 1),
+    );
+    const cyclic: ConfigurationPropertySchema = { type: "number" };
+    cyclic.allOf = [cyclic];
+    branches[0] = cyclic;
+    expect(session.validatePartial(1)).toEqual(
+      validatePartialConfiguration(schema, 1),
+    );
+    branches[0] = runtimeSchema("number", "allOf", [null]);
+    expect(session.validatePartial(1)).toEqual(
+      validatePartialConfiguration(schema, 1),
+    );
+  });
+
+  it.each([
+    "default",
+    "const",
+    "enum",
+  ] as const)("refreshes when a nested %s constraint becomes cyclic", (keyword) => {
+    const constraint: Record<string, unknown> = { allowed: true };
+    const member: ConfigurationPropertySchema = {
+      type: "object",
+      additionalProperties: true,
+    };
+    setRuntimeField(
+      member,
+      keyword,
+      keyword === "enum" ? [constraint] : constraint,
+    );
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: { member },
+    };
+    const value = { member: { allowed: true } };
+    const session = createConfigurationValidationSession(schema);
+
+    expect(session.validatePartial(value)).toEqual(
+      validatePartialConfiguration(schema, value),
+    );
+    constraint.self = constraint;
+    const result = session.validatePartial(value);
+    expect(result).toEqual(validatePartialConfiguration(schema, value));
+    expect(result.errors[0]).toMatchObject({
+      code: "invalid-schema",
+      message: "Schema constraint values must not contain cycles",
+    });
+  });
+
+  it("refreshes when primitive schema definitions change", () => {
+    const stringBranch: ConfigurationPropertySchema = {
+      type: "string",
+      pattern: "^[a-z]+$",
+    };
+    const numberBranch: ConfigurationPropertySchema = {
+      type: "number",
+      multipleOf: 2,
+    };
+    const schema: ConfigurationPropertySchema = {
+      type: ["string", "number"],
+      anyOf: [stringBranch, numberBranch],
+    };
+    const session = createConfigurationValidationSession(schema);
+
+    expect(session.validatePartial("valid")).toEqual({
+      valid: true,
+      errors: [],
+    });
+    stringBranch.pattern = "[";
+    expect(session.validatePartial("valid")).toEqual(
+      validatePartialConfiguration(schema, "valid"),
+    );
+    stringBranch.pattern = "^[a-z]+$";
+    numberBranch.multipleOf = 0;
+    expect(session.validatePartial(2)).toEqual(
+      validatePartialConfiguration(schema, 2),
+    );
+  });
+
+  it("uses fresh preparation for accessor-bearing schema graphs", () => {
+    let getterCalls = 0;
+    const schema: ConfigurationPropertySchema = { type: "object" };
+    Reflect.defineProperty(schema, "maxProperties", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return 0;
+      },
+    });
+    const session = createConfigurationValidationSession(schema);
+    const stability = captureSchemaStability(schema);
+
+    expect(stability.reusable).toBe(false);
+    const first = session.validatePartial({ value: 1 });
+    const firstCalls = getterCalls;
+    getterCalls = 0;
+    expect(first).toEqual(validatePartialConfiguration(schema, { value: 1 }));
+    expect(getterCalls).toBe(firstCalls);
+    getterCalls = 0;
+    const second = session.validatePartial({ value: 1 });
+    const secondCalls = getterCalls;
+    getterCalls = 0;
+    expect(second).toEqual(validatePartialConfiguration(schema, { value: 1 }));
+    expect(getterCalls).toBe(secondCalls);
+
+    let constraintCalls = 0;
+    const constraint = {};
+    Reflect.defineProperty(constraint, "allowed", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        constraintCalls += 1;
+        return true;
+      },
+    });
+    const constrained: ConfigurationPropertySchema = {
+      type: "object",
+      enum: [constraint],
+    };
+    const constrainedSession =
+      createConfigurationValidationSession(constrained);
+    expect(captureSchemaStability(constrained).reusable).toBe(false);
+    const constrainedResult = constrainedSession.validatePartial({
+      allowed: true,
+    });
+    const constrainedCalls = constraintCalls;
+    constraintCalls = 0;
+    expect(constrainedResult).toEqual(
+      validatePartialConfiguration(constrained, { allowed: true }),
+    );
+    expect(constraintCalls).toBe(constrainedCalls);
+  });
+
+  it("fresh-prepares an unprovable graph before its first validation", () => {
+    const member: ConfigurationPropertySchema = { type: "string" };
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: { member },
+    };
+    Reflect.defineProperty(schema, "description", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return "unprovable";
+      },
+    });
+    const session = createConfigurationValidationSession(schema);
+
+    member.type = "number";
+    expect(session.validatePartial({ member: "stale" })).toEqual(
+      validatePartialConfiguration(schema, { member: "stale" }),
+    );
+  });
+
+  it("proves unchanged plain graphs reusable without hiding value mutation", () => {
+    const shared: ConfigurationPropertySchema = { type: "string" };
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: { left: shared, right: shared },
+      additionalProperties: false,
+    };
+    const stability = captureSchemaStability(schema);
+    const session = createConfigurationValidationSession(schema);
+    const value: Record<string, unknown> = { left: "ok", right: "ok" };
+
+    expect(stability.reusable).toBe(true);
+    expect(schemaStabilityMatches(stability)).toBe(true);
+    expect(session.validatePatch("left", "ok")).toEqual(
+      validateConfigurationPatch(schema, "left", "ok"),
+    );
+    expect(session.validatePartial(value)).toEqual({ valid: true, errors: [] });
+    expect(session.validateEffective(value)).toEqual(
+      validateEffectiveConfiguration(schema, value),
+    );
+    value.right = 1;
+    expect(session.validatePartial(value)).toEqual(
+      validatePartialConfiguration(schema, value),
+    );
+    value.self = value;
+    expect(session.validatePartial(value)).toEqual(
+      validatePartialConfiguration(schema, value),
+    );
   });
 });
 
