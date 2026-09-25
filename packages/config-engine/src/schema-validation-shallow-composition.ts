@@ -89,8 +89,7 @@ function shallowCompositionBranches(
     for (const branch of getCompositionBranches(schema, keyword)) {
       if (branch === schema) return undefined;
       if (isTypeLeafSchema(branch)) {
-        if (isScalarSchema(branch)) predicateScalars.add(branch);
-        flattened.push({ schema: branch });
+        flattened.push(typeLeafBranch(branch, predicateScalars));
         continue;
       }
       if (hasComposition(branch)) return undefined;
@@ -100,6 +99,14 @@ function shallowCompositionBranches(
     }
   }
   return flattened;
+}
+
+function typeLeafBranch(
+  schema: ConfigurationPropertySchema,
+  predicateScalars: WeakSet<ConfigurationPropertySchema>,
+): ShallowBranch {
+  if (isScalarSchema(schema)) predicateScalars.add(schema);
+  return { schema };
 }
 
 function validateShallowBranches(
