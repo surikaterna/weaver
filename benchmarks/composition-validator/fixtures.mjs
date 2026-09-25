@@ -78,7 +78,7 @@ function addBranches(descriptors) {
 
 function sharedDiamond(depth, leaf) {
   let schema = leaf;
-  for (let index = 0; index < depth; index += 1) schema = { type: leaf.type, allOf: [schema, schema] };
+  for (let index = 0; index < depth; index += 1) schema = { type: leaf.type, allOf: [schema, schema], additionalProperties: true };
   return schema;
 }
 
@@ -178,7 +178,7 @@ function serverDefinition(name, expectedValid) {
   let schema = { type: "object", properties: { kind: { type: "string" }, value: { type: ["string", "number"] } }, additionalProperties: false };
   let initial = { kind: "text", value: "old" };
   let path = "/bench/value";
-  let values = expectedValid ? ["a", "b"] : [1];
+  let values = expectedValid ? ["a", "b"] : name === "ordinary" ? [true] : [1];
   if (name.startsWith("anyOf")) schema = { ...schema, anyOf: branches };
   if (name === "oneOf-ambiguity") {
     schema = { ...schema, oneOf: [{ type: "object", properties: { kind: { type: "string", const: "text" } }, additionalProperties: true }, { type: "object", properties: { value: { type: "string" } }, additionalProperties: true }] };

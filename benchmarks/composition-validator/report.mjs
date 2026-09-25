@@ -97,6 +97,18 @@ function positionRows(byCase) {
   return rows;
 }
 
+function pilotReport(raw) {
+  const rows = raw.results.map((result) => [result.id, result.variant, result.run, fixed(result.stats.cv * 100, 2), fixed(result.stats.drift * 100, 2), result.correctness.failures.length === 0 ? "PASS" : result.correctness.failures.join("; ")]);
+  const detail = raw.verdict === "GO" ? "Every run passed the frozen gates." : "Full shards are blocked pending a human release decision.";
+  return `# Composition validator benchmark pilot\n\n## Verdict: ${raw.verdict}\n\nCompleted ${raw.runCount}/48 runs and ${raw.sampleCount}/1200 samples with no retry, trimming, replacement, or outlier exclusion. ${detail}\n\n${markdownTable(["case", "source", "run", "CV %", "drift %", "correctness"], rows)}\n`;
+}
+
+function genericStopReport(raw, text) {
+  const stop = raw.stop;
+  const variant = stop.variant ? ` / \`${stop.variant}\`` : "";
+  return `# Composition validator benchmark report\n\n## Verdict: ${stop.verdict}\n\nThe frozen matrix stopped at \`${stop.case}\`${variant} during ${stop.phase}: ${stop.reason}. It was not silently reduced. Completed measured samples: ${stop.completedSamples}; stable full-matrix runs: ${stop.stableRuns}.\n\n- Base: \`${raw.sources.base.sha}\`\n- Tip: \`${raw.sources.tip.sha}\`\n- Raw JSON SHA-256: \`${createHash("sha256").update(text).digest("hex")}\`\n`;
+}
+
 function verdict(raw, ordinary, scaling, server, byCase) {
   const reasons = [];
   let level = "PASS";
@@ -124,10 +136,15 @@ async function main() {
   const output = resolve(args.output ?? "benchmarks/composition-validator/REPORT.md");
   const text = await readFile(input, "utf8");
   const raw = JSON.parse(text);
+  if (raw.verdict === "GO" || raw.verdict === "INVESTIGATE") {
+    await writeFile(output, pilotReport(raw));
+    process.stdout.write(`${raw.verdict}\n`);
+    return;
+  }
   if (raw.stop !== null) {
     const report = `# Composition validator benchmark report\n\n## Verdict: FAIL\n\nThe frozen matrix stopped at the required safety boundary and was not silently reduced. Case \`${raw.stop.case}\` crashed during ${raw.stop.phase}: ${raw.stop.reason}. A process crash/OOM is an immediate FAIL under the predeclared thresholds. Full 3 × 25 timing evidence, ordinary geomean, scaling, server ratio, and comparative memory summaries are therefore unavailable; stable full-matrix run count is **${raw.stop.stableRuns}**.\n\n## Evidence\n\n- Base: \`${raw.sources.base.sha}\` (tree \`${raw.sources.base.tree}\`, packages \`${raw.sources.base.packagesTree}\`, clean: ${raw.sources.base.clean})\n- Tip: \`${raw.sources.tip.sha}\` (tree \`${raw.sources.tip.tree}\`, packages \`${raw.sources.tip.packagesTree}\`, clean: ${raw.sources.tip.clean})\n- Seed: \`${raw.seed}\`; stopped case: \`${raw.stop.case}\`; completed measured samples: ${raw.stop.completedSamples}\n- Fixture manifest SHA-256: \`${raw.fixtureManifestHash}\`\n- Raw JSON SHA-256: \`${createHash("sha256").update(text).digest("hex")}\`\n- Host: ${raw.environment.cpu.model}; ${raw.environment.arch}; kernel ${raw.environment.release}; Node ${raw.environment.node}; V8 ${raw.environment.v8}\n- Selected core: ${raw.environment.cpu.selectedCore}; affinity: ${raw.environment.cpu.affinity}; topology: ${raw.environment.cpu.topology ?? "unknown"}; cache: ${raw.environment.cpu.cache ?? "unknown"}\n- Governor/frequency/boost: ${raw.environment.cpu.governor ?? "unknown"} / ${raw.environment.cpu.frequencyKHz ?? "unknown"} kHz / ${raw.environment.cpu.boost ?? "unknown"}\n- Load: ${raw.environment.loadAverage.map((value) => fixed(value, 2)).join(" / ")}; RAM: ${(raw.environment.memory.total / 1024 ** 3).toFixed(1)} GiB; NODE_OPTIONS: ${raw.environment.nodeOptions ?? "unset"}\n\n## Build and stop details\n\nBoth exact worktrees completed frozen-lockfile installation and forced config-engine/server Turbo builds before execution. Recorded milliseconds: base install ${raw.buildEvidence.milliseconds.baseInstall}, engine ${raw.buildEvidence.milliseconds.baseEngine}, server ${raw.buildEvidence.milliseconds.baseServer}; tip install ${raw.buildEvidence.milliseconds.tipInstall}, engine ${raw.buildEvidence.milliseconds.tipEngine}, server ${raw.buildEvidence.milliseconds.tipServer}. Import, registration, fixture setup, calibration, warmup, hashing, and reporting are excluded from hot timing. The failure occurred in excluded setup, while registering the depth-40 shared-identity allOf schema through public \`createSchemaRegistry\` after constructing the service with public \`createWeaverConfigService\` and the in-memory provider. V8 reported ineffective mark-compacts near its approximately 4 GiB heap limit and terminated the child with JavaScript heap out of memory. This also exceeds the 1 GiB RSS safety ceiling by construction.\n\n## Limitations\n\nNo ordinary geomean, worst paired cases, normalized scaling, server ratio, or matrix memory maximum is claimed from an incomplete run. Isolated smoke timings are intentionally excluded because they are not the frozen three-run stable matrix. CPU thermal, virtualization/container, turbo, and AC fields are retained in raw evidence where the host exposes them.\n`;
-    await writeFile(output, report);
-    process.stdout.write("FAIL\n");
+    await writeFile(output, genericStopReport(raw, text));
+    process.stdout.write(`${raw.stop.verdict}\n`);
     return;
   }
   const accepted = raw.sets.find((set) => set.set === raw.acceptedSet);
