@@ -73,6 +73,7 @@ export type {
   ConfigurationPropertySchema,
   ConfigurationRole,
   ConfigurationVisibility,
+  ObjectConfigurationPropertySchema,
   WeaverPropertyExtensions,
 } from "./property-schema";
 // providers.ts — Storage provider interfaces
@@ -183,7 +184,10 @@ export {
   sinkDomainAuditEntrySchema,
 } from "./schemas-promotion";
 // schemas-property.ts — Zod schemas for configuration property schema types
-export { configurationPropertySchemaSchema } from "./schemas-property";
+export {
+  configurationPropertySchemaSchema,
+  objectConfigurationPropertySchemaSchema,
+} from "./schemas-property";
 // schemas-providers.ts — Zod schemas for provider types
 export {
   configurationChangeSchema,
@@ -199,6 +203,16 @@ export {
   syncStatusSyncingSchema,
   writeResultSchema,
 } from "./schemas-providers";
+export {
+  isReservedPathSegment,
+  providerIdPattern,
+  providerIdSchema,
+  publicConfigPathSchema,
+  registrationEnvironmentSchema,
+  serviceIdPattern,
+  serviceIdSchema,
+  slotPathSchema,
+} from "./schemas-registration-paths";
 // schemas-schema-registration.ts — Zod schemas for path-first schema registration contracts
 export {
   fragmentSchemaRegistrationRequestSchema,

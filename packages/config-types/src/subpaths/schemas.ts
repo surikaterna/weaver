@@ -49,7 +49,10 @@ export {
   sessionDomainAuditEntrySchema,
   sinkDomainAuditEntrySchema,
 } from "../schemas-promotion";
-export { configurationPropertySchemaSchema } from "../schemas-property";
+export {
+  configurationPropertySchemaSchema,
+  objectConfigurationPropertySchemaSchema,
+} from "../schemas-property";
 export {
   configurationChangeSchema,
   configurationConflictSchema,
@@ -64,6 +67,16 @@ export {
   syncStatusSyncingSchema,
   writeResultSchema,
 } from "../schemas-providers";
+export {
+  isReservedPathSegment,
+  providerIdPattern,
+  providerIdSchema,
+  publicConfigPathSchema,
+  registrationEnvironmentSchema,
+  serviceIdPattern,
+  serviceIdSchema,
+  slotPathSchema,
+} from "../schemas-registration-paths";
 export {
   godModeSessionSchema,
   overrideSessionSchema,

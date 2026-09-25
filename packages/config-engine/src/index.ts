@@ -20,19 +20,24 @@ export type { ResolvedConfiguration } from "./layers";
 export { deepMerge } from "./merge";
 // namespace.ts — Namespace utilities
 // path.ts — Bracket-aware path parsing
-export { buildPath, parsePath } from "./path";
+export { assertSafePathSegment, buildPath, parsePath } from "./path";
 export { clearRegexCache, getCachedRegex, isSafePattern } from "./regex-cache";
 export type {
+  CanonicalConfigPath,
   DerivedFragmentPath,
   DerivedServicePath,
 } from "./registration-paths";
 export {
   assertPublicConfigPath,
+  canonicalConfigPathFromSegments,
+  canonicalConfigPathFromStorageKey,
+  canonicalConfigPathSchema,
   deriveCanonicalSlotPath,
   deriveFragmentPath,
   deriveServicePath,
   isWeaverInternalPath,
   normalizeConfigPath,
+  parseCanonicalConfigPath,
   WEAVER_INTERNAL_ROOT,
 } from "./registration-paths";
 // schema-diff.ts — Schema comparison utilities
