@@ -1,5 +1,6 @@
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import { buildSchemaPatch } from "../../src/core/config-service-schema-patches.ts";
+import { prepareRegisteredPatchWrite } from "../../src/core/config-service-schema-writes.ts";
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { createSchemaRegistry } from "../../src/core/schema-registry.ts";
 
@@ -300,6 +301,93 @@ describe("schema-registered config writes", () => {
     expect(notifications).toBe(0);
     expect(Object.getPrototypeOf(initial)).toBe(prototype);
     unsubscribe();
+  });
+
+  test("patch sessions validate leaf, existing value, and every candidate branch in order", async () => {
+    const branchReads = [0, 0];
+    const branch = (index, kind, valueType) => {
+      const kindSchema = { type: "string" };
+      Object.defineProperty(kindSchema, "const", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          branchReads[index] += 1;
+          return kind;
+        },
+      });
+      return {
+        type: "object",
+        properties: { kind: kindSchema, value: { type: valueType } },
+        additionalProperties: true,
+      };
+    };
+    const schema = {
+      type: "object",
+      properties: {
+        kind: { type: "string" },
+        value: { type: ["string", "number"] },
+      },
+      additionalProperties: false,
+      anyOf: [branch(0, "text", "string"), branch(1, "count", "number")],
+    };
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const events = [];
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/value",
+      1,
+      { schemaRegistry: { resolveAnchor: async () => anchor } },
+      "test",
+      async () => {
+        events.push("existing");
+        return { kind: "text", value: "old" };
+      },
+    );
+
+    expect(events).toEqual(["existing"]);
+    expect(branchReads).toEqual([5, 5]);
+    expect(result.result.error.details.errors).toEqual([
+      {
+        code: "invalid-value",
+        path: "$.billing",
+        segments: ["billing"],
+        message: "Value must match at least one anyOf branch",
+      },
+    ]);
+  });
+
+  test("invalid patch leaves stop before existing-value retrieval", async () => {
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema: serviceSchema,
+      environment: "test",
+      metadata: {},
+    };
+    let reads = 0;
+
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/limit",
+      "invalid",
+      { schemaRegistry: { resolveAnchor: async () => anchor } },
+      "test",
+      async () => {
+        reads += 1;
+        return { mode: "test" };
+      },
+    );
+
+    expect(result.success).toBe(false);
+    expect(reads).toBe(0);
+    expect(result.result.error.details.errors[0]).toMatchObject({
+      code: "invalid-type",
+      path: "$.billing.limit",
+    });
   });
 
   test("oneOf ambiguity and contextual not rejection have zero effects", async () => {
@@ -775,6 +863,68 @@ describe("schema-registered config writes", () => {
     );
     await expectNoEffects(provider, service, initialEntries, initialRevision);
     expect(await service.get("billing.mode")).toBe("test");
+  });
+
+  test("patches cannot bypass invalid existing values by repairing them", async () => {
+    const { provider, registry, service } = await makeRegisteredService({
+      billing: { mode: "test", limit: "bad" },
+    });
+    const initialEntries = await providerEntries(provider);
+    const initialRevision = service.revision;
+
+    const result = await patchRegistered(service, registry, "/billing/limit", 5);
+
+    expect(result.error.details.errors[0]).toMatchObject({
+      code: "invalid-type",
+      path: "$.billing.limit",
+      actual: "string",
+    });
+    await expectNoEffects(provider, service, initialEntries, initialRevision);
+  });
+
+  test("separate writes prepare fresh sessions after schema mutation", async () => {
+    const member = { type: "string" };
+    const schema = {
+      type: "object",
+      properties: { value: member },
+      additionalProperties: false,
+    };
+    const provider = createTestProvider("p1", "platform", {
+      billing: { value: "old" },
+    });
+    const service = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const registry = { resolveAnchor: async () => anchor };
+
+    expect(
+      await patchRegistered(service, registry, "/billing/value", "first"),
+    ).toEqual({ success: true });
+    member.type = "number";
+    const rejected = await patchRegistered(
+      service,
+      registry,
+      "/billing/value",
+      "second",
+    );
+
+    expect(rejected.error.details.errors[0]).toMatchObject({
+      code: "invalid-type",
+      path: "$.billing.value",
+      expected: "number",
+    });
+    expect(await providerEntries(provider)).toEqual({
+      billing: { value: "first" },
+    });
+    expect(provider.writes).toHaveLength(1);
   });
 
   test("patches reject a resulting anchor object that violates schema bounds", async () => {

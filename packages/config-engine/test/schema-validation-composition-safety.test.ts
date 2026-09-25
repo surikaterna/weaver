@@ -6,6 +6,7 @@ import {
   validatePartialConfiguration,
 } from "../src/schema-validation.js";
 import { schemaValidationResultSchema } from "../src/schema-validation-schemas.js";
+import { createConfigurationValidationSession } from "../src/schema-validation-session.js";
 
 const keywordCases = ["anyOf", "oneOf", "allOf"] as const;
 
@@ -334,6 +335,80 @@ describe("composition schema preflight", () => {
         message: "Schema must not contain cycles",
       }),
     ]);
+  });
+});
+
+describe("call-local validation sessions", () => {
+  it("creates fresh value-graph and composition runtimes for every validation", () => {
+    const shared: ConfigurationPropertySchema = {
+      type: "object",
+      properties: { item: { type: "string" } },
+      additionalProperties: true,
+    };
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      anyOf: [shared, shared],
+      additionalProperties: true,
+    };
+    const value: Record<string, unknown> = { item: "valid" };
+    const session = createConfigurationValidationSession(schema, {
+      path: ["service"],
+    });
+
+    expect(session.validatePartial(value)).toEqual({ valid: true, errors: [] });
+    value.item = 1;
+    expect(session.validatePartial(value).errors).toEqual([
+      {
+        code: "invalid-value",
+        path: "$.service",
+        segments: ["service"],
+        message: "Value must match at least one anyOf branch",
+      },
+    ]);
+    value.item = "valid";
+    value.self = value;
+    expect(session.validatePartial(value).errors[0]).toMatchObject({
+      code: "invalid-value",
+      path: "$.service.self",
+      message: "Configuration values must not contain cycles",
+    });
+  });
+
+  it("rejects malformed and cyclic schemas through the prepared boundary", () => {
+    const malformed = runtimeSchema("object", "properties", { child: null });
+    const cyclic: ConfigurationPropertySchema = { type: "object" };
+    cyclic.properties = { self: cyclic };
+
+    expect(
+      createConfigurationValidationSession(malformed).validatePartial({}),
+    ).toEqual(validatePartialConfiguration(malformed, {}));
+    expect(
+      createConfigurationValidationSession(cyclic).validatePartial({}),
+    ).toEqual(validatePartialConfiguration(cyclic, {}));
+  });
+
+  it("observes schema changes in a new operation without mutating inputs", () => {
+    const member: ConfigurationPropertySchema = { type: "string" };
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: { value: member },
+      additionalProperties: false,
+    };
+    const value = { value: "text" };
+    const schemaPrototype = Object.getPrototypeOf(schema);
+    const valuePrototype = Object.getPrototypeOf(value);
+
+    expect(
+      createConfigurationValidationSession(schema).validatePartial(value),
+    ).toEqual({ valid: true, errors: [] });
+    member.type = "number";
+    expect(
+      createConfigurationValidationSession(schema).validatePartial(value)
+        .errors[0],
+    ).toMatchObject({ code: "invalid-type", path: "$.value" });
+    expect(Object.getPrototypeOf(schema)).toBe(schemaPrototype);
+    expect(Object.getPrototypeOf(value)).toBe(valuePrototype);
+    expect(value).toEqual({ value: "text" });
   });
 });
 

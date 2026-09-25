@@ -31,6 +31,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./internal/schema-validation-session": {
+      "types": "./dist/schema-validation-session.d.ts",
+      "import": "./dist/schema-validation-session.js",
+      "require": "./dist/schema-validation-session.cjs"
     }
   },
   "files": [
