@@ -1,3 +1,4 @@
+import { validatePartialConfiguration } from "@weaver-conf/config-engine";
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import { buildSchemaPatch } from "../../src/core/config-service-schema-patches.ts";
 import { prepareRegisteredPatchWrite } from "../../src/core/config-service-schema-writes.ts";
@@ -350,7 +351,7 @@ describe("schema-registered config writes", () => {
     );
 
     expect(events).toEqual(["existing"]);
-    expect(branchReads).toEqual([5, 5]);
+    expect(branchReads).toEqual([7, 7]);
     expect(result.result.error.details.errors).toEqual([
       {
         code: "invalid-value",
@@ -388,6 +389,202 @@ describe("schema-registered config writes", () => {
       code: "invalid-type",
       path: "$.billing.limit",
     });
+  });
+
+  test("refreshes after a schema getter introduces composition during leaf preparation", async () => {
+    const schema = {
+      type: "object",
+      properties: { value: { type: ["string", "number"] } },
+      additionalProperties: false,
+    };
+    let introduced = false;
+    Object.defineProperty(schema, "maxProperties", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        if (!introduced) {
+          introduced = true;
+          schema.anyOf = [{
+            type: "object",
+            properties: { value: { type: "string" } },
+            additionalProperties: true,
+          }];
+        }
+        return undefined;
+      },
+    });
+    const provider = createTestProvider("p1", "platform", {
+      billing: { value: "old" },
+    });
+    const service = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const registry = { resolveAnchor: async () => anchor };
+    const initialRevision = service.revision;
+    const schemaPrototype = Object.getPrototypeOf(schema);
+    let notifications = 0;
+    const unsubscribe = service.onDelta(() => notifications++);
+
+    const result = await patchRegistered(
+      service,
+      registry,
+      "/billing/value",
+      1,
+    );
+    const fresh = validatePartialConfiguration(schema, { value: 1 }, {
+      path: ["billing"],
+    });
+
+    expect(result.error.details.errors).toEqual(fresh.errors);
+    expect(provider.writes).toEqual([]);
+    expect(notifications).toBe(0);
+    expect(service.revision).toBe(initialRevision);
+    expect(await providerEntries(provider)).toEqual({
+      billing: { value: "old" },
+    });
+    expect(Object.getPrototypeOf(schema)).toBe(schemaPrototype);
+    unsubscribe();
+  });
+
+  test("refreshes after awaited layer retrieval mutates composition", async () => {
+    const branch = {
+      type: "object",
+      properties: { value: { type: ["string", "number"] } },
+      additionalProperties: true,
+    };
+    const schema = {
+      type: "object",
+      properties: { value: { type: ["string", "number"] } },
+      additionalProperties: false,
+    };
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const events = [];
+
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/value",
+      1,
+      { schemaRegistry: { resolveAnchor: async () => anchor } },
+      "test",
+      async () => {
+        events.push("layer-read");
+        await Promise.resolve();
+        schema.anyOf = [branch];
+        branch.properties.value.type = "string";
+        events.push("schema-mutated");
+        return { value: "old" };
+      },
+    );
+    const fresh = validatePartialConfiguration(schema, { value: 1 }, {
+      path: ["billing"],
+    });
+
+    expect(events).toEqual(["layer-read", "schema-mutated"]);
+    expect(result.success).toBe(false);
+    expect(result.result.error.details.errors).toEqual(fresh.errors);
+  });
+
+  test("refreshes candidate preparation after existing-value mutation", async () => {
+    const schema = {
+      type: "object",
+      properties: { value: { type: ["string", "number"] } },
+      additionalProperties: false,
+    };
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const existing = {};
+    Object.defineProperty(existing, "value", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        schema.anyOf = [{
+          type: "object",
+          properties: { value: { type: "string" } },
+          additionalProperties: true,
+        }];
+        return "old";
+      },
+    });
+
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/value",
+      1,
+      { schemaRegistry: { resolveAnchor: async () => anchor } },
+      "test",
+      async () => existing,
+    );
+    const fresh = validatePartialConfiguration(schema, { value: 1 }, {
+      path: ["billing"],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.result.error.details.errors).toEqual(fresh.errors);
+    expect(Object.getPrototypeOf(existing)).toBe(Object.prototype);
+  });
+
+  test("refreshes candidate preparation after patch cloning mutation", async () => {
+    const schema = {
+      type: "object",
+      properties: { value: { type: ["string", "number"] } },
+      additionalProperties: false,
+    };
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const existing = {};
+    let reads = 0;
+    Object.defineProperty(existing, "value", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        reads += 1;
+        if (reads === 3) {
+          schema.anyOf = [{
+            type: "object",
+            properties: { value: { type: "string" } },
+            additionalProperties: true,
+          }];
+        }
+        return "old";
+      },
+    });
+
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/value",
+      1,
+      { schemaRegistry: { resolveAnchor: async () => anchor } },
+      "test",
+      async () => existing,
+    );
+    const fresh = validatePartialConfiguration(schema, { value: 1 }, {
+      path: ["billing"],
+    });
+
+    expect(reads).toBe(3);
+    expect(result.success).toBe(false);
+    expect(result.result.error.details.errors).toEqual(fresh.errors);
   });
 
   test("oneOf ambiguity and contextual not rejection have zero effects", async () => {

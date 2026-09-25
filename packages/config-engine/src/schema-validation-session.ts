@@ -3,6 +3,11 @@ import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 import { validateSchemaGraph } from "./schema-validation-graph";
 import { resolveMemberSchemas } from "./schema-validation-paths";
 import {
+  captureSchemaStability,
+  type SchemaStabilitySnapshot,
+  schemaStabilityMatches,
+} from "./schema-validation-schema-stability";
+import {
   createValidationPath,
   type SchemaValidationOptions,
   type SchemaValidationPathSegment,
@@ -27,6 +32,11 @@ type ValidationPreparation =
   | { readonly prepared: PreparedValidation }
   | { readonly error: SchemaValidationResult };
 
+interface PreparationState {
+  readonly preparation: ValidationPreparation;
+  readonly stability: SchemaStabilitySnapshot;
+}
+
 /** @internal Call-local validation plan for one configuration operation. */
 export interface ConfigurationValidationSession {
   validateEffective(value: unknown): SchemaValidationResult;
@@ -42,14 +52,32 @@ export function createConfigurationValidationSession(
   schema: ConfigurationPropertySchema,
   options?: SchemaValidationOptions,
 ): ConfigurationValidationSession {
-  const preparation = prepareValidation(schema, options);
+  let state: PreparationState | undefined;
+  const currentPreparation = (): ValidationPreparation => {
+    if (state !== undefined && schemaStabilityMatches(state.stability)) {
+      return state.preparation;
+    }
+    state = createPreparationState(schema, options);
+    return state.preparation;
+  };
   return {
     validateEffective: (value) =>
-      validatePreparedValue(preparation, value, "effective"),
+      validatePreparedValue(currentPreparation(), value, "effective"),
     validatePartial: (value) =>
-      validatePreparedValue(preparation, value, "partial"),
+      validatePreparedValue(currentPreparation(), value, "partial"),
     validatePatch: (path, value) =>
-      validatePreparedPatch(preparation, path, value),
+      validatePreparedPatch(currentPreparation(), path, value),
+  };
+}
+
+function createPreparationState(
+  schema: ConfigurationPropertySchema,
+  options: SchemaValidationOptions | undefined,
+): PreparationState {
+  const preparation = prepareValidation(schema, options);
+  return {
+    preparation,
+    stability: captureSchemaStability(schema),
   };
 }
 
