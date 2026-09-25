@@ -1,5 +1,7 @@
 import type {
   ConfigurationPropertySchema,
+  SchemaRegistrationRequest,
+  SchemaRegistrationResponse,
   ScopeDefinition,
   ScopeInstance,
   WriteResult,
@@ -58,9 +60,8 @@ export interface WeaverTransport {
   // Schemas
   fetchSchemas?(): Promise<Record<string, ConfigurationPropertySchema>>;
   registerSchema?(
-    namespace: string,
-    schema: Record<string, unknown>,
-  ): Promise<void>;
+    request: SchemaRegistrationRequest,
+  ): Promise<SchemaRegistrationResponse>;
 
   // Lifecycle
   close(): Promise<void>;

@@ -50,15 +50,26 @@ function makeOptions() {
   }));
 }
 
+function serviceRegistration(serviceId, environment, schema) {
+  return {
+    serviceId,
+    environment,
+    owner: { name: serviceId, contact: `${serviceId}@example.com` },
+    schema,
+    fragmentSlots: [],
+  };
+}
+
 describe("SchemaRegistry", () => {
   test("register new schema succeeds with isNewSchema true", async () => {
     const opts = await makeOptions();
     const registry = createSchemaRegistry(opts);
 
     const result = await registry.register({
-      serviceId: "my-service",
-      declaration: { type: "object", properties: { port: { type: "number", default: 3000 } } },
-      environment: "dev",
+      ...serviceRegistration("my-service", "dev", {
+        type: "object",
+        properties: { port: { type: "number", default: 3000 } },
+      }),
     });
 
     expect(result.success).toBe(true);
@@ -69,10 +80,10 @@ describe("SchemaRegistry", () => {
   test("register unchanged schema is idempotent", async () => {
     const opts = await makeOptions();
     const registry = createSchemaRegistry(opts);
-    const declaration = { type: "object", properties: { port: { type: "number" } } };
+    const schema = { type: "object", properties: { port: { type: "number" } } };
 
-    await registry.register({ serviceId: "svc", declaration, environment: "dev" });
-    const result = await registry.register({ serviceId: "svc", declaration, environment: "dev" });
+    await registry.register(serviceRegistration("svc", "dev", schema));
+    const result = await registry.register(serviceRegistration("svc", "dev", schema));
 
     expect(result.success).toBe(true);
     expect(result.isNewSchema).toBe(false);
@@ -84,15 +95,17 @@ describe("SchemaRegistry", () => {
     const registry = createSchemaRegistry(opts);
 
     await registry.register({
-      serviceId: "svc",
-      declaration: { type: "object", properties: { port: { type: "number" }, host: { type: "string" } } },
-      environment: "dev",
+      ...serviceRegistration("svc", "dev", {
+        type: "object",
+        properties: { port: { type: "number" }, host: { type: "string" } },
+      }),
     });
 
     const result = await registry.register({
-      serviceId: "svc",
-      declaration: { type: "object", properties: { port: { type: "number" } } },
-      environment: "dev",
+      ...serviceRegistration("svc", "dev", {
+        type: "object",
+        properties: { port: { type: "number" } },
+      }),
     });
 
     expect(result.success).toBe(true);
@@ -103,12 +116,12 @@ describe("SchemaRegistry", () => {
   test("getSchema returns registered schema", async () => {
     const opts = await makeOptions();
     const registry = createSchemaRegistry(opts);
-    const declaration = { type: "object", properties: { key: { type: "string" } } };
+    const schema = { type: "object", properties: { key: { type: "string" } } };
 
-    await registry.register({ serviceId: "svc", declaration, environment: "dev" });
-    const schema = await registry.getSchema("svc", "dev");
+    await registry.register(serviceRegistration("svc", "dev", schema));
+    const registeredSchema = await registry.getSchema("svc", "dev");
 
-    expect(schema).toEqual(declaration);
+    expect(registeredSchema).toEqual(schema);
   });
 
   test("getSchema returns null for unknown service", async () => {
@@ -119,7 +132,7 @@ describe("SchemaRegistry", () => {
     expect(schema).toBe(null);
   });
 
-  test("persistent registry writes schemas into configured layer and key", async () => {
+  test("persistent registry writes schemas into the protected internal registry root", async () => {
     const provider = createTestProvider("p1", "custom", {});
     const configService = await createWeaverConfigService({
       providers: [provider],
@@ -128,19 +141,37 @@ describe("SchemaRegistry", () => {
     const registry = await createPersistentSchemaRegistry({
       configService,
       layer: "custom",
-      key: "registry.schemas",
     });
 
     const result = await registry.register({
-      serviceId: "billing",
-      declaration: { type: "object", properties: { enabled: { type: "boolean" } } },
-      environment: "dev",
+      ...serviceRegistration("billing", "dev", {
+        type: "object",
+        properties: { enabled: { type: "boolean" } },
+      }),
     });
 
     expect(result.success).toBe(true);
-    expect(await configService.get("registry.schemas")).toEqual({
-      billing: {
-        dev: { type: "object", properties: { enabled: { type: "boolean" } } },
+    expect(await configService.get("_weaver.registry.schemas")).toEqual({
+      environments: {
+        dev: {
+          schemas: {
+            "/billing": {
+              kind: "service",
+              schema: {
+                type: "object",
+                properties: { enabled: { type: "boolean" } },
+              },
+              metadata: {
+                serviceId: "billing",
+                servicePath: "/billing",
+                environment: "dev",
+                providerId: "billing",
+                owner: { name: "billing", contact: "billing@example.com" },
+              },
+            },
+          },
+          slots: {},
+        },
       },
     });
   });
@@ -148,9 +179,29 @@ describe("SchemaRegistry", () => {
   test("persistent registry hydrates schemas after restart", async () => {
     const entries = {
       _weaver: {
-        schemas: {
-          billing: {
-            dev: { type: "object", properties: { limit: { type: "number" } } },
+        registry: {
+          schemas: {
+            environments: {
+              dev: {
+                schemas: {
+                  "/billing": {
+                    kind: "service",
+                    schema: {
+                      type: "object",
+                      properties: { limit: { type: "number" } },
+                    },
+                    metadata: {
+                      serviceId: "billing",
+                      servicePath: "/billing",
+                      environment: "dev",
+                      providerId: "billing",
+                      owner: { name: "billing", contact: "billing@example.com" },
+                    },
+                  },
+                },
+                slots: {},
+              },
+            },
           },
         },
       },
@@ -172,7 +223,30 @@ describe("SchemaRegistry", () => {
     const configService = await createWeaverConfigService({
       providers: [
         createTestProvider("p1", "platform", {
-          _weaver: { schemas: { svc: { prod: { type: "string" } } } },
+          _weaver: {
+            registry: {
+              schemas: {
+                environments: {
+                  prod: {
+                    schemas: {
+                      "/svc": {
+                        kind: "service",
+                        schema: { type: "string" },
+                        metadata: {
+                          serviceId: "svc",
+                          servicePath: "/svc",
+                          environment: "prod",
+                          providerId: "svc",
+                          owner: { name: "svc", contact: "svc@example.com" },
+                        },
+                      },
+                    },
+                    slots: {},
+                  },
+                },
+              },
+            },
+          },
         }),
       ],
       environment: "prod",
@@ -180,16 +254,35 @@ describe("SchemaRegistry", () => {
 
     const registry = await createPersistentSchemaRegistry({ configService });
 
-    expect(registry.listAll()).toEqual({ "svc:prod": { type: "string" } });
+    expect(registry.listAll()).toEqual({ "/svc:prod": { type: "string" } });
   });
 
   test("persistent registry throws for invalid persisted root", async () => {
     const configService = await createWeaverConfigService({
-      providers: [createTestProvider("p1", "platform", { _weaver: { schemas: [] } })],
+      providers: [
+        createTestProvider("p1", "platform", {
+          _weaver: { registry: { schemas: [] } },
+        }),
+      ],
       environment: "dev",
     });
 
     await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(/Persisted schema registry must be an object/);
+  });
+
+  test("register rejects legacy target fields", async () => {
+    const opts = await makeOptions();
+    const registry = createSchemaRegistry(opts);
+
+    const result = await registry.register({
+      ...serviceRegistration("svc", "dev", { type: "object" }),
+      path: "/svc",
+      namespace: "legacy",
+      ownerId: "team-a",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe("VALIDATION_ERROR");
   });
 
   test("write failure returns failed result without updating memory", async () => {
@@ -200,9 +293,10 @@ describe("SchemaRegistry", () => {
     const registry = await createPersistentSchemaRegistry({ configService });
 
     const result = await registry.register({
-      serviceId: "svc",
-      declaration: { type: "object", properties: { host: { type: "string" } } },
-      environment: "dev",
+      ...serviceRegistration("svc", "dev", {
+        type: "object",
+        properties: { host: { type: "string" } },
+      }),
     });
 
     expect(result.success).toBe(false);

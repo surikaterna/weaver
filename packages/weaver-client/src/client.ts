@@ -12,7 +12,6 @@ import type {
   TypedNamespaceClient,
   UntypedNamespaceClient,
 } from "./namespace";
-import { registerNamespaces } from "./registration";
 import type { ValidationResult } from "./schema-registry";
 import {
   type ClientSchemaRegistry,
@@ -357,10 +356,6 @@ export async function createWeaverClient(
     },
 
     namespace: namespaceClient,
-
-    async registerNamespaces(definitions: ReadonlyArray<NamespaceDefinition>) {
-      return registerNamespaces(definitions, transport);
-    },
   };
 
   return client;

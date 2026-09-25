@@ -108,6 +108,18 @@ export type {
 // result.ts — Discriminated Result<T,E> union for fallible operations
 export type { Result } from "./result";
 export { err, isErr, isOk, ok } from "./result";
+// schema-registration.ts — Path-first schema registration contracts
+export type {
+  FragmentSchemaRegistrationRequest,
+  FragmentSlotDeclaration,
+  FragmentSlotRegistrationMetadata,
+  RegistrationOwner,
+  SchemaRegistrationAuditMetadata,
+  SchemaRegistrationMetadata,
+  SchemaRegistrationRequest,
+  SchemaRegistrationResponse,
+  ServiceSchemaRegistrationRequest,
+} from "./schema-registration";
 // schemas-access.ts — Zod schemas for access context and write policy types
 export {
   configurationAccessContextSchema,
@@ -187,6 +199,17 @@ export {
   syncStatusSyncingSchema,
   writeResultSchema,
 } from "./schemas-providers";
+// schemas-schema-registration.ts — Zod schemas for path-first schema registration contracts
+export {
+  fragmentSchemaRegistrationRequestSchema,
+  fragmentSlotDeclarationSchema,
+  fragmentSlotRegistrationMetadataSchema,
+  registrationOwnerSchema,
+  schemaRegistrationAuditMetadataSchema,
+  schemaRegistrationMetadataSchema,
+  schemaRegistrationResponseSchema,
+  serviceSchemaRegistrationRequestSchema,
+} from "./schemas-schema-registration";
 // schemas-session.ts — Zod schemas for session types
 export {
   godModeSessionSchema,
