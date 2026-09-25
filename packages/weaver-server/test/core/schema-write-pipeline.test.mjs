@@ -1,5 +1,7 @@
+import { validatePartialConfiguration } from "@weaver-conf/config-engine";
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import { buildSchemaPatch } from "../../src/core/config-service-schema-patches.ts";
+import { prepareRegisteredPatchWrite } from "../../src/core/config-service-schema-writes.ts";
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { createSchemaRegistry } from "../../src/core/schema-registry.ts";
 
@@ -108,6 +110,14 @@ function serviceRegistration(schema, fragmentSlots = [], serviceId = "billing") 
   };
 }
 
+function sharedAllOfDiamond(depth, leaf) {
+  let schema = leaf;
+  for (let index = 0; index < depth; index++) {
+    schema = { type: "object", allOf: [schema, schema], additionalProperties: true };
+  }
+  return schema;
+}
+
 async function makeRegisteredService(entries = {}) {
   const provider = createTestProvider("p1", "platform", entries);
   const service = await createWeaverConfigService({
@@ -116,6 +126,18 @@ async function makeRegisteredService(entries = {}) {
   });
   const registry = createSchemaRegistry({ configService: service });
   await registry.register(serviceRegistration(serviceSchema));
+  return { provider, registry, service };
+}
+
+async function makeCompositionService(schema, value) {
+  const provider = createTestProvider("p1", "platform", { billing: value });
+  const service = await createWeaverConfigService({
+    providers: [provider],
+    environment: "test",
+  });
+  const registry = createSchemaRegistry({ configService: service });
+  const registration = await registry.register(serviceRegistration(schema));
+  expect(registration.success).toBe(true);
   return { provider, registry, service };
 }
 
@@ -169,6 +191,536 @@ const extensibleServiceSchema = {
 };
 
 describe("schema-registered config writes", () => {
+  test("composition accepts a full registered candidate and emits one effect", async () => {
+    const branches = [
+      {
+        type: "object",
+        properties: {
+          kind: { type: "string", const: "text" },
+          value: { type: "string" },
+        },
+        additionalProperties: true,
+      },
+      {
+        type: "object",
+        properties: {
+          kind: { type: "string", const: "count" },
+          value: { type: "number" },
+        },
+        additionalProperties: true,
+      },
+    ];
+    const schema = {
+      type: "object",
+      properties: {
+        kind: { type: "string" },
+        value: { type: ["string", "number"] },
+      },
+      additionalProperties: false,
+      anyOf: branches,
+      oneOf: branches,
+      allOf: [{ type: "object", maxProperties: 2, additionalProperties: true }],
+      not: {
+        type: "object",
+        const: { kind: "blocked", value: "blocked" },
+        additionalProperties: true,
+      },
+    };
+    const initial = { kind: "text", value: "old" };
+    const { provider, registry, service } = await makeCompositionService(
+      schema,
+      initial,
+    );
+    let notifications = 0;
+    const unsubscribe = service.onDelta(() => notifications++);
+
+    const result = await patchRegistered(
+      service,
+      registry,
+      "/billing/value",
+      "new",
+    );
+
+    expect(result).toEqual({ success: true });
+    expect(provider.writes).toEqual([
+      { key: "billing", value: { kind: "text", value: "new" } },
+    ]);
+    expect(notifications).toBe(1);
+    unsubscribe();
+  });
+
+  test("contextual anyOf rejection is full-candidate and has zero effects", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        kind: { type: "string" },
+        value: { type: ["string", "number"] },
+      },
+      additionalProperties: false,
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { type: "string", const: "text" },
+            value: { type: "string" },
+          },
+          additionalProperties: true,
+        },
+        {
+          type: "object",
+          properties: {
+            kind: { type: "string", const: "count" },
+            value: { type: "number" },
+          },
+          additionalProperties: true,
+        },
+      ],
+    };
+    const initial = { kind: "text", value: "old" };
+    const { provider, registry, service } = await makeCompositionService(
+      schema,
+      initial,
+    );
+    const revision = service.revision;
+    const prototype = Object.getPrototypeOf(initial);
+    let notifications = 0;
+    const unsubscribe = service.onDelta(() => notifications++);
+
+    const result = await patchRegistered(
+      service,
+      registry,
+      "/billing/value",
+      1,
+    );
+
+    expect(result.error.details.errors[0]).toMatchObject({
+      code: "invalid-value",
+      path: "$.billing",
+      message: "Value must match at least one anyOf branch",
+    });
+    await expectNoEffects(provider, service, { billing: initial }, revision);
+    expect(notifications).toBe(0);
+    expect(Object.getPrototypeOf(initial)).toBe(prototype);
+    unsubscribe();
+  });
+
+  test("patch sessions validate leaf, existing value, and every candidate branch in order", async () => {
+    const branchReads = [0, 0];
+    const branch = (index, kind, valueType) => {
+      const kindSchema = { type: "string" };
+      Object.defineProperty(kindSchema, "const", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          branchReads[index] += 1;
+          return kind;
+        },
+      });
+      return {
+        type: "object",
+        properties: { kind: kindSchema, value: { type: valueType } },
+        additionalProperties: true,
+      };
+    };
+    const schema = {
+      type: "object",
+      properties: {
+        kind: { type: "string" },
+        value: { type: ["string", "number"] },
+      },
+      additionalProperties: false,
+      anyOf: [branch(0, "text", "string"), branch(1, "count", "number")],
+    };
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const events = [];
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/value",
+      1,
+      { schemaRegistry: { resolveAnchor: async () => anchor } },
+      "test",
+      async () => {
+        events.push("existing");
+        return { kind: "text", value: "old" };
+      },
+    );
+
+    expect(events).toEqual(["existing"]);
+    expect(branchReads).toEqual([7, 7]);
+    expect(result.result.error.details.errors).toEqual([
+      {
+        code: "invalid-value",
+        path: "$.billing",
+        segments: ["billing"],
+        message: "Value must match at least one anyOf branch",
+      },
+    ]);
+  });
+
+  test("invalid patch leaves stop before existing-value retrieval", async () => {
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema: serviceSchema,
+      environment: "test",
+      metadata: {},
+    };
+    let reads = 0;
+
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/limit",
+      "invalid",
+      { schemaRegistry: { resolveAnchor: async () => anchor } },
+      "test",
+      async () => {
+        reads += 1;
+        return { mode: "test" };
+      },
+    );
+
+    expect(result.success).toBe(false);
+    expect(reads).toBe(0);
+    expect(result.result.error.details.errors[0]).toMatchObject({
+      code: "invalid-type",
+      path: "$.billing.limit",
+    });
+  });
+
+  test("refreshes after a schema getter introduces composition during leaf preparation", async () => {
+    const schema = {
+      type: "object",
+      properties: { value: { type: ["string", "number"] } },
+      additionalProperties: false,
+    };
+    let introduced = false;
+    Object.defineProperty(schema, "maxProperties", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        if (!introduced) {
+          introduced = true;
+          schema.anyOf = [{
+            type: "object",
+            properties: { value: { type: "string" } },
+            additionalProperties: true,
+          }];
+        }
+        return undefined;
+      },
+    });
+    const provider = createTestProvider("p1", "platform", {
+      billing: { value: "old" },
+    });
+    const service = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const registry = { resolveAnchor: async () => anchor };
+    const initialRevision = service.revision;
+    const schemaPrototype = Object.getPrototypeOf(schema);
+    let notifications = 0;
+    const unsubscribe = service.onDelta(() => notifications++);
+
+    const result = await patchRegistered(
+      service,
+      registry,
+      "/billing/value",
+      1,
+    );
+    const fresh = validatePartialConfiguration(schema, { value: 1 }, {
+      path: ["billing"],
+    });
+
+    expect(result.error.details.errors).toEqual(fresh.errors);
+    expect(provider.writes).toEqual([]);
+    expect(notifications).toBe(0);
+    expect(service.revision).toBe(initialRevision);
+    expect(await providerEntries(provider)).toEqual({
+      billing: { value: "old" },
+    });
+    expect(Object.getPrototypeOf(schema)).toBe(schemaPrototype);
+    unsubscribe();
+  });
+
+  test("refreshes after awaited layer retrieval mutates composition", async () => {
+    const branch = {
+      type: "object",
+      properties: { value: { type: ["string", "number"] } },
+      additionalProperties: true,
+    };
+    const schema = {
+      type: "object",
+      properties: { value: { type: ["string", "number"] } },
+      additionalProperties: false,
+    };
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const events = [];
+
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/value",
+      1,
+      { schemaRegistry: { resolveAnchor: async () => anchor } },
+      "test",
+      async () => {
+        events.push("layer-read");
+        await Promise.resolve();
+        schema.anyOf = [branch];
+        branch.properties.value.type = "string";
+        events.push("schema-mutated");
+        return { value: "old" };
+      },
+    );
+    const fresh = validatePartialConfiguration(schema, { value: 1 }, {
+      path: ["billing"],
+    });
+
+    expect(events).toEqual(["layer-read", "schema-mutated"]);
+    expect(result.success).toBe(false);
+    expect(result.result.error.details.errors).toEqual(fresh.errors);
+  });
+
+  test("refreshes candidate preparation after existing-value mutation", async () => {
+    const schema = {
+      type: "object",
+      properties: { value: { type: ["string", "number"] } },
+      additionalProperties: false,
+    };
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const existing = {};
+    Object.defineProperty(existing, "value", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        schema.anyOf = [{
+          type: "object",
+          properties: { value: { type: "string" } },
+          additionalProperties: true,
+        }];
+        return "old";
+      },
+    });
+
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/value",
+      1,
+      { schemaRegistry: { resolveAnchor: async () => anchor } },
+      "test",
+      async () => existing,
+    );
+    const fresh = validatePartialConfiguration(schema, { value: 1 }, {
+      path: ["billing"],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.result.error.details.errors).toEqual(fresh.errors);
+    expect(Object.getPrototypeOf(existing)).toBe(Object.prototype);
+  });
+
+  test("refreshes candidate preparation after patch cloning mutation", async () => {
+    const schema = {
+      type: "object",
+      properties: { value: { type: ["string", "number"] } },
+      additionalProperties: false,
+    };
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const existing = {};
+    let reads = 0;
+    Object.defineProperty(existing, "value", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        reads += 1;
+        if (reads === 3) {
+          schema.anyOf = [{
+            type: "object",
+            properties: { value: { type: "string" } },
+            additionalProperties: true,
+          }];
+        }
+        return "old";
+      },
+    });
+
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/value",
+      1,
+      { schemaRegistry: { resolveAnchor: async () => anchor } },
+      "test",
+      async () => existing,
+    );
+    const fresh = validatePartialConfiguration(schema, { value: 1 }, {
+      path: ["billing"],
+    });
+
+    expect(reads).toBe(3);
+    expect(result.success).toBe(false);
+    expect(result.result.error.details.errors).toEqual(fresh.errors);
+  });
+
+  test("oneOf ambiguity and contextual not rejection have zero effects", async () => {
+    const oneOfSchema = {
+      type: "object",
+      properties: {
+        kind: { type: "string" },
+        value: { type: "string" },
+      },
+      additionalProperties: false,
+      oneOf: [
+        {
+          type: "object",
+          properties: { kind: { type: "string", const: "text" } },
+          additionalProperties: true,
+        },
+        {
+          type: "object",
+          properties: { value: { type: "string" } },
+          additionalProperties: true,
+        },
+      ],
+    };
+    const oneOfInitial = { kind: "count", value: "old" };
+    const oneOf = await makeCompositionService(oneOfSchema, oneOfInitial);
+    const oneOfRevision = oneOf.service.revision;
+    const ambiguous = await patchRegistered(
+      oneOf.service,
+      oneOf.registry,
+      "/billing/kind",
+      "text",
+    );
+    expect(ambiguous.error.details.errors[0]).toMatchObject({
+      message: "Value must match exactly one oneOf branch (matched 2)",
+    });
+    await expectNoEffects(
+      oneOf.provider,
+      oneOf.service,
+      { billing: oneOfInitial },
+      oneOfRevision,
+    );
+
+    const notSchema = {
+      type: "object",
+      properties: {
+        kind: { type: "string" },
+        value: { type: "string" },
+      },
+      additionalProperties: false,
+      not: {
+        type: "object",
+        const: { kind: "blocked", value: "blocked" },
+        additionalProperties: true,
+      },
+    };
+    const notInitial = { kind: "blocked", value: "allowed" };
+    const notCase = await makeCompositionService(notSchema, notInitial);
+    const notRevision = notCase.service.revision;
+    const blocked = await patchRegistered(
+      notCase.service,
+      notCase.registry,
+      "/billing/value",
+      "blocked",
+    );
+    expect(blocked.error.details.errors[0]).toMatchObject({
+      message: "Value must not match the not schema",
+    });
+    await expectNoEffects(
+      notCase.provider,
+      notCase.service,
+      { billing: notInitial },
+      notRevision,
+    );
+  });
+
+  test("allOf projects local constraints and missing-container array shape", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        value: { type: "number" },
+        groups: {
+          type: ["array", "object"],
+          additionalProperties: true,
+          allOf: [
+            {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { name: { type: "string" } },
+                additionalProperties: false,
+              },
+            },
+          ],
+        },
+      },
+      additionalProperties: false,
+      allOf: [
+        {
+          type: "object",
+          properties: { value: { type: "number", minimum: 1 } },
+          additionalProperties: true,
+        },
+      ],
+    };
+    const initial = { value: 1 };
+    const { provider, registry, service } = await makeCompositionService(
+      schema,
+      initial,
+    );
+    const revision = service.revision;
+
+    const invalid = await patchRegistered(
+      service,
+      registry,
+      "/billing/value",
+      0,
+    );
+    expect(invalid.error.details.errors[0]).toMatchObject({
+      code: "invalid-value",
+      path: "$.billing.value",
+    });
+    await expectNoEffects(provider, service, { billing: initial }, revision);
+
+    const appended = await patchRegistered(
+      service,
+      registry,
+      "/billing/groups/0/name",
+      "first",
+    );
+    expect(appended).toEqual({ success: true });
+    expect(provider.writes[0]).toEqual({
+      key: "billing",
+      value: { value: 1, groups: [{ name: "first" }] },
+    });
+  });
+
   test("object writes at registered service anchors validate partial compatibility", async () => {
     const { provider, registry, service } = await makeRegisteredService();
 
@@ -508,6 +1060,68 @@ describe("schema-registered config writes", () => {
     );
     await expectNoEffects(provider, service, initialEntries, initialRevision);
     expect(await service.get("billing.mode")).toBe("test");
+  });
+
+  test("patches cannot bypass invalid existing values by repairing them", async () => {
+    const { provider, registry, service } = await makeRegisteredService({
+      billing: { mode: "test", limit: "bad" },
+    });
+    const initialEntries = await providerEntries(provider);
+    const initialRevision = service.revision;
+
+    const result = await patchRegistered(service, registry, "/billing/limit", 5);
+
+    expect(result.error.details.errors[0]).toMatchObject({
+      code: "invalid-type",
+      path: "$.billing.limit",
+      actual: "string",
+    });
+    await expectNoEffects(provider, service, initialEntries, initialRevision);
+  });
+
+  test("separate writes prepare fresh sessions after schema mutation", async () => {
+    const member = { type: "string" };
+    const schema = {
+      type: "object",
+      properties: { value: member },
+      additionalProperties: false,
+    };
+    const provider = createTestProvider("p1", "platform", {
+      billing: { value: "old" },
+    });
+    const service = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const registry = { resolveAnchor: async () => anchor };
+
+    expect(
+      await patchRegistered(service, registry, "/billing/value", "first"),
+    ).toEqual({ success: true });
+    member.type = "number";
+    const rejected = await patchRegistered(
+      service,
+      registry,
+      "/billing/value",
+      "second",
+    );
+
+    expect(rejected.error.details.errors[0]).toMatchObject({
+      code: "invalid-type",
+      path: "$.billing.value",
+      expected: "number",
+    });
+    expect(await providerEntries(provider)).toEqual({
+      billing: { value: "first" },
+    });
+    expect(provider.writes).toHaveLength(1);
   });
 
   test("patches reject a resulting anchor object that violates schema bounds", async () => {
@@ -869,5 +1483,72 @@ describe("schema-registered config writes", () => {
     cursor = result.value;
     for (const segment of segments) cursor = cursor[segment];
     expect(cursor).toBe("new");
+  });
+
+  test.each([30, 40])("builds depth-%i shared allOf patches", (depth) => {
+    const schema = sharedAllOfDiamond(depth, {
+      type: "object",
+      properties: { x: { type: "string" } },
+      additionalProperties: true,
+    });
+    expect(buildSchemaPatch({}, ["x"], "ok", schema)).toEqual({
+      success: true,
+      value: { x: "ok" },
+    });
+  });
+
+  test("shared allOf registered patches retain effect safety", async () => {
+    const contextual = {
+      type: "object",
+      properties: { kind: { type: "string" }, value: { type: ["string", "number"] } },
+      additionalProperties: false,
+      anyOf: [{
+        type: "object",
+        properties: { kind: { type: "string", const: "text" }, value: { type: "string" } },
+        additionalProperties: true,
+      }],
+    };
+    const schema = sharedAllOfDiamond(40, contextual);
+    const provider = createTestProvider("p1", "platform", {
+      billing: { kind: "text", value: "old" },
+    });
+    const service = await createWeaverConfigService({
+      providers: [provider],
+      environment: "test",
+    });
+    const anchor = {
+      kind: "service",
+      path: "/billing",
+      schema,
+      environment: "test",
+      metadata: {},
+    };
+    const registry = { resolveAnchor: async () => anchor };
+    const initialRevision = service.revision;
+    let notifications = 0;
+    const unsubscribe = service.onDelta(() => notifications++);
+
+    expect(await patchRegistered(service, registry, "/billing/value", "new")).toEqual({ success: true });
+    const acceptedEntries = await providerEntries(provider);
+    const acceptedRevision = service.revision;
+    expect([provider.writes.length, notifications]).toEqual([1, 1]);
+    expect(acceptedRevision).not.toBe(initialRevision);
+    expect(acceptedEntries).toEqual({ billing: { kind: "text", value: "new" } });
+
+    const invalid = await patchRegistered(service, registry, "/billing/value", 1);
+    expect(invalid.error.details.errors).toEqual([
+      expect.objectContaining({
+        code: "invalid-value",
+        path: "$.billing",
+        message: "Value must match every allOf branch (matched 0 of 2)",
+      }),
+    ]);
+    expect([provider.writes.length, notifications]).toEqual([1, 1]);
+    expect(service.revision).toBe(acceptedRevision);
+    const unchangedEntries = await providerEntries(provider);
+    expect(unchangedEntries).toEqual(acceptedEntries);
+    expect(Object.getPrototypeOf(unchangedEntries)).toBe(Object.prototype);
+    expect(Object.getPrototypeOf(unchangedEntries.billing)).toBe(Object.prototype);
+    unsubscribe();
   });
 });
