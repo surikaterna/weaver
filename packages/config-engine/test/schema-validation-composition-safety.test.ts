@@ -415,6 +415,39 @@ describe("call-local validation sessions", () => {
     expect(value).toEqual({ value: "text" });
   });
 
+  it("keeps a private base path copy across schema invalidation", () => {
+    const member: ConfigurationPropertySchema = { type: "string" };
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: { value: member },
+    };
+    const callerPath = ["original"];
+    const session = createConfigurationValidationSession(schema, {
+      path: callerPath,
+    });
+
+    expect(session.validatePartial({ value: "valid" })).toEqual({
+      valid: true,
+      errors: [],
+    });
+    callerPath[0] = "mutated";
+    member.type = "number";
+
+    expect(session.validatePartial({ value: "invalid" })).toEqual({
+      valid: false,
+      errors: [
+        {
+          code: "invalid-type",
+          path: "$.original.value",
+          segments: ["original", "value"],
+          message: "Value does not match schema type",
+          expected: "number",
+          actual: "string",
+        },
+      ],
+    });
+  });
+
   it("refreshes for root, nested, and composition-array topology changes", () => {
     const nested: ConfigurationPropertySchema = { type: "string" };
     const branches: ConfigurationPropertySchema[] = [

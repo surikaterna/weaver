@@ -9,6 +9,7 @@ import {
 } from "./schema-validation-schema-stability";
 import {
   createValidationPath,
+  type PathSegmentsResult,
   type SchemaValidationOptions,
   type SchemaValidationPathSegment,
   type SchemaValidationResult,
@@ -52,12 +53,13 @@ export function createConfigurationValidationSession(
   schema: ConfigurationPropertySchema,
   options?: SchemaValidationOptions,
 ): ConfigurationValidationSession {
+  const basePath = toPathSegmentsResult(options?.path);
   let state: PreparationState | undefined;
   const currentPreparation = (): ValidationPreparation => {
     if (state !== undefined && schemaStabilityMatches(state.stability)) {
       return state.preparation;
     }
-    state = createPreparationState(schema, options);
+    state = createPreparationState(schema, basePath);
     return state.preparation;
   };
   return {
@@ -72,9 +74,9 @@ export function createConfigurationValidationSession(
 
 function createPreparationState(
   schema: ConfigurationPropertySchema,
-  options: SchemaValidationOptions | undefined,
+  basePath: PathSegmentsResult,
 ): PreparationState {
-  const preparation = prepareValidation(schema, options);
+  const preparation = prepareValidation(schema, basePath);
   return {
     preparation,
     stability: captureSchemaStability(schema),
@@ -83,9 +85,8 @@ function createPreparationState(
 
 function prepareValidation(
   schema: ConfigurationPropertySchema,
-  options: SchemaValidationOptions | undefined,
+  parsedPath: PathSegmentsResult,
 ): ValidationPreparation {
-  const parsedPath = toPathSegmentsResult(options?.path);
   if (parsedPath.error !== undefined) {
     return { error: invalidPathResult(parsedPath.error) };
   }
