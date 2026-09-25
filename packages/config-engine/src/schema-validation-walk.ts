@@ -81,7 +81,6 @@ interface WalkRuntime {
   readonly plan: SchemaValidationPlan;
   memo?: CompositionMemo;
 }
-
 export function validateValuesIteratively(
   states: readonly ValidationState[],
   plan: SchemaValidationPlan,

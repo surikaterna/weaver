@@ -105,8 +105,16 @@ export function validateSchemaGraph(
       predicateScalars: inspection.predicateScalars,
     };
   }
+  return rejectCyclicSchema(inspection.cyclic, path, context);
+}
+
+function rejectCyclicSchema(
+  cyclic: boolean,
+  path: ValidationPath,
+  context: ValidationContext,
+): undefined {
   addContextError(context, "invalid-schema", path, {
-    message: inspection.cyclic
+    message: cyclic
       ? "Schema must not contain cycles"
       : "Schema constraint values must not contain cycles",
   });
