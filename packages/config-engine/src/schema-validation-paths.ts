@@ -1,6 +1,5 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 
-import { rejectUnsupportedComposition } from "./schema-validation-composition";
 import {
   allowsType,
   compileSchemaPattern,
@@ -44,7 +43,9 @@ export function collectMemberSchemas(
   context: ValidationContext,
 ): ConfigurationPropertySchema[] {
   const schemas: ConfigurationPropertySchema[] = [];
-  const properties = schema.properties;
+  const properties = Object.hasOwn(schema, "properties")
+    ? schema.properties
+    : undefined;
   const declared =
     properties !== undefined && Object.hasOwn(properties, key)
       ? properties[key]
@@ -60,11 +61,20 @@ function resolveNextSchemas(
   path: readonly SchemaValidationPathSegment[],
   errors: SchemaValidationError[],
 ): ConfigurationPropertySchema[] {
-  const context: ValidationContext = { mode: "partial", errors };
-  if (rejectUnsupportedComposition(schema, path, context)) {
-    return [];
+  const resolved: ConfigurationPropertySchema[] = [];
+  for (const projected of directAndAllOfSchemas(schema)) {
+    resolved.push(...resolveDirectSchema(projected, segment, path, errors));
+    if (errors.length > 0) return [];
   }
+  return resolved;
+}
 
+function resolveDirectSchema(
+  schema: ConfigurationPropertySchema,
+  segment: SchemaValidationPathSegment,
+  path: readonly SchemaValidationPathSegment[],
+  errors: SchemaValidationError[],
+): ConfigurationPropertySchema[] {
   if (allowsType(schema, "object")) {
     return resolveObjectMemberSchema(schema, String(segment), path, errors);
   }
@@ -81,6 +91,30 @@ function resolveNextSchemas(
   return [];
 }
 
+function directAndAllOfSchemas(
+  schema: ConfigurationPropertySchema,
+): readonly ConfigurationPropertySchema[] {
+  const projected: ConfigurationPropertySchema[] = [];
+  const pending = [schema];
+  const completed = new WeakSet<ConfigurationPropertySchema>();
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) continue;
+    if (completed.has(current)) continue;
+    completed.add(current);
+    projected.push(current);
+    const branches = Object.hasOwn(current, "allOf")
+      ? current.allOf
+      : undefined;
+    if (!Array.isArray(branches)) continue;
+    for (let index = branches.length - 1; index >= 0; index--) {
+      const branch = branches[index];
+      if (branch !== undefined) pending.push(branch);
+    }
+  }
+  return projected;
+}
+
 function resolveObjectMemberSchema(
   schema: ConfigurationPropertySchema,
   key: string,
@@ -90,11 +124,11 @@ function resolveObjectMemberSchema(
   const context: ValidationContext = { mode: "partial", errors };
   const schemas = collectMemberSchemas(schema, key, path, context);
   if (schemas.length > 0) return schemas;
-  if (schema.additionalProperties === true) return [];
-  if (
-    schema.additionalProperties === undefined ||
-    schema.additionalProperties === false
-  ) {
+  const additional = Object.hasOwn(schema, "additionalProperties")
+    ? schema.additionalProperties
+    : undefined;
+  if (additional === true) return [];
+  if (additional === undefined || additional === false) {
     errors.push(
       makeError(
         "unknown-property",
@@ -104,7 +138,7 @@ function resolveObjectMemberSchema(
     );
     return [];
   }
-  return [schema.additionalProperties];
+  return [additional];
 }
 
 function resolveArrayMemberSchema(
@@ -124,7 +158,7 @@ function resolveArrayMemberSchema(
     );
     return [];
   }
-  const items = schema.items;
+  const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
   if (items === undefined) return [];
   if (!isSchemaArray(items)) return [items];
   const item = items[index];
@@ -137,7 +171,10 @@ function patternSchemas(
   path: ValidationErrorPath,
   context: ValidationContext,
 ): ConfigurationPropertySchema[] {
-  const entries = Object.entries(schema.patternProperties ?? {});
+  const patterns = Object.hasOwn(schema, "patternProperties")
+    ? schema.patternProperties
+    : undefined;
+  const entries = Object.entries(patterns ?? {});
   return entries.flatMap(([pattern, nestedSchema]) => {
     const regex = compileSchemaPattern(pattern, path, context);
     return regex?.test(key) === true ? [nestedSchema] : [];

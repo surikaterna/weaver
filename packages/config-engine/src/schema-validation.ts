@@ -1,4 +1,5 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
+import { createCompositionMemo } from "./schema-validation-composition";
 import {
   validateSchemaGraph,
   validateValueGraph,
@@ -71,7 +72,7 @@ export function validateConfigurationPatch(
     path: targetPath,
     context,
   }));
-  validateValuesIteratively(states);
+  validateValuesIteratively(states, createCompositionMemo());
   return result(context);
 }
 
@@ -88,7 +89,10 @@ function validateSchema(
   const path = createValidationPath(parsedPath.segments);
   if (!validateSchemaGraph(schema, path, context)) return result(context);
   if (!validateValueGraph(value, path, context)) return result(context);
-  validateValuesIteratively([{ schema, value, path, context }]);
+  validateValuesIteratively(
+    [{ schema, value, path, context }],
+    createCompositionMemo(),
+  );
   return result(context);
 }
 

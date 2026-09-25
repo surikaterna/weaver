@@ -14,6 +14,14 @@ pnpm add @weaver-conf/config-engine
 
 The package also provides namespace utilities for the `{namespace}.{category}.{setting}` key format, a scope chain builder for dynamic tenant hierarchies, a schema registry for aggregating property declarations across modules, and codegen utilities for generating JSON Schema and Zod source from property schemas.
 
+### Schema composition validation
+
+The configuration validators support `anyOf`, `oneOf`, `allOf`, and `not` at every schema location. Composition keywords, ordinary sibling constraints, and multiple composition keywords on the same schema are conjunctive. Failed branches remain private; callers receive one summary error for each failed composition keyword.
+
+Partial validation does not apply defaults or enforce `required` and `minProperties`. Effective validation uses root and branch defaults as nonmutating fallbacks, so defaults can make multiple `oneOf` branches match without changing or persisting the input.
+
+Patch validation fully checks composition on the resolved leaf. At unknown ancestor context it conservatively defers `anyOf`, `oneOf`, and `not`, while retaining direct and `allOf` structural constraints. Registered server writes always validate the fully patched candidate before storage mutation, which remains authoritative for sibling-dependent composition.
+
 ## Usage
 
 ### Deep merge
