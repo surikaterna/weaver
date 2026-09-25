@@ -397,7 +397,12 @@ describe("SchemaRegistry", () => {
           schemas: {
             "/example-service": {
               kind: "service",
-              schema: { type: "object" },
+              schema: {
+                encoding: "weaver.configuration-property-schema-graph",
+                version: 1,
+                root: 0,
+                nodes: [{ type: "object" }],
+              },
               metadata: {
                 serviceId: "example-service",
                 servicePath: "/example-service",

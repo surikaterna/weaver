@@ -200,8 +200,13 @@ describe("SchemaRegistry", () => {
             "/billing": {
               kind: "service",
               schema: {
-                type: "object",
-                properties: { enabled: { type: "boolean" } },
+                encoding: "weaver.configuration-property-schema-graph",
+                version: 1,
+                root: 0,
+                nodes: [
+                  { type: "object", properties: { enabled: 1 } },
+                  { type: "boolean" },
+                ],
               },
               metadata: {
                 serviceId: "billing",
