@@ -1,25 +1,46 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 
 import {
-  getCompositionEntries,
+  COMPOSITION_KEYWORDS,
+  getCompositionBranches,
+  hasComposition,
   isSupportedSchema,
-  validateCompositionShape,
 } from "./schema-validation-composition";
 import {
+  collectConstraintRoots,
+  hasObjectCycle,
+} from "./schema-validation-constraint-graph";
+import { validateSchemaNode } from "./schema-validation-definitions";
+import { validateShallowComposition } from "./schema-validation-shallow-composition";
+import {
+  hasOnlyTypeLeafChildren,
+  hasSchemaChildren,
+  isTypeLeafSchema,
+  validateTypeLeafChildren,
+} from "./schema-validation-shallow-graph";
+import {
   addContextError,
-  appendValidationPath,
-  compileSchemaPattern,
   isSchemaArray,
-  type SchemaValidationPathSegment,
   type ValidationContext,
   type ValidationPath,
 } from "./schema-validation-support";
 
 interface SchemaInspection {
-  readonly cyclic: boolean;
-  readonly valid: boolean;
-  readonly nodes: readonly ConfigurationPropertySchema[];
+  cyclic: boolean;
+  valid: boolean;
+  composed?: WeakSet<ConfigurationPropertySchema> | undefined;
+  readonly constraintRoots: unknown[];
+  memoEligible?: WeakSet<object> | undefined;
+  predicateScalars?: WeakSet<ConfigurationPropertySchema> | undefined;
 }
+
+export interface SchemaValidationPlan {
+  readonly composed?: WeakSet<ConfigurationPropertySchema> | undefined;
+  readonly memoEligible?: WeakSet<object> | undefined;
+  readonly predicateScalars?: WeakSet<ConfigurationPropertySchema> | undefined;
+}
+
+const EMPTY_SCHEMA_VALIDATION_PLAN: SchemaValidationPlan = {};
 
 type SchemaGraphFrame =
   | {
@@ -29,58 +50,128 @@ type SchemaGraphFrame =
     }
   | { readonly kind: "exit"; readonly value: ConfigurationPropertySchema };
 
-type GraphFrame<T extends object> =
-  | { readonly kind: "enter"; readonly value: T }
-  | { readonly kind: "exit"; readonly value: T };
-
-type ValueCycleFrame =
-  | {
-      readonly kind: "enter";
-      readonly value: unknown;
-      readonly path: ValidationPath;
-    }
-  | { readonly kind: "exit"; readonly value: object };
+interface GraphInspectionRuntime {
+  readonly context: ValidationContext;
+  readonly inspection: SchemaInspection;
+  readonly path: ValidationPath;
+  readonly pending: SchemaGraphFrame[];
+  readonly root: ConfigurationPropertySchema;
+  readonly rootComposed: boolean;
+  readonly rootValidated: boolean;
+  readonly supportsSchema: (value: unknown) => boolean;
+  readonly visits: WeakMap<object, "supported" | "active" | "completed">;
+}
 
 export function validateSchemaGraph(
   schema: ConfigurationPropertySchema,
   path: ValidationPath,
   context: ValidationContext,
-): boolean {
-  const inspection = inspectSchemaGraph(schema, path, context);
-  if (!inspection.valid) return false;
-  const constraintCycle = hasObjectCycle(
-    schemaConstraintRoots(inspection.nodes),
+): SchemaValidationPlan | undefined {
+  if (!isSupportedSchema(schema)) {
+    addContextError(context, "invalid-schema", path, {
+      message: "Schema must have a supported non-empty type",
+    });
+    return undefined;
+  }
+  if (isTypeLeafSchema(schema)) return EMPTY_SCHEMA_VALIDATION_PLAN;
+  const rootComposed = hasComposition(schema);
+  if (!hasSchemaChildren(schema, rootComposed)) {
+    return validateSingleSchema(schema, path, context);
+  }
+  if (
+    !validateSchemaNode(schema, path, context, isSupportedSchema, rootComposed)
+  ) {
+    return undefined;
+  }
+  if (rootComposed) {
+    const shallowPlan = validateShallowComposition(schema, path, context);
+    if (shallowPlan !== null) return shallowPlan;
+  } else if (hasOnlyTypeLeafChildren(schema)) {
+    return validateShallowSchema(schema, path, context);
+  }
+  const inspection = inspectSchemaGraph(
+    schema,
+    path,
+    context,
+    rootComposed,
+    true,
   );
-  if (!inspection.cyclic && !constraintCycle) return true;
+  if (!inspection.valid) return undefined;
+  const constraintCycle = hasObjectCycle(inspection.constraintRoots);
+  if (!inspection.cyclic && !constraintCycle) {
+    return {
+      composed: inspection.composed,
+      memoEligible: inspection.memoEligible,
+      predicateScalars: inspection.predicateScalars,
+    };
+  }
+  return rejectCyclicSchema(inspection.cyclic, path, context);
+}
+
+function rejectCyclicSchema(
+  cyclic: boolean,
+  path: ValidationPath,
+  context: ValidationContext,
+): undefined {
   addContextError(context, "invalid-schema", path, {
-    message: inspection.cyclic
+    message: cyclic
       ? "Schema must not contain cycles"
       : "Schema constraint values must not contain cycles",
   });
-  return false;
+  return undefined;
 }
 
-export function validateValueGraph(
-  value: unknown,
+function validateShallowSchema(
+  schema: ConfigurationPropertySchema,
   path: ValidationPath,
   context: ValidationContext,
-): boolean {
-  const cyclePath = findValueCycle(value, path);
-  if (cyclePath === undefined) return true;
-  addContextError(context, "invalid-value", cyclePath, {
-    message: "Configuration values must not contain cycles",
+): SchemaValidationPlan | undefined {
+  if (!validateTypeLeafChildren(schema, path, context, isSupportedSchema))
+    return undefined;
+  const roots: unknown[] = [];
+  collectConstraintRoots(schema, roots);
+  if (!hasObjectCycle(roots)) return EMPTY_SCHEMA_VALIDATION_PLAN;
+  addContextError(context, "invalid-schema", path, {
+    message: "Schema constraint values must not contain cycles",
   });
-  return false;
+  return undefined;
+}
+
+function validateSingleSchema(
+  schema: ConfigurationPropertySchema,
+  path: ValidationPath,
+  context: ValidationContext,
+): SchemaValidationPlan | undefined {
+  if (!validateSchemaNode(schema, path, context, isSupportedSchema, false)) {
+    return undefined;
+  }
+  const roots: unknown[] = [];
+  collectConstraintRoots(schema, roots);
+  if (!hasObjectCycle(roots)) return EMPTY_SCHEMA_VALIDATION_PLAN;
+  addContextError(context, "invalid-schema", path, {
+    message: "Schema constraint values must not contain cycles",
+  });
+  return undefined;
 }
 
 function inspectSchemaGraph(
   root: ConfigurationPropertySchema,
   path: ValidationPath,
   context: ValidationContext,
+  rootComposed: boolean,
+  rootValidated: boolean,
 ): SchemaInspection {
-  const active = new WeakSet<object>();
-  const completed = new WeakSet<object>();
-  const nodes: ConfigurationPropertySchema[] = [];
+  const visits = new WeakMap<object, "supported" | "active" | "completed">([
+    [root, "supported"],
+  ]);
+  const constraintRoots: unknown[] = [];
+  const inspection: SchemaInspection = {
+    cyclic: false,
+    valid: true,
+    constraintRoots,
+  };
+  const supportsSchema = (value: unknown): boolean =>
+    isKnownSupportedSchema(value, visits);
   const pending: SchemaGraphFrame[] = [
     {
       kind: "enter",
@@ -88,84 +179,166 @@ function inspectSchemaGraph(
       invalidMessage: "Schema must have a supported non-empty type",
     },
   ];
+  const runtime: GraphInspectionRuntime = {
+    context,
+    inspection,
+    path,
+    pending,
+    root,
+    rootComposed,
+    rootValidated,
+    supportsSchema,
+    visits,
+  };
   while (pending.length > 0) {
     const frame = pending.pop();
     if (frame === undefined) continue;
-    if (frame.kind === "exit") {
-      active.delete(frame.value);
-      completed.add(frame.value);
-      continue;
-    }
-    if (!isSupportedSchema(frame.value)) {
-      addContextError(context, "invalid-schema", path, {
-        message: frame.invalidMessage,
-      });
-      return { cyclic: false, valid: false, nodes };
-    }
-    const schema = frame.value;
-    if (active.has(schema)) return { cyclic: true, valid: true, nodes };
-    if (completed.has(schema)) continue;
-    if (!validateSchemaNode(schema, path, context))
-      return { cyclic: false, valid: false, nodes };
-    active.add(schema);
-    nodes.push(schema);
-    pending.push({ kind: "exit", value: schema });
-    pushSchemaChildren(schema, pending);
+    if (!processSchemaGraphFrame(frame, runtime)) return inspection;
   }
-  return { cyclic: false, valid: true, nodes };
+  return inspection;
+}
+
+function processSchemaGraphFrame(
+  frame: SchemaGraphFrame,
+  runtime: GraphInspectionRuntime,
+): boolean {
+  if (frame.kind === "exit") {
+    runtime.visits.set(frame.value, "completed");
+    return true;
+  }
+  if (handleExistingVisit(frame.value, runtime)) {
+    return !runtime.inspection.cyclic;
+  }
+  if (!isKnownSupportedSchema(frame.value, runtime.visits)) {
+    addContextError(runtime.context, "invalid-schema", runtime.path, {
+      message: frame.invalidMessage,
+    });
+    runtime.inspection.valid = false;
+    return false;
+  }
+  return inspectSchemaNode(frame.value, runtime);
+}
+
+function handleExistingVisit(
+  value: unknown,
+  runtime: GraphInspectionRuntime,
+): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const visit = runtime.visits.get(value);
+  if (visit === "completed") {
+    runtime.inspection.memoEligible ??= new WeakSet();
+    runtime.inspection.memoEligible.add(value);
+    return true;
+  }
+  if (visit !== "active") return false;
+  runtime.inspection.cyclic = true;
+  return true;
+}
+
+function inspectSchemaNode(
+  schema: ConfigurationPropertySchema,
+  runtime: GraphInspectionRuntime,
+): boolean {
+  const { inspection, pending, visits } = runtime;
+  if (isTypeLeafSchema(schema)) {
+    inspection.predicateScalars ??= new WeakSet();
+    inspection.predicateScalars.add(schema);
+    visits.set(schema, "completed");
+    return true;
+  }
+  const composed =
+    schema === runtime.root ? runtime.rootComposed : hasComposition(schema);
+  if (composed) {
+    inspection.composed ??= new WeakSet();
+    inspection.composed.add(schema);
+  }
+  if (!validateInspectedSchema(schema, composed, runtime)) return false;
+  visits.set(schema, "active");
+  collectConstraintRoots(schema, inspection.constraintRoots);
+  pending.push({ kind: "exit", value: schema });
+  inspection.predicateScalars ??= new WeakSet();
+  if (hasOnlyTypeLeafChildren(schema, inspection.predicateScalars)) {
+    if (
+      !validateTypeLeafChildren(
+        schema,
+        runtime.path,
+        runtime.context,
+        runtime.supportsSchema,
+      )
+    ) {
+      inspection.valid = false;
+      return false;
+    }
+    if (composed) pushCompositionChildren(schema, pending);
+  } else pushSchemaChildren(schema, pending, composed);
+  return true;
+}
+
+function validateInspectedSchema(
+  schema: ConfigurationPropertySchema,
+  composed: boolean,
+  runtime: GraphInspectionRuntime,
+): boolean {
+  if (schema === runtime.root && runtime.rootValidated) return true;
+  const valid = validateSchemaNode(
+    schema,
+    runtime.path,
+    runtime.context,
+    runtime.supportsSchema,
+    composed,
+  );
+  if (!valid) runtime.inspection.valid = false;
+  return valid;
+}
+
+function isKnownSupportedSchema(
+  value: unknown,
+  visits: WeakMap<object, "supported" | "active" | "completed">,
+): value is ConfigurationPropertySchema {
+  if (typeof value !== "object" || value === null) return false;
+  if (visits.has(value)) return true;
+  if (!isSupportedSchema(value)) return false;
+  visits.set(value, "supported");
+  return true;
 }
 
 function pushSchemaChildren(
   schema: ConfigurationPropertySchema,
   pending: SchemaGraphFrame[],
+  composed: boolean,
 ): void {
-  const children: Extract<SchemaGraphFrame, { kind: "enter" }>[] = [];
-  pushSchemaMapChildren(schema, "properties", children);
-  pushSchemaMapChildren(schema, "patternProperties", children);
+  if (composed) pushCompositionChildren(schema, pending);
+  pushItemChildren(schema, pending);
   const additional = Object.hasOwn(schema, "additionalProperties")
     ? schema.additionalProperties
     : undefined;
   if (additional !== undefined && typeof additional !== "boolean") {
-    children.push({
+    pending.push({
       kind: "enter",
       value: additional,
       invalidMessage:
         "additionalProperties must be a boolean or schema object with a supported non-empty type",
     });
   }
-  pushItemChildren(schema, children);
-  for (const entry of getCompositionEntries(schema)) {
-    for (let index = 0; index < entry.branches.length; index++) {
-      const branch = entry.branches[index];
-      if (branch === undefined) continue;
-      children.push({
-        kind: "enter",
-        value: branch,
-        invalidMessage:
-          entry.keyword === "not"
-            ? "not must be a schema object with a supported non-empty type"
-            : `${entry.keyword} branch ${String(index)} must be a schema object with a supported non-empty type`,
-      });
-    }
-  }
-  for (let index = children.length - 1; index >= 0; index--) {
-    const child = children[index];
-    if (child !== undefined) pending.push(child);
-  }
+  pushSchemaMapChildren(schema, "patternProperties", pending);
+  pushSchemaMapChildren(schema, "properties", pending);
 }
 
 function pushSchemaMapChildren(
   schema: ConfigurationPropertySchema,
   key: "properties" | "patternProperties",
-  children: Extract<SchemaGraphFrame, { kind: "enter" }>[],
+  pending: SchemaGraphFrame[],
 ): void {
   if (!Object.hasOwn(schema, key)) return;
   const map = schema[key];
   if (map === undefined) return;
-  for (const [name, child] of Object.entries(map)) {
-    children.push({
+  const names = Object.keys(map);
+  for (let index = names.length - 1; index >= 0; index--) {
+    const name = names[index];
+    if (name === undefined) continue;
+    pending.push({
       kind: "enter",
-      value: child,
+      value: map[name],
       invalidMessage: `${key} entry ${JSON.stringify(name)} must be a schema object with a supported non-empty type`,
     });
   }
@@ -173,11 +346,11 @@ function pushSchemaMapChildren(
 
 function pushItemChildren(
   schema: ConfigurationPropertySchema,
-  children: Extract<SchemaGraphFrame, { kind: "enter" }>[],
+  pending: SchemaGraphFrame[],
 ): void {
   if (!Object.hasOwn(schema, "items") || schema.items === undefined) return;
   if (!isSchemaArray(schema.items)) {
-    children.push({
+    pending.push({
       kind: "enter",
       value: schema.items,
       invalidMessage:
@@ -185,8 +358,8 @@ function pushItemChildren(
     });
     return;
   }
-  for (let index = 0; index < schema.items.length; index++) {
-    children.push({
+  for (let index = schema.items.length - 1; index >= 0; index--) {
+    pending.push({
       kind: "enter",
       value: Object.hasOwn(schema.items, index)
         ? schema.items[index]
@@ -196,167 +369,27 @@ function pushItemChildren(
   }
 }
 
-function validateSchemaNode(
+function pushCompositionChildren(
   schema: ConfigurationPropertySchema,
-  path: ValidationPath,
-  context: ValidationContext,
-): boolean {
-  if (!isSupportedSchema(schema)) {
-    addContextError(context, "invalid-schema", path, {
-      message: "Schema must have a supported non-empty type",
-    });
-    return false;
-  }
-  if (!validateCompositionShape(schema, path, context)) return false;
-  if (!validateMultipleOfDefinition(schema, path, context)) return false;
-  if (!validatePatternDefinition(schema, path, context)) return false;
-  return validatePatternProperties(schema, path, context);
-}
-
-function validateMultipleOfDefinition(
-  schema: ConfigurationPropertySchema,
-  path: ValidationPath,
-  context: ValidationContext,
-): boolean {
-  if (!Object.hasOwn(schema, "multipleOf")) return true;
-  const divisor = schema.multipleOf;
-  if (divisor === undefined || (Number.isFinite(divisor) && divisor > 0)) {
-    return true;
-  }
-  addContextError(context, "invalid-schema", path, {
-    message: "multipleOf must be positive and finite",
-  });
-  return false;
-}
-
-function validatePatternDefinition(
-  schema: ConfigurationPropertySchema,
-  path: ValidationPath,
-  context: ValidationContext,
-): boolean {
-  if (!Object.hasOwn(schema, "pattern") || schema.pattern === undefined) {
-    return true;
-  }
-  return compileSchemaPattern(schema.pattern, path, context) !== undefined;
-}
-
-function validatePatternProperties(
-  schema: ConfigurationPropertySchema,
-  path: ValidationPath,
-  context: ValidationContext,
-): boolean {
-  if (!Object.hasOwn(schema, "patternProperties")) return true;
-  const patterns = schema.patternProperties;
-  if (patterns === undefined) return true;
-  for (const pattern of Object.keys(patterns)) {
-    if (compileSchemaPattern(pattern, path, context) === undefined)
-      return false;
-  }
-  return true;
-}
-
-function schemaConstraintRoots(
-  nodes: readonly ConfigurationPropertySchema[],
-): readonly unknown[] {
-  const roots: unknown[] = [];
-  for (const schema of nodes) {
-    if (Object.hasOwn(schema, "default") && schema.default !== undefined)
-      roots.push(schema.default);
-    if (Object.hasOwn(schema, "const") && schema.const !== undefined)
-      roots.push(schema.const);
-    if (Object.hasOwn(schema, "enum") && schema.enum !== undefined)
-      roots.push(schema.enum);
-  }
-  return roots;
-}
-
-function hasObjectCycle(roots: readonly unknown[]): boolean {
-  const active = new WeakSet<object>();
-  const completed = new WeakSet<object>();
-  const pending: GraphFrame<object>[] = [];
-  for (let index = roots.length - 1; index >= 0; index--) {
-    const root = roots[index];
-    if (isObjectValue(root)) pending.push({ kind: "enter", value: root });
-  }
-  while (pending.length > 0) {
-    const frame = pending.pop();
-    if (frame === undefined) continue;
-    if (frame.kind === "exit") {
-      active.delete(frame.value);
-      completed.add(frame.value);
-      continue;
-    }
-    if (active.has(frame.value)) return true;
-    if (completed.has(frame.value)) continue;
-    active.add(frame.value);
-    pending.push({ kind: "exit", value: frame.value });
-    pushObjectChildren(frame.value, pending);
-  }
-  return false;
-}
-
-function pushObjectChildren(
-  value: object,
-  pending: GraphFrame<object>[],
+  pending: SchemaGraphFrame[],
 ): void {
-  const children = Object.values(value);
-  for (let index = children.length - 1; index >= 0; index--) {
-    const child = children[index];
-    if (isObjectValue(child)) pending.push({ kind: "enter", value: child });
-  }
-}
-
-function findValueCycle(
-  value: unknown,
-  path: ValidationPath,
-): ValidationPath | undefined {
-  const active = new WeakSet<object>();
-  const completed = new WeakSet<object>();
-  const pending: ValueCycleFrame[] = [{ kind: "enter", value, path }];
-  while (pending.length > 0) {
-    const frame = pending.pop();
-    if (frame === undefined) continue;
-    if (frame.kind === "exit") {
-      active.delete(frame.value);
-      completed.add(frame.value);
-      continue;
+  for (
+    let keyIndex = COMPOSITION_KEYWORDS.length - 1;
+    keyIndex >= 0;
+    keyIndex--
+  ) {
+    const keyword = COMPOSITION_KEYWORDS[keyIndex];
+    if (keyword === undefined || !Object.hasOwn(schema, keyword)) continue;
+    const branches = getCompositionBranches(schema, keyword);
+    for (let index = branches.length - 1; index >= 0; index--) {
+      pending.push({
+        kind: "enter",
+        value: branches[index],
+        invalidMessage:
+          keyword === "not"
+            ? "not must be a schema object with a supported non-empty type"
+            : `${keyword} branch ${String(index)} must be a schema object with a supported non-empty type`,
+      });
     }
-    if (!isObjectValue(frame.value)) continue;
-    if (active.has(frame.value)) return frame.path;
-    if (completed.has(frame.value)) continue;
-    active.add(frame.value);
-    pending.push({ kind: "exit", value: frame.value });
-    pushValueChildren(frame.value, frame.path, pending);
   }
-  return undefined;
-}
-
-function pushValueChildren(
-  value: object,
-  path: ValidationPath,
-  pending: ValueCycleFrame[],
-): void {
-  const entries = Object.entries(value);
-  for (let index = entries.length - 1; index >= 0; index--) {
-    const entry = entries[index];
-    if (entry === undefined) continue;
-    pending.push({
-      kind: "enter",
-      value: entry[1],
-      path: appendValidationPath(path, valuePathSegment(value, entry[0])),
-    });
-  }
-}
-
-function valuePathSegment(
-  parent: object,
-  key: string,
-): SchemaValidationPathSegment {
-  if (!Array.isArray(parent) || !/^(?:0|[1-9][0-9]*)$/.test(key)) return key;
-  const index = Number(key);
-  return Number.isSafeInteger(index) && index <= 4_294_967_294 ? index : key;
-}
-
-function isObjectValue(value: unknown): value is object {
-  return typeof value === "object" && value !== null;
 }

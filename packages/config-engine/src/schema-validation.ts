@@ -1,9 +1,5 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { createCompositionMemo } from "./schema-validation-composition";
-import {
-  validateSchemaGraph,
-  validateValueGraph,
-} from "./schema-validation-graph";
+import { validateSchemaGraph } from "./schema-validation-graph";
 import { resolveMemberSchemas } from "./schema-validation-paths";
 import {
   createValidationPath,
@@ -15,6 +11,7 @@ import {
   type ValidationMode,
   type ValidationState,
 } from "./schema-validation-support";
+import { validateValueGraph } from "./schema-validation-value-graph";
 import { validateValuesIteratively } from "./schema-validation-walk";
 
 export type {
@@ -54,7 +51,8 @@ export function validateConfigurationPatch(
 
   const context: ValidationContext = { mode: "partial", errors: [] };
   const schemaPath = createValidationPath(basePath.segments);
-  if (!validateSchemaGraph(schema, schemaPath, context)) return result(context);
+  const plan = validateSchemaGraph(schema, schemaPath, context);
+  if (plan === undefined) return result(context);
   const target = resolveMemberSchemas(
     schema,
     patchPath.segments,
@@ -72,7 +70,7 @@ export function validateConfigurationPatch(
     path: targetPath,
     context,
   }));
-  validateValuesIteratively(states, createCompositionMemo());
+  validateValuesIteratively(states, plan);
   return result(context);
 }
 
@@ -87,12 +85,10 @@ function validateSchema(
     return invalidPathResult(parsedPath.error);
   const context: ValidationContext = { mode, errors: [] };
   const path = createValidationPath(parsedPath.segments);
-  if (!validateSchemaGraph(schema, path, context)) return result(context);
+  const plan = validateSchemaGraph(schema, path, context);
+  if (plan === undefined) return result(context);
   if (!validateValueGraph(value, path, context)) return result(context);
-  validateValuesIteratively(
-    [{ schema, value, path, context }],
-    createCompositionMemo(),
-  );
+  validateValuesIteratively([{ schema, value, path, context }], plan);
   return result(context);
 }
 

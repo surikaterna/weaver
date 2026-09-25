@@ -7,24 +7,32 @@ import {
 } from "./schema-validation-cardinality";
 import {
   addCompositionResult,
-  type CompositionEntry,
+  COMPOSITION_KEYWORDS,
+  type CompositionKeyword,
   type CompositionMemo,
-  getCompositionEntries,
+  createCompositionMemo,
+  getCompositionBranches,
   getMemoizedCompositionMatch,
   memoizeCompositionMatch,
 } from "./schema-validation-composition";
 import { validateValueConstraints } from "./schema-validation-constraints";
-import { collectMemberSchemas } from "./schema-validation-paths";
+import type { SchemaValidationPlan } from "./schema-validation-graph";
+import { collectMemberSchemas, itemSchema } from "./schema-validation-paths";
+import {
+  appendContextPath,
+  createPredicateContext,
+  rejectPredicate,
+  validateScalarPredicate,
+} from "./schema-validation-predicate-context";
+import { queuePredicateObjectFrames } from "./schema-validation-predicate-object";
 import {
   addContextError,
   addError,
-  appendValidationPath,
   describeTypes,
   describeValue,
   getEffectiveValue,
   hasOwn,
   isRecord,
-  isSchemaArray,
   matchesAnyType,
   type ValidationPath,
   type ValidationState,
@@ -34,7 +42,6 @@ type WalkFrame =
   | { readonly kind: "value"; readonly state: ValidationState }
   | { readonly kind: "ordinary"; readonly state: ValidationState }
   | CompositionFrame
-  | BranchCompleteFrame
   | RequiredFrame
   | MemberFrame
   | ArrayItemFrame;
@@ -62,29 +69,24 @@ interface ArrayItemFrame {
 interface CompositionFrame {
   readonly kind: "composition";
   readonly state: ValidationState;
-  readonly entry: CompositionEntry;
-  readonly progress: { matched: number };
-  readonly index: number;
-}
-
-interface BranchCompleteFrame {
-  readonly kind: "branch-complete";
-  readonly schema: ConfigurationPropertySchema;
-  readonly value: unknown;
-  readonly context: ValidationState["context"];
-  readonly progress: { matched: number };
+  readonly keyword: CompositionKeyword;
+  readonly branches: readonly ConfigurationPropertySchema[];
+  matched: number;
+  index: number;
+  branchSchema?: ConfigurationPropertySchema | undefined;
+  branchContext?: ValidationState["context"] | undefined;
 }
 
 interface WalkRuntime {
-  readonly memo: CompositionMemo;
+  readonly plan: SchemaValidationPlan;
+  memo?: CompositionMemo;
 }
-
 export function validateValuesIteratively(
   states: readonly ValidationState[],
-  memo: CompositionMemo,
+  plan: SchemaValidationPlan,
 ): void {
   const pending: WalkFrame[] = [];
-  const runtime: WalkRuntime = { memo };
+  const runtime: WalkRuntime = { plan };
   for (let index = states.length - 1; index >= 0; index--) {
     const state = states[index];
     if (state !== undefined) pending.push({ kind: "value", state });
@@ -109,32 +111,50 @@ function processWalkFrame(
     processArrayItemFrame(frame, pending);
   } else if (frame.kind === "composition") {
     processCompositionFrame(frame, pending, runtime);
-  } else if (frame.kind === "branch-complete") {
-    processBranchComplete(frame, runtime);
   } else if (frame.kind === "ordinary") {
     processOrdinaryFrame(frame.state, pending);
   } else {
-    processValueFrame(frame.state, pending);
+    processValueFrame(frame.state, pending, runtime);
   }
 }
 
-function processValueFrame(state: ValidationState, pending: WalkFrame[]): void {
+function processValueFrame(
+  state: ValidationState,
+  pending: WalkFrame[],
+  runtime: WalkRuntime,
+): void {
+  const predicateScalar =
+    runtime.plan.predicateScalars?.has(state.schema) === true;
+  if (validateScalarPredicate(state, predicateScalar)) return;
   const value = getEffectiveValue(
     state.schema,
     state.value,
     state.context.mode,
   );
-  const effectiveState = { ...state, value };
+  const effectiveState = value === state.value ? state : { ...state, value };
+  if (runtime.plan.composed?.has(state.schema) !== true) {
+    processOrdinaryFrame(effectiveState, pending);
+    return;
+  }
   pending.push({ kind: "ordinary", state: effectiveState });
-  const entries = getCompositionEntries(state.schema);
-  for (let index = entries.length - 1; index >= 0; index--) {
-    const entry = entries[index];
-    if (entry === undefined) continue;
+  queueCompositionFrames(effectiveState, pending);
+}
+
+function queueCompositionFrames(
+  state: ValidationState,
+  pending: WalkFrame[],
+): void {
+  for (let index = COMPOSITION_KEYWORDS.length - 1; index >= 0; index--) {
+    const keyword = COMPOSITION_KEYWORDS[index];
+    if (keyword === undefined || !Object.hasOwn(state.schema, keyword))
+      continue;
+    const branches = getCompositionBranches(state.schema, keyword);
     pending.push({
       kind: "composition",
-      state: effectiveState,
-      entry,
-      progress: { matched: 0 },
+      state,
+      keyword,
+      branches,
+      matched: 0,
       index: 0,
     });
   }
@@ -146,6 +166,7 @@ function processOrdinaryFrame(
 ): void {
   const value = state.value;
   if (value === undefined) {
+    if (rejectPredicate(state.context)) return;
     addError(state, "invalid-type", "Value must be defined", {
       expected: describeTypes(state.schema),
       actual: "undefined",
@@ -153,6 +174,7 @@ function processOrdinaryFrame(
     return;
   }
   if (!matchesAnyType(value, state.schema)) {
+    if (rejectPredicate(state.context)) return;
     addError(state, "invalid-type", "Value does not match schema type", {
       expected: describeTypes(state.schema),
       actual: describeValue(value),
@@ -169,17 +191,18 @@ function processCompositionFrame(
   pending: WalkFrame[],
   runtime: WalkRuntime,
 ): void {
-  const branch = frame.entry.branches[frame.index];
-  if (branch === undefined) {
-    addCompositionResult(
-      frame.entry,
-      frame.progress.matched,
-      frame.state.path,
-      frame.state.context,
-    );
+  completeCompositionBranch(frame, runtime);
+  if (frame.index >= frame.branches.length) {
+    const { state } = frame;
+    addCompositionResult(frame, frame.matched, state.path, state.context);
     return;
   }
-  pending.push({ ...frame, index: frame.index + 1 });
+  const branch = frame.branches[frame.index];
+  frame.index++;
+  if (branch === undefined) {
+    pending.push(frame);
+    return;
+  }
   queueCompositionBranch(frame, branch, pending, runtime);
 }
 
@@ -190,43 +213,50 @@ function queueCompositionBranch(
   runtime: WalkRuntime,
 ): void {
   const { mode } = frame.state.context;
-  const cached = getMemoizedCompositionMatch(
-    runtime.memo,
-    schema,
-    frame.state.value,
-    mode,
-  );
+  const memoEligible = runtime.plan.memoEligible?.has(schema) === true;
+  const cached =
+    memoEligible && runtime.memo !== undefined
+      ? getMemoizedCompositionMatch(
+          runtime.memo,
+          schema,
+          frame.state.value,
+          mode,
+        )
+      : undefined;
   if (cached !== undefined) {
-    if (cached) frame.progress.matched++;
+    if (cached) frame.matched++;
+    pending.push(frame);
     return;
   }
-  const context = { mode, errors: [] };
-  pending.push({
-    kind: "branch-complete",
-    schema,
-    value: frame.state.value,
-    context,
-    progress: frame.progress,
-  });
-  pending.push({
-    kind: "value",
-    state: { ...frame.state, schema, context },
-  });
+  const context = createPredicateContext(mode);
+  const state = { ...frame.state, schema, context };
+  frame.branchSchema = schema;
+  frame.branchContext = context;
+  pending.push(frame);
+  pending.push({ kind: "value", state });
 }
 
-function processBranchComplete(
-  frame: BranchCompleteFrame,
+function completeCompositionBranch(
+  frame: CompositionFrame,
   runtime: WalkRuntime,
 ): void {
-  const matches = frame.context.errors.length === 0;
-  memoizeCompositionMatch(
-    runtime.memo,
-    frame.schema,
-    frame.value,
-    frame.context.mode,
-    matches,
-  );
-  if (matches) frame.progress.matched++;
+  const schema = frame.branchSchema;
+  const context = frame.branchContext;
+  if (schema === undefined || context === undefined) return;
+  const matches = !context.failed;
+  if (runtime.plan.memoEligible?.has(schema) === true) {
+    runtime.memo ??= createCompositionMemo();
+    memoizeCompositionMatch(
+      runtime.memo,
+      schema,
+      frame.state.value,
+      context.mode,
+      matches,
+    );
+  }
+  if (matches) frame.matched++;
+  frame.branchSchema = undefined;
+  frame.branchContext = undefined;
 }
 
 function queueObjectFrames(
@@ -235,6 +265,7 @@ function queueObjectFrames(
   pending: WalkFrame[],
 ): void {
   validateObjectSize(state.schema, value, state.path, state.context);
+  if (queuePredicateObjectFrames(state, value, pending)) return;
   const entries = Object.entries(value);
   for (let index = entries.length - 1; index >= 0; index--) {
     const entry = entries[index];
@@ -258,7 +289,11 @@ function processRequiredFrame(
 ): void {
   if (!isRecord(frame.state.value) || hasOwn(frame.state.value, frame.key))
     return;
-  const path = appendValidationPath(frame.state.path, frame.key);
+  const path = appendContextPath(
+    frame.state.context,
+    frame.state.path,
+    frame.key,
+  );
   const properties = Object.hasOwn(frame.state.schema, "properties")
     ? frame.state.schema.properties
     : undefined;
@@ -280,7 +315,7 @@ function processRequiredFrame(
 
 function processMemberFrame(frame: MemberFrame, pending: WalkFrame[]): void {
   const { schema, path, context } = frame.state;
-  const childPath = appendValidationPath(path, frame.key);
+  const childPath = appendContextPath(context, path, frame.key);
   const schemas = collectMemberSchemas(schema, frame.key, path, context);
   if (schemas.length === 0) {
     queueAdditionalProperty(frame, childPath, pending);
@@ -339,31 +374,26 @@ function processArrayItemFrame(
   frame: ArrayItemFrame,
   pending: WalkFrame[],
 ): void {
-  const path = appendValidationPath(frame.state.path, frame.index);
+  const path = appendContextPath(
+    frame.state.context,
+    frame.state.path,
+    frame.index,
+  );
   if (!Object.hasOwn(frame.value, frame.index)) {
     addContextError(frame.state.context, "invalid-value", path, {
       message: "Array item must be present",
     });
     return;
   }
-  const itemSchema = arrayItemSchema(frame.state.schema, frame.index);
-  if (itemSchema === undefined) return;
+  const schema = itemSchema(frame.state.schema, frame.index);
+  if (schema === undefined) return;
   pending.push({
     kind: "value",
     state: {
       ...frame.state,
-      schema: itemSchema,
+      schema,
       value: frame.value[frame.index],
       path,
     },
   });
-}
-
-function arrayItemSchema(
-  schema: ConfigurationPropertySchema,
-  index: number,
-): ConfigurationPropertySchema | undefined {
-  const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
-  if (items === undefined) return undefined;
-  return isSchemaArray(items) ? items[index] : items;
 }

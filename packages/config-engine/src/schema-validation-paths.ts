@@ -51,8 +51,22 @@ export function collectMemberSchemas(
       ? properties[key]
       : undefined;
   if (declared !== undefined) schemas.push(declared);
-  schemas.push(...patternSchemas(schema, key, path, context));
+  const patterns = Object.hasOwn(schema, "patternProperties")
+    ? schema.patternProperties
+    : undefined;
+  if (patterns !== undefined) {
+    collectPatternSchemas(patterns, key, path, context, schemas);
+  }
   return schemas;
+}
+
+export function itemSchema(
+  schema: ConfigurationPropertySchema,
+  index: number,
+): ConfigurationPropertySchema | undefined {
+  const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
+  if (items === undefined) return undefined;
+  return isSchemaArray(items) ? items[index] : items;
 }
 
 function resolveNextSchemas(
@@ -165,18 +179,15 @@ function resolveArrayMemberSchema(
   return item === undefined ? [] : [item];
 }
 
-function patternSchemas(
-  schema: ConfigurationPropertySchema,
+function collectPatternSchemas(
+  patterns: Readonly<Record<string, ConfigurationPropertySchema>>,
   key: string,
   path: ValidationErrorPath,
   context: ValidationContext,
-): ConfigurationPropertySchema[] {
-  const patterns = Object.hasOwn(schema, "patternProperties")
-    ? schema.patternProperties
-    : undefined;
-  const entries = Object.entries(patterns ?? {});
-  return entries.flatMap(([pattern, nestedSchema]) => {
+  schemas: ConfigurationPropertySchema[],
+): void {
+  for (const [pattern, nestedSchema] of Object.entries(patterns)) {
     const regex = compileSchemaPattern(pattern, path, context);
-    return regex?.test(key) === true ? [nestedSchema] : [];
-  });
+    if (regex?.test(key) === true) schemas.push(nestedSchema);
+  }
 }
