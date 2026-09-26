@@ -5,6 +5,13 @@ import {
   scopeDefinitionSchema,
   scopeInstanceSchema,
 } from "../src/schemas-layers.js";
+import { configurationPropertySchemaSchema } from "../src/schemas-property.js";
+import {
+  registeredEffectiveValidationResponseSchema,
+  registeredObjectWriteRequestSchema,
+  registeredObjectWriteResponseSchema,
+  registeredSchemasResponseSchema,
+} from "../src/schemas-registered-operations.js";
 import {
   registeredEffectiveValidationResponseSchema,
   registeredObjectWriteRequestSchema,
@@ -161,6 +168,26 @@ describe("configurationLayerDataSchema", () => {
       entries: {},
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("configurationPropertySchemaSchema composition", () => {
+  it("admits all four supported fields recursively", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        choice: {
+          type: "string",
+          anyOf: [{ type: "string", const: "a" }],
+          oneOf: [{ type: "string", minLength: 1 }],
+          allOf: [{ type: "string", maxLength: 2 }],
+          not: { type: "string", const: "blocked" },
+        },
+      },
+      additionalProperties: false,
+    };
+
+    expect(configurationPropertySchemaSchema.parse(schema)).toEqual(schema);
   });
 });
 

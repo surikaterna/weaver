@@ -26,7 +26,6 @@ const settingsSchema: ConfigurationPropertySchema = {
   },
 };
 
-const compositionKeywords = ["oneOf", "anyOf", "allOf", "not"] as const;
 const prototypeCollisionKeys = [
   "toString",
   "valueOf",
@@ -35,54 +34,8 @@ const prototypeCollisionKeys = [
 ] as const;
 const patchCollisionKeys = ["toString", "valueOf", "hasOwnProperty"] as const;
 
-type CompositionKeyword = (typeof compositionKeywords)[number];
-
 function expectPublicResultCompatible(result: unknown): void {
   expect(() => schemaValidationResultSchema.parse(result)).not.toThrow();
-}
-
-function addComposition(
-  keyword: CompositionKeyword,
-  schema: ConfigurationPropertySchema,
-  nested: ConfigurationPropertySchema,
-): ConfigurationPropertySchema {
-  if (keyword === "not") return { ...schema, not: nested };
-  return { ...schema, [keyword]: [nested] };
-}
-
-function schemaWithComposition(
-  keyword: CompositionKeyword,
-): ConfigurationPropertySchema {
-  const nested: ConfigurationPropertySchema = { type: "string" };
-  return addComposition(keyword, { type: "string" }, nested);
-}
-
-function schemaWithRootPatchComposition(
-  keyword: CompositionKeyword,
-): ConfigurationPropertySchema {
-  const objectSchema: ConfigurationPropertySchema = {
-    type: "object",
-    properties: { x: { type: "string" } },
-    additionalProperties: false,
-  };
-  return addComposition(keyword, objectSchema, objectSchema);
-}
-
-function schemaWithAncestorPatchComposition(
-  keyword: CompositionKeyword,
-): ConfigurationPropertySchema {
-  const ancestorSchema: ConfigurationPropertySchema = {
-    type: "object",
-    properties: { x: { type: "string" } },
-    additionalProperties: false,
-  };
-  return {
-    type: "object",
-    properties: {
-      group: addComposition(keyword, ancestorSchema, ancestorSchema),
-    },
-    additionalProperties: false,
-  };
 }
 
 function deepFixture(
@@ -502,50 +455,69 @@ describe("schema validation", () => {
     );
   });
 
-  it.each(
-    compositionKeywords,
-  )("rejects unsupported %s composition schemas as invalid-schema", (keyword) => {
-    const schema = schemaWithComposition(keyword);
+  it("supports composition schemas during value validation", () => {
+    const schema: ConfigurationPropertySchema = {
+      type: "string",
+      anyOf: [{ type: "string", const: "ok" }],
+      oneOf: [{ type: "string", minLength: 1 }],
+      allOf: [{ type: "string", maxLength: 2 }],
+      not: { type: "string", const: "blocked" },
+    };
 
-    const result = validatePartialConfiguration(schema, "blocked");
-
-    expect(result.valid).toBe(false);
-    expect(result.errors[0]).toMatchObject({
-      code: "invalid-schema",
-      path: "$",
+    expect(validatePartialConfiguration(schema, "ok")).toEqual({
+      valid: true,
+      errors: [],
     });
   });
 
-  it.each(
-    compositionKeywords,
-  )("rejects root %s composition during patch path resolution", (keyword) => {
-    const result = validateConfigurationPatch(
-      schemaWithRootPatchComposition(keyword),
-      "x",
-      "ok",
-    );
+  it("fully validates composition on a resolved patch leaf", () => {
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      properties: {
+        x: {
+          type: "string",
+          anyOf: [{ type: "string", const: "ok" }],
+        },
+      },
+      additionalProperties: false,
+    };
 
-    expect(result.valid).toBe(false);
-    expect(result.errors[0]).toMatchObject({
-      code: "invalid-schema",
-      path: "$",
-    });
+    const result = validateConfigurationPatch(schema, "x", "blocked");
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        code: "invalid-value",
+        path: "$.x",
+        message: "Value must match at least one anyOf branch",
+      }),
+    ]);
     expectPublicResultCompatible(result);
   });
 
-  it.each(
-    compositionKeywords,
-  )("rejects ancestor %s composition during patch path resolution", (keyword) => {
-    const result = validateConfigurationPatch(
-      schemaWithAncestorPatchComposition(keyword),
-      ["group", "x"],
-      "ok",
-    );
+  it("defers contextual ancestors while projecting allOf patch constraints", () => {
+    const schema: ConfigurationPropertySchema = {
+      type: "object",
+      additionalProperties: true,
+      anyOf: [
+        {
+          type: "object",
+          properties: { x: { type: "number" } },
+          additionalProperties: true,
+        },
+      ],
+      allOf: [
+        {
+          type: "object",
+          properties: { x: { type: "string" } },
+          additionalProperties: true,
+        },
+      ],
+    };
 
-    expect(result.valid).toBe(false);
+    const result = validateConfigurationPatch(schema, "x", 1);
     expect(result.errors[0]).toMatchObject({
-      code: "invalid-schema",
-      path: "$.group",
+      code: "invalid-type",
+      path: "$.x",
+      expected: "string",
     });
     expectPublicResultCompatible(result);
   });

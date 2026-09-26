@@ -50,6 +50,8 @@ export type ValidationMode = "partial" | "effective";
 export interface ValidationContext {
   mode: ValidationMode;
   errors: SchemaValidationError[];
+  readonly predicateOnly?: true;
+  failed?: boolean;
 }
 
 export interface ValidationState {
@@ -106,6 +108,10 @@ export function addError(
   message: string,
   details?: Pick<SchemaValidationError, "expected" | "actual">,
 ): void {
+  if (state.context.predicateOnly === true) {
+    state.context.failed = true;
+    return;
+  }
   addContextError(state.context, code, state.path, { message, ...details });
 }
 
@@ -119,6 +125,10 @@ export function addContextError(
     actual?: string | undefined;
   },
 ): void {
+  if (context.predicateOnly === true) {
+    context.failed = true;
+    return;
+  }
   context.errors.push(
     makeError(code, materializeValidationPath(path), details.message, details),
   );
@@ -165,6 +175,10 @@ export function addBoundedContextError(
   operator: string,
 ): void {
   if (expected === undefined || boundPasses(actual, expected, operator)) return;
+  if (context.predicateOnly === true) {
+    context.failed = true;
+    return;
+  }
   addContextError(context, "invalid-value", path, {
     message: `${name} requires ${String(actual)} ${operator} ${String(expected)}`,
   });
@@ -207,14 +221,17 @@ export function matchesAnyType(
   value: unknown,
   schema: ConfigurationPropertySchema,
 ): boolean {
-  return getTypes(schema).some((type) => matchesType(value, type));
+  const types = schema.type;
+  if (!isSchemaTypeArray(types)) return matchesType(value, types);
+  return types.some((type) => matchesType(value, type));
 }
 
 export function allowsType(
   schema: ConfigurationPropertySchema,
   type: ConfigurationJsonSchemaType,
 ): boolean {
-  return getTypes(schema).includes(type);
+  const types = schema.type;
+  return isSchemaTypeArray(types) ? types.includes(type) : types === type;
 }
 
 export function getTypes(
@@ -224,20 +241,13 @@ export function getTypes(
 }
 
 export function describeTypes(schema: ConfigurationPropertySchema): string {
-  return getTypes(schema).join(" | ");
+  return isSchemaTypeArray(schema.type) ? schema.type.join(" | ") : schema.type;
 }
 
 export function describeValue(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;
-}
-
-export function toPathSegments(
-  path: string | readonly SchemaValidationPathSegment[] | undefined,
-): readonly SchemaValidationPathSegment[] {
-  if (path === undefined) return [];
-  return typeof path === "string" ? parsePath(path) : validPathPrefix(path);
 }
 
 export function toPathSegmentsResult(
@@ -284,17 +294,6 @@ function toArrayPathSegmentsResult(
     };
   }
   return { segments };
-}
-
-function validPathPrefix(
-  path: readonly unknown[],
-): SchemaValidationPathSegment[] {
-  const segments: SchemaValidationPathSegment[] = [];
-  for (const segment of path) {
-    if (!isValidPathSegment(segment)) return segments;
-    segments.push(segment);
-  }
-  return segments;
 }
 
 function isValidPathSegment(
