@@ -7,6 +7,7 @@ export default defineConfig({
     "src/json-schema-generator.ts",
     "src/layers.ts",
     "src/scope.ts",
+    "src/schema-validation-session.ts",
     "src/zod-schema-generator.ts",
   ],
   format: ["esm", "cjs"],

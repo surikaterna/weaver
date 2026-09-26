@@ -41,6 +41,36 @@ function makeDeps(
 }
 
 describe("createInstanceClient", () => {
+  it("addresses literal-dot instance IDs and members across reads, writes, reset and subscription", async () => {
+    const deps = makeDeps({
+      app: {
+        editor: {
+          "theme.dark": "base",
+          instances: {
+            "panel.one": { "theme.dark": "override" },
+            panel: { one: { "theme.dark": "wrong" } },
+          },
+        },
+      },
+    });
+    const client = createInstanceClient<{ "theme.dark": string }>(
+      "app.editor",
+      "panel.one",
+      deps,
+    );
+    expect(client.get("theme.dark")).toBe("override");
+    await client.set("theme.dark", "changed");
+    client.onChange("theme.dark", () => {});
+    await client.reset();
+    expect(deps.calls.set[0]?.[0]).toBe(
+      "app.editor.instances[panel.one][theme.dark]",
+    );
+    expect(deps.calls.onChange[0]?.[0]).toBe(
+      "app.editor.instances[panel.one][theme.dark]",
+    );
+    expect(deps.calls.remove[0]?.[0]).toBe("app.editor.instances[panel.one]");
+  });
+
   it("get() reads from instance path when override exists", () => {
     const state = {
       editor: { instances: { vim: { theme: "dark" } }, theme: "light" },

@@ -129,11 +129,12 @@ function writeMethods(
 ): Pick<WeaverClient, "set" | "remove" | "setMany" | "setNamespace"> {
   return {
     async set(key, value, options) {
-      const resolvedKey = applyNamespace(runtime.namespace, key);
-      const result = validateOnWrite(resolvedKey, value, runtime.registry);
-      if (result.valid)
-        return runtime.transport.set(resolvedKey, value, options);
-      return validationFailure(result.errors);
+      return validatedSet(
+        runtime,
+        applyNamespace(runtime.namespace, key),
+        value,
+        options,
+      );
     },
     async remove(key, options) {
       return runtime.transport.remove(
@@ -146,11 +147,11 @@ function writeMethods(
       for (const [key, value] of Object.entries(entries)) {
         prefixed[applyNamespace(runtime.namespace, key)] = value;
       }
-      return runtime.transport.setMany(prefixed, options);
+      return validatedSetMany(runtime, prefixed, options);
     },
     async setNamespace(prefix, values, options) {
       const path = applyNamespace(runtime.namespace, prefix);
-      return runtime.transport.setMany({ [path]: values }, options);
+      return validatedSetMany(runtime, { [path]: values }, options);
     },
   };
 }
@@ -283,7 +284,7 @@ function instanceMethods(
       return createInstanceClient<TConfig>(resolvedBase, instanceId, {
         getState: () => runtime.baseState,
         set: (key, value, options) =>
-          runtime.transport.set(key, value, options),
+          validatedSet(runtime, key, value, options),
         remove: (key, options) => runtime.transport.remove(key, options),
         onChange: (pattern, handler) => client().onChange(pattern, handler),
       });
@@ -312,12 +313,35 @@ function namespaceDeps(runtime: ClientRuntime, client: ClientReference) {
         ? (runtime.scopeLoader.getScopeState(scopePath) ?? {})
         : runtime.baseState,
     set: (key: string, value: unknown, options?: WriteOptions) =>
-      runtime.transport.set(key, value, options),
+      validatedSet(runtime, key, value, options),
     setMany: (entries: Record<string, unknown>, options?: WriteOptions) =>
-      runtime.transport.setMany(entries, options),
+      validatedSetMany(runtime, entries, options),
     remove: (key: string, options?: WriteOptions) =>
       runtime.transport.remove(key, options),
     onChange: (pattern: string, handler: (changes: ConfigDelta[]) => void) =>
       client().onChange(pattern, handler),
   };
+}
+
+function validatedSet(
+  runtime: ClientRuntime,
+  key: string,
+  value: unknown,
+  options?: WriteOptions,
+): Promise<WriteResult> {
+  const result = validateOnWrite(key, value, runtime.registry);
+  if (!result.valid) return Promise.resolve(validationFailure(result.errors));
+  return runtime.transport.set(key, value, options);
+}
+
+function validatedSetMany(
+  runtime: ClientRuntime,
+  entries: Record<string, unknown>,
+  options?: WriteOptions,
+): Promise<WriteResult> {
+  const errors = Object.entries(entries).flatMap(
+    ([key, value]) => validateOnWrite(key, value, runtime.registry).errors,
+  );
+  if (errors.length > 0) return Promise.resolve(validationFailure(errors));
+  return runtime.transport.setMany(entries, options);
 }

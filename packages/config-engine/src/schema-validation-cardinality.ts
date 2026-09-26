@@ -1,10 +1,10 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 
 import { deepEqual } from "./deep-equal";
+import { appendContextPath } from "./schema-validation-predicate-context";
 import {
   addBoundedContextError,
   addContextError,
-  appendValidationPath,
   type ValidationContext,
   type ValidationPath,
 } from "./schema-validation-support";
@@ -15,7 +15,7 @@ export function validateObjectSize(
   path: ValidationPath,
   context: ValidationContext,
 ): void {
-  if (context.mode === "effective") {
+  if (context.mode === "effective" && schema.minProperties !== undefined) {
     addBoundedContextError(
       context,
       path,
@@ -25,6 +25,7 @@ export function validateObjectSize(
       ">=",
     );
   }
+  if (schema.maxProperties === undefined) return;
   addBoundedContextError(
     context,
     path,
@@ -41,22 +42,26 @@ export function validateArraySize(
   path: ValidationPath,
   context: ValidationContext,
 ): void {
-  addBoundedContextError(
-    context,
-    path,
-    "minItems",
-    value.length,
-    schema.minItems,
-    ">=",
-  );
-  addBoundedContextError(
-    context,
-    path,
-    "maxItems",
-    value.length,
-    schema.maxItems,
-    "<=",
-  );
+  if (schema.minItems !== undefined) {
+    addBoundedContextError(
+      context,
+      path,
+      "minItems",
+      value.length,
+      schema.minItems,
+      ">=",
+    );
+  }
+  if (schema.maxItems !== undefined) {
+    addBoundedContextError(
+      context,
+      path,
+      "maxItems",
+      value.length,
+      schema.maxItems,
+      "<=",
+    );
+  }
 }
 
 export function validateUniqueItems(
@@ -74,7 +79,7 @@ export function validateUniqueItems(
         addContextError(
           context,
           "invalid-value",
-          appendValidationPath(path, right),
+          appendContextPath(context, path, right),
           { message: "Array item must be unique" },
         );
       }

@@ -11,12 +11,17 @@ import {
   schemaRegistrationMetadataSchema,
 } from "@weaver-conf/config-types";
 import { z } from "zod";
+import {
+  decodeSchemaGraph,
+  encodeSchemaGraph,
+  type PersistedSchemaGraph,
+} from "./schema-registry-schema-codec";
 import type { RegistryState, SchemaEntry } from "./schema-registry-state";
 import { createEmptyState, schemaKey } from "./schema-registry-state";
 
 const persistedSchemaEntrySchema = z.strictObject({
   kind: z.enum(["service", "fragment"]),
-  schema: objectConfigurationPropertySchemaSchema,
+  schema: z.unknown(),
   metadata: schemaRegistrationMetadataSchema,
 });
 
@@ -33,9 +38,23 @@ const persistedSchemaRegistrySchema = z.strictObject({
 });
 
 type PersistedSchemaEntry = z.infer<typeof persistedSchemaEntrySchema>;
-type PersistedSchemaRegistry = z.infer<typeof persistedSchemaRegistrySchema>;
+interface SerializedSchemaEntry extends Omit<PersistedSchemaEntry, "schema"> {
+  readonly schema: PersistedSchemaGraph;
+}
+interface SerializedSchemaRegistry {
+  readonly environments: Record<
+    string,
+    {
+      readonly schemas: Record<string, SerializedSchemaEntry>;
+      readonly slots: Record<
+        string,
+        z.infer<typeof fragmentSlotRegistrationMetadataSchema>
+      >;
+    }
+  >;
+}
 type MutablePersistedEnvironment = {
-  readonly schemas: Map<string, PersistedSchemaEntry>;
+  readonly schemas: Map<string, SerializedSchemaEntry>;
   readonly slots: Map<
     string,
     z.infer<typeof fragmentSlotRegistrationMetadataSchema>
@@ -44,13 +63,13 @@ type MutablePersistedEnvironment = {
 
 export function serializeRegistry(
   state: RegistryState,
-): PersistedSchemaRegistry {
+): SerializedSchemaRegistry {
   const environments = new Map<string, MutablePersistedEnvironment>();
   for (const entry of state.schemas.values()) {
     const env = getPersistedEnvironment(environments, entry.environment);
     env.schemas.set(entry.path, {
       kind: entry.kind,
-      schema: entry.schema,
+      schema: encodeSchemaGraph(entry.schema),
       metadata: entry.metadata,
     });
   }
@@ -115,7 +134,7 @@ function getPersistedEnvironment(
 
 function serializeEnvironments(
   environments: ReadonlyMap<string, MutablePersistedEnvironment>,
-): PersistedSchemaRegistry["environments"] {
+): SerializedSchemaRegistry["environments"] {
   return Object.fromEntries(
     [...environments].map(([environment, registry]) => [
       environment,
@@ -134,11 +153,18 @@ function toSchemaEntry(
 ): SchemaEntry {
   return {
     kind: entry.kind,
-    schema: entry.schema,
+    schema: parsePersistedSchema(entry.schema),
     metadata: entry.metadata,
     path,
     environment,
   };
+}
+
+function parsePersistedSchema(schema: unknown) {
+  if (isRecord(schema) && Object.hasOwn(schema, "encoding")) {
+    return decodeSchemaGraph(schema);
+  }
+  return objectConfigurationPropertySchemaSchema.parse(schema);
 }
 
 function validatePersistedEntry(

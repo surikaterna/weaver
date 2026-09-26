@@ -102,6 +102,32 @@ describe("NamespaceClient", () => {
     ]);
   });
 
+  it("keeps literal-dot members distinct beneath a dotted namespace", async () => {
+    const { deps, calls, subscriptions } = createDeps({
+      app: {
+        editor: {
+          "theme.dark": "literal",
+          theme: { dark: "nested" },
+        },
+      },
+    });
+    const client = createNamespaceClient<{
+      "theme.dark": string;
+      theme: object;
+    }>("app.editor", deps);
+    expect(client.get("theme.dark")).toBe("literal");
+    await client.set("theme.dark", "new");
+    await client.setMany({ "theme.dark": "next", theme: {} });
+    await client.remove("theme.dark");
+    client.onChange("theme.dark", () => {});
+    expect(calls.map(({ args }) => args[0])).toEqual([
+      "app.editor[theme.dark]",
+      { "app.editor[theme.dark]": "next", "app.editor.theme": {} },
+      "app.editor[theme.dark]",
+    ]);
+    expect(subscriptions[0]?.pattern).toBe("app.editor[theme.dark]");
+  });
+
   it("preserves its generic through scoped and instance views", () => {
     const base = { editor: { theme: "light" } };
     const scoped = {
