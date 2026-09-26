@@ -3,6 +3,7 @@ import type {
   ConfigurationStorageProvider,
   WeaverConfig,
 } from "@weaver-conf/config-types";
+import type { AuditService } from "./audit/audit-service";
 import type { AuthMiddleware } from "./auth/auth-middleware";
 import { createAuthMiddleware } from "./auth/auth-middleware";
 import { createJwtValidator } from "./auth/jwt-validator";
@@ -45,6 +46,7 @@ export interface WeaverServerOptions {
   adminRoles?: string[];
   corsOrigins?: string[];
   providers?: ConfigurationStorageProvider[];
+  auditService?: AuditService;
 }
 export interface WeaverServer {
   readonly port: number;
@@ -66,6 +68,7 @@ function resolveOptions(options?: WeaverServerOptions) {
     adminRoles: options?.adminRoles ?? ["admin"],
     corsOrigins: options?.corsOrigins,
     providers: options?.providers,
+    auditService: options?.auditService,
   };
 }
 export async function startWeaverServer(
@@ -171,6 +174,8 @@ async function createConfiguredRestAdapter(
     }),
     ...(config.corsOrigins ? { corsOrigins: config.corsOrigins } : {}),
     ...(authGate ? { authGate } : {}),
+    ...(config.auditService ? { auditService: config.auditService } : {}),
+    defaultEnvironment: config.environment,
   });
 }
 

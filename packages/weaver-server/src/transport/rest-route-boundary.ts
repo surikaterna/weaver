@@ -1,9 +1,40 @@
-import type { WriteResult } from "@weaver-conf/config-types";
+import {
+  registeredSchemasResponseSchema,
+  type SchemaRegistrationResponse,
+  type WriteResult,
+} from "@weaver-conf/config-types";
+import type { z } from "zod";
 import type { WeaverConfigService } from "../core/config-service";
 import type { WeaverErrorCode } from "../types/index";
 import { createWeaverError, httpStatusForError } from "../types/index";
 import type { RestRequest, RestResponse } from "./rest-adapter";
 import { envelope, errorEnvelope, v1Headers } from "./rest-helpers";
+
+export class RestResponseContractError extends Error {
+  constructor(operation: string, cause: z.ZodError) {
+    super(`Malformed ${operation} response: ${cause.message}`, { cause });
+    this.name = "RestResponseContractError";
+  }
+}
+
+export function parseRestResponse<Schema extends z.ZodType>(
+  operation: string,
+  schema: Schema,
+  value: unknown,
+): z.output<Schema> {
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    throw new RestResponseContractError(operation, result.error);
+  }
+  return result.data;
+}
+
+export function restResponseParser<Schema extends z.ZodType>(
+  operation: string,
+  schema: Schema,
+): (value: unknown) => z.output<Schema> {
+  return (value) => parseRestResponse(operation, schema, value);
+}
 
 export function v1Response<T>(
   configService: WeaverConfigService,
@@ -31,6 +62,38 @@ export function v1Error(
     body: errorEnvelope(error, revision),
     headers: v1Headers(revision),
   };
+}
+
+export function unavailable(configService: WeaverConfigService): RestResponse {
+  return v1Error(
+    configService,
+    "VALIDATION_ERROR",
+    "Schema registry not configured",
+  );
+}
+
+export function registrationFailure(
+  configService: WeaverConfigService,
+  result: SchemaRegistrationResponse,
+): RestResponse {
+  return v1Error(
+    configService,
+    "VALIDATION_ERROR",
+    result.error?.message ?? "Schema registration failed",
+    result.error?.details,
+  );
+}
+
+export function registeredSchemasResponse(
+  configService: WeaverConfigService,
+  schemas: unknown,
+): RestResponse {
+  const response = parseRestResponse(
+    "registered schemas",
+    registeredSchemasResponseSchema,
+    { schemas },
+  );
+  return v1Response(configService, 200, response);
 }
 
 export function extractExpectedRevision(

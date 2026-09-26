@@ -5,6 +5,7 @@ import {
   scopeDefinitionSchema,
   scopeInstanceSchema,
 } from "../src/schemas-layers.js";
+import { schemaDomainAuditEntrySchema } from "../src/schemas-promotion.js";
 import { configurationPropertySchemaSchema } from "../src/schemas-property.js";
 import {
   registeredEffectiveValidationResponseSchema,
@@ -72,6 +73,45 @@ describe("registered operation schemas", () => {
     expect(
       registeredSchemasResponseSchema.safeParse({
         schemas: { "/checkout": { type: "unsupported" } },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("schema audit schemas", () => {
+  it("validates typed schema operation outcomes", () => {
+    const result = schemaDomainAuditEntrySchema.safeParse({
+      domain: "schema",
+      timestamp: "2026-09-18T00:00:00.000Z",
+      actor: "svc:checkout",
+      action: "schema.patch.path",
+      key: "/checkout/db/host",
+      environment: "prod",
+      success: false,
+      error: "Registered path patch failed",
+      metadata: {
+        operation: "schema.patch.path",
+        subject: "svc:checkout",
+        serviceId: "checkout",
+        writePath: "/checkout/db/host",
+        environment: "prod",
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects mismatched or empty schema audit fields", () => {
+    expect(
+      schemaDomainAuditEntrySchema.safeParse({
+        domain: "schema",
+        timestamp: "now",
+        actor: "",
+        action: "schema.write.object",
+        key: "",
+        environment: "",
+        success: true,
+        metadata: { operation: "schema.write.object" },
       }).success,
     ).toBe(false);
   });
@@ -193,6 +233,20 @@ describe("schema registration request schemas", () => {
     { oneOf: [{ type: "object" }, { type: "string" }] },
     { type: ["object", "null"] },
   ];
+
+  it("strips legacy subjects from persisted registration metadata", () => {
+    const result = schemaRegistrationMetadataSchema.safeParse({
+      serviceId: "lynx",
+      servicePath: "/lynx",
+      environment: "default",
+      providerId: "lynx",
+      owner: { name: "Lynx", contact: "lynx@example.com" },
+      audit: { subject: "svc:lynx", actor: "api" },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data?.audit).toEqual({ actor: "api" });
+  });
 
   it("enforces registration identifier and slot path lexical contracts", () => {
     for (const id of ["lynx", "checkout-api"]) {

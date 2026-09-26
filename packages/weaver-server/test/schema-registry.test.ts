@@ -227,7 +227,6 @@ describe("SchemaRegistry", () => {
         contact: "example-service@example.com",
       },
       schemaVersion: "1.2.3",
-      audit: { subject: "svc:example-service", actor: "api" },
     });
     expect(await registry.getSchema("example-service", "default")).toEqual({
       type: "object",
@@ -373,73 +372,87 @@ describe("SchemaRegistry", () => {
   });
 
   it("persists and hydrates registry metadata under the protected internal root", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {},
+    });
     const persistentConfigService = await createWeaverConfigService({
-      providers: [
-        createInMemoryStorageProvider({
-          id: "platform",
-          layer: "platform",
-          initialEntries: {},
-        }),
-      ],
+      providers: [provider],
       environment: "default",
     });
 
     const registry = await createPersistentSchemaRegistry({
       configService: persistentConfigService,
     });
-    await registry.register(serviceRegistration(), { actor: "api" });
+    await registry.register(serviceRegistration(), {
+      actor: "api",
+      subject: "svc:example-service",
+    });
 
-    expect(
-      await persistentConfigService.get("_weaver.registry.schemas"),
-    ).toEqual({
-      environments: {
-        default: {
+    expect(await persistentConfigService.get("_weaver.registry.schemas")).toBe(
+      undefined,
+    );
+    expect((await provider.load()).entries).toMatchObject({
+      _weaver: {
+        registry: {
           schemas: {
-            "/example-service": {
-              kind: "service",
-              schema: {
-                encoding: "weaver.configuration-property-schema-graph",
-                version: 1,
-                root: 0,
-                nodes: [{ type: "object" }],
-              },
-              metadata: {
-                serviceId: "example-service",
-                servicePath: "/example-service",
-                environment: "default",
-                providerId: "example-service",
-                owner: {
-                  name: "Example Service",
-                  contact: "example-service@example.com",
+            environments: {
+              default: {
+                schemas: {
+                  "/example-service": {
+                    kind: "service",
+                    schema: {
+                      encoding: "weaver.configuration-property-schema-graph",
+                      version: 1,
+                      root: 0,
+                      nodes: [{ type: "object" }],
+                    },
+                    metadata: {
+                      serviceId: "example-service",
+                      servicePath: "/example-service",
+                      environment: "default",
+                      providerId: "example-service",
+                      owner: {
+                        name: "Example Service",
+                        contact: "example-service@example.com",
+                      },
+                      schemaVersion: "1.2.3",
+                    },
+                  },
                 },
-                schemaVersion: "1.2.3",
-                audit: { actor: "api" },
+                slots: {
+                  "/example-service/plugins": {
+                    serviceId: "example-service",
+                    servicePath: "/example-service",
+                    slotPath: "/plugins",
+                    canonicalSlotPath: "/example-service/plugins",
+                    environment: "default",
+                    providerId: "example-service",
+                    owner: {
+                      name: "Example Service",
+                      contact: "example-service@example.com",
+                    },
+                    accepts: "object",
+                    schemaVersion: "1.2.3",
+                  },
+                },
               },
-            },
-          },
-          slots: {
-            "/example-service/plugins": {
-              serviceId: "example-service",
-              servicePath: "/example-service",
-              slotPath: "/plugins",
-              canonicalSlotPath: "/example-service/plugins",
-              environment: "default",
-              providerId: "example-service",
-              owner: {
-                name: "Example Service",
-                contact: "example-service@example.com",
-              },
-              accepts: "object",
-              schemaVersion: "1.2.3",
-              audit: { actor: "api" },
             },
           },
         },
       },
     });
+    const persisted = JSON.stringify((await provider.load()).entries);
+    expect(persisted).not.toContain('"subject"');
+    expect(persisted).not.toContain('"audit"');
 
+    const restartedConfigService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+    });
     const hydrated = await createPersistentSchemaRegistry({
-      configService: persistentConfigService,
+      configService: restartedConfigService,
     });
     expect((await hydrated.register(fragmentRegistration())).success).toBe(
       true,
