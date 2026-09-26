@@ -13,12 +13,6 @@ import {
   registeredSchemasResponseSchema,
 } from "../src/schemas-registered-operations.js";
 import {
-  registeredEffectiveValidationResponseSchema,
-  registeredObjectWriteRequestSchema,
-  registeredObjectWriteResponseSchema,
-  registeredSchemasResponseSchema,
-} from "../src/schemas-registered-operations.js";
-import {
   providerIdSchema,
   publicConfigPathSchema,
   registrationEnvironmentSchema,
