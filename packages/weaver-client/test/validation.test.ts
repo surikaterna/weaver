@@ -139,6 +139,153 @@ function createMockTransport(
 }
 
 describe("client validation integration", () => {
+  it("validates bracket-safe namespace and instance targets without treating slashes as aliases", async () => {
+    const writes: unknown[][] = [];
+    const transport = createMockTransport({
+      set: async (...args) => {
+        writes.push(args);
+        return { success: true };
+      },
+      fetchSchemas: async () => ({
+        "/app:default": {
+          type: "object",
+          properties: {
+            editor: {
+              type: "object",
+              properties: {
+                "theme.dark": { type: "number" },
+                theme: {
+                  type: "object",
+                  properties: { dark: { type: "string" } },
+                },
+                instances: {
+                  type: "object",
+                  properties: {
+                    "panel.one": {
+                      type: "object",
+                      properties: {
+                        "theme.dark": { type: "number" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    });
+    const client = await createWeaverClient({ transport, schemas: true });
+    const namespace = client.namespace<{ "theme.dark": number }>("app.editor");
+    expect(
+      (await namespace.set("theme.dark", "wrong" as unknown as number)).error
+        ?.code,
+    ).toBe("VALIDATION_ERROR");
+    expect(
+      (
+        await namespace
+          .instance("panel.one")
+          .set("theme.dark", "wrong" as unknown as number)
+      ).error?.code,
+    ).toBe("VALIDATION_ERROR");
+    expect(writes).toEqual([]);
+    expect(client.validate("/app/editor[theme.dark]", "wrong").valid).toBe(
+      true,
+    );
+    expect(
+      (await namespace.instance("panel.one").set("theme.dark", 12)).success,
+    ).toBe(true);
+    expect(writes).toEqual([
+      ["app.editor.instances[panel.one][theme.dark]", 12, undefined],
+    ]);
+    await client.close();
+  });
+
+  it("preflights every batch entry and every facade write before transport effects", async () => {
+    const writes: unknown[][] = [];
+    const transport = createMockTransport({
+      set: async (...args) => {
+        writes.push(["set", ...args]);
+        return { success: true };
+      },
+      setMany: async (...args) => {
+        writes.push(["setMany", ...args]);
+        return { success: true };
+      },
+      fetchSchemas: async () => ({
+        "/app:default": {
+          type: "object",
+          properties: {
+            port: { type: "number" },
+            name: { type: "string" },
+            instances: {
+              type: "object",
+              additionalProperties: {
+                type: "object",
+                properties: { port: { type: "number" } },
+              },
+            },
+          },
+        },
+      }),
+    });
+    const client = await createWeaverClient({ transport, schemas: true });
+    const namespace = client.namespace<{ port: number; name: string }>("app");
+    const options = { layer: "user" };
+    const rejected = [
+      await client.setMany({ "app.name": "ok", "app.port": "wrong" }, options),
+      await client.setMany({ "app.port": "wrong", "app.name": "ok" }, options),
+      await client.setNamespace("app", { port: "wrong", name: "ok" }, options),
+      await namespace.set("port", "wrong" as unknown as number, options),
+      await namespace.setMany(
+        { name: "ok", port: "wrong" as unknown as number },
+        options,
+      ),
+      await client
+        .instance<{ port: number }>("app", "one")
+        .set("port", "wrong" as unknown as number, options),
+      await namespace
+        .instance("one")
+        .set("port", "wrong" as unknown as number, options),
+    ];
+    for (const result of rejected) {
+      expect(result).toMatchObject({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          details: { errors: expect.any(Array) },
+        },
+      });
+      expect(result.error?.details?.errors).not.toHaveLength(0);
+    }
+    expect(writes).toEqual([]);
+    expect(
+      (await client.setMany({ "app.port": 80, "app.name": "ok" }, options))
+        .success,
+    ).toBe(true);
+    expect(
+      (await client.setNamespace("app", { port: 80, name: "ok" }, options))
+        .success,
+    ).toBe(true);
+    expect((await namespace.set("port", 80, options)).success).toBe(true);
+    expect(
+      (await namespace.setMany({ port: 80, name: "ok" }, options)).success,
+    ).toBe(true);
+    expect(
+      (
+        await client
+          .instance<{ port: number }>("app", "one")
+          .set("port", 80, options)
+      ).success,
+    ).toBe(true);
+    expect(
+      (await namespace.instance("one").set("port", 80, options)).success,
+    ).toBe(true);
+    expect(writes).toHaveLength(6);
+    expect(writes.every((call) => call.at(-1) === options)).toBe(true);
+    await client.close();
+  });
+
   it("set() rejects invalid value without calling transport", async () => {
     let transportCalled = false;
     const transport = createMockTransport({

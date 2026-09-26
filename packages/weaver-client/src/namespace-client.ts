@@ -1,4 +1,4 @@
-import { deepGet } from "@weaver-conf/config-engine";
+import { buildPath, deepGet, parsePath } from "@weaver-conf/config-engine";
 import type { ScopeInstance } from "@weaver-conf/config-types";
 import { createInstanceClient } from "./instance-client";
 import type { NamespaceClient } from "./namespace";
@@ -148,5 +148,5 @@ function namespaceViews<TConfig extends object>(
 }
 
 function resolveKey(path: string, key: string): string {
-  return `${path}.${key}`;
+  return buildPath([...parsePath(path), key]);
 }

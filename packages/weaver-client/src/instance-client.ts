@@ -1,4 +1,4 @@
-import { deepGet } from "@weaver-conf/config-engine";
+import { buildPath, deepGet, parsePath } from "@weaver-conf/config-engine";
 import type { InstanceClient } from "./namespace";
 import type { WriteOptions, WriteResult } from "./transport";
 import type { ConfigDelta, Unsubscribe } from "./types";
@@ -27,7 +27,11 @@ export function createInstanceClient<
   instanceId: string,
   deps: InstanceClientDeps,
 ): InstanceClient<TConfig> {
-  const instancePath = `${basePath}.instances.${instanceId}`;
+  const instancePath = buildPath([
+    ...parsePath(basePath),
+    "instances",
+    instanceId,
+  ]);
 
   function get<K extends ConfigKey<TConfig>>(key: K): TConfig[K] | undefined {
     return readInstanceValue<TConfig, K>(basePath, instancePath, key, deps);
@@ -41,7 +45,7 @@ export function createInstanceClient<
     },
     async set(key, value, options) {
       return deps.set(
-        `${instancePath}.${key}`,
+        memberPath(instancePath, key),
         value,
         instanceWriteOptions(deps, options),
       );
@@ -50,7 +54,7 @@ export function createInstanceClient<
       return deps.remove(instancePath, instanceWriteOptions(deps, options));
     },
     onChange(key, handler) {
-      const fullKey = `${instancePath}.${key}`;
+      const fullKey = memberPath(instancePath, key);
       return deps.onChange(fullKey, (deltas) => {
         for (const delta of deltas) {
           if (delta.key !== fullKey) continue;
@@ -73,13 +77,17 @@ function readInstanceValue<
   deps: InstanceClientDeps,
 ): TConfig[K] | undefined {
   const state = deps.getState();
-  const instanceValue = deepGet(state, `${instancePath}.${key}`);
+  const instanceValue = deepGet(state, memberPath(instancePath, key));
   const value =
     instanceValue === undefined
-      ? deepGet(state, `${basePath}.${key}`)
+      ? deepGet(state, memberPath(basePath, key))
       : instanceValue;
   // The consumer-supplied generic is compile-time-only; server validation is authoritative.
   return value as TConfig[K] | undefined;
+}
+
+function memberPath(path: string, key: string): string {
+  return buildPath([...parsePath(path), key]);
 }
 
 function instanceWriteOptions(
