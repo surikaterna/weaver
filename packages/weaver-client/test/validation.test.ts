@@ -138,6 +138,69 @@ function createMockTransport(
   };
 }
 
+const literalMemberSchemas = {
+  "/app:default": {
+    type: "object" as const,
+    properties: {
+      editor: {
+        type: "object" as const,
+        properties: {
+          "theme.dark": { type: "number" as const },
+          theme: {
+            type: "object" as const,
+            properties: { dark: { type: "string" as const } },
+          },
+          instances: {
+            type: "object" as const,
+            properties: {
+              "panel.one": {
+                type: "object" as const,
+                properties: {
+                  "theme.dark": { type: "number" as const },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+async function trackedClient() {
+  const writes: unknown[][] = [];
+  const transport = createMockTransport({
+    set: async (...args) => {
+      writes.push(["set", ...args]);
+      return { success: true };
+    },
+    setMany: async (...args) => {
+      writes.push(["setMany", ...args]);
+      return { success: true };
+    },
+    fetchSchemas: async () => ({
+      "/app:default": {
+        type: "object",
+        properties: {
+          port: { type: "number" },
+          name: { type: "string" },
+          instances: {
+            type: "object",
+            additionalProperties: {
+              type: "object",
+              properties: { port: { type: "number" } },
+            },
+          },
+        },
+      },
+    }),
+  });
+  return {
+    client: await createWeaverClient({ transport, schemas: true }),
+    writes,
+  };
+}
+
 describe("client validation integration", () => {
   it("validates bracket-safe namespace and instance targets without treating slashes as aliases", async () => {
     const writes: unknown[][] = [];
@@ -146,34 +209,7 @@ describe("client validation integration", () => {
         writes.push(args);
         return { success: true };
       },
-      fetchSchemas: async () => ({
-        "/app:default": {
-          type: "object",
-          properties: {
-            editor: {
-              type: "object",
-              properties: {
-                "theme.dark": { type: "number" },
-                theme: {
-                  type: "object",
-                  properties: { dark: { type: "string" } },
-                },
-                instances: {
-                  type: "object",
-                  properties: {
-                    "panel.one": {
-                      type: "object",
-                      properties: {
-                        "theme.dark": { type: "number" },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      }),
+      fetchSchemas: async () => literalMemberSchemas,
     });
     const client = await createWeaverClient({ transport, schemas: true });
     const namespace = client.namespace<{ "theme.dark": number }>("app.editor");
@@ -202,34 +238,7 @@ describe("client validation integration", () => {
   });
 
   it("preflights every batch entry and every facade write before transport effects", async () => {
-    const writes: unknown[][] = [];
-    const transport = createMockTransport({
-      set: async (...args) => {
-        writes.push(["set", ...args]);
-        return { success: true };
-      },
-      setMany: async (...args) => {
-        writes.push(["setMany", ...args]);
-        return { success: true };
-      },
-      fetchSchemas: async () => ({
-        "/app:default": {
-          type: "object",
-          properties: {
-            port: { type: "number" },
-            name: { type: "string" },
-            instances: {
-              type: "object",
-              additionalProperties: {
-                type: "object",
-                properties: { port: { type: "number" } },
-              },
-            },
-          },
-        },
-      }),
-    });
-    const client = await createWeaverClient({ transport, schemas: true });
+    const { client, writes } = await trackedClient();
     const namespace = client.namespace<{ port: number; name: string }>("app");
     const options = { layer: "user" };
     const rejected = [
@@ -259,6 +268,13 @@ describe("client validation integration", () => {
       expect(result.error?.details?.errors).not.toHaveLength(0);
     }
     expect(writes).toEqual([]);
+    await client.close();
+  });
+
+  it("preserves one transport call and options for each valid facade write", async () => {
+    const { client, writes } = await trackedClient();
+    const namespace = client.namespace<{ port: number; name: string }>("app");
+    const options = { layer: "user" };
     expect(
       (await client.setMany({ "app.port": 80, "app.name": "ok" }, options))
         .success,
