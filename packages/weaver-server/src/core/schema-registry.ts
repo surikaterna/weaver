@@ -86,7 +86,7 @@ export interface SchemaRegistry {
   ): Promise<ObjectConfigurationPropertySchema | null>;
   resolveAnchor(
     path: string,
-    environment: string,
+    environment?: string,
   ): Promise<RegisteredSchemaAnchor | null>;
   listAll(): Record<string, ConfigurationPropertySchema>;
 }
@@ -162,13 +162,30 @@ export function createSchemaRegistry(
     },
 
     async resolveAnchor(path, environment) {
-      return findRegisteredAnchor(state.schemas.values(), path, environment);
+      return findRegisteredAnchor(
+        state.schemas.values(),
+        path,
+        environment ?? "",
+      );
     },
 
     listAll() {
       return listSchemas(state);
     },
   };
+}
+
+function getRegisteredServiceSchema(
+  schemas: ReadonlyMap<string, SchemaEntry>,
+  serviceId: string,
+  environment: string,
+): ObjectConfigurationPropertySchema | null {
+  try {
+    const { servicePath } = deriveServicePath(serviceId);
+    return schemas.get(schemaKey(servicePath, environment))?.schema ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function createPersistentSchemaRegistry(
@@ -200,18 +217,15 @@ export async function createPersistentSchemaRegistry(
     },
 
     async getSchema(serviceId, environment) {
-      try {
-        const { servicePath } = deriveServicePath(serviceId);
-        return (
-          state.schemas.get(schemaKey(servicePath, environment))?.schema ?? null
-        );
-      } catch {
-        return null;
-      }
+      return getRegisteredServiceSchema(state.schemas, serviceId, environment);
     },
 
     async resolveAnchor(path, environment) {
-      return findRegisteredAnchor(state.schemas.values(), path, environment);
+      return findRegisteredAnchor(
+        state.schemas.values(),
+        path,
+        environment ?? defaultEnvironment ?? "",
+      );
     },
 
     listAll() {
