@@ -91,10 +91,15 @@ async function rawRequest(
   port: number,
   path: string,
   headers?: Record<string, string>,
-): Promise<{ readonly status: number; readonly body: string }> {
+  method = "GET",
+): Promise<{
+  readonly status: number;
+  readonly body: string;
+  readonly headers: import("node:http").IncomingHttpHeaders;
+}> {
   return new Promise((resolve, reject) => {
     const request = httpRequest(
-      { hostname: "127.0.0.1", port, path, headers },
+      { hostname: "127.0.0.1", port, path, headers, method },
       (response) => {
         const chunks: Buffer[] = [];
         response.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -102,6 +107,7 @@ async function rawRequest(
           resolve({
             status: response.statusCode ?? 0,
             body: Buffer.concat(chunks).toString("utf8"),
+            headers: response.headers,
           });
         });
       },
@@ -109,6 +115,26 @@ async function rawRequest(
     request.on("error", reject);
     request.end();
   });
+}
+
+function expectOuterEnvelope(
+  response: Awaited<ReturnType<typeof rawRequest>>,
+  status: number,
+  code: string,
+): void {
+  expect(response.status).toBe(status);
+  expect(response.headers["content-type"]).toMatch(/^application\/json/);
+  expect(response.headers.etag).toBeUndefined();
+  const body: unknown = JSON.parse(response.body);
+  expect(body).toEqual({
+    data: null,
+    meta: { revision: "", timestamp: expect.any(String) },
+    error: { code, message: expect.any(String) },
+  });
+  if (!isRecord(body) || !isRecord(body.meta)) throw new Error("Invalid meta");
+  expect(new Date(String(body.meta.timestamp)).toISOString()).toBe(
+    body.meta.timestamp,
+  );
 }
 
 async function startWithProviders(
@@ -122,6 +148,72 @@ async function startWithProviders(
 }
 
 describe("Weaver server auth gate", () => {
+  it("envelopes pre-routing REST rejections before writes without changing other targets", async () => {
+    let writes = 0;
+    const memory = createInMemoryStorageProvider({
+      id: "test",
+      layer: "platform",
+    });
+    const provider: ConfigurationStorageProvider = {
+      id: memory.id,
+      layer: memory.layer,
+      writable: true,
+      load: () => memory.load(),
+      remove: (key) => memory.remove(key),
+      write: async (key, value) => {
+        writes += 1;
+        return memory.write(key, value);
+      },
+    };
+    const server = await startWeaverServer({
+      port: 0,
+      jwtSecret: "target-secret",
+      providers: [provider],
+    });
+    try {
+      const path = "/v1/config/test/key";
+      for (const headers of [undefined, bearer("invalid")]) {
+        expectOuterEnvelope(
+          await rawRequest(server.port, path, headers, "PUT"),
+          401,
+          "UNAUTHORIZED",
+        );
+        for (const bad of [
+          `${path}?env=prod&%65nv=other`,
+          "/v1/config/%ZZ",
+          "/v1/config/__proto__",
+        ]) {
+          expectOuterEnvelope(
+            await rawRequest(server.port, bad, headers, "PUT"),
+            400,
+            "VALIDATION_ERROR",
+          );
+        }
+      }
+      expect(writes).toBe(0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("preserves bare malformed-target responses outside REST", async () => {
+    const server = await startWeaverServer({ port: 0 });
+    try {
+      for (const path of [
+        "/v1/events?x=1&x=2",
+        "/v1/events/%ZZ",
+        "/healthz#bad",
+        "/else#bad",
+      ]) {
+        expect((await rawRequest(server.port, path)).body).toBe(
+          '{"error":"invalid request target"}',
+        );
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
   it("rejects unauthenticated writes when JWT auth is enabled", async () => {
     const server = await startWeaverServer({
       port: 0,
