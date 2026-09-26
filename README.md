@@ -46,7 +46,7 @@ const request: SchemaRegistrationRequest = {
 };
 
 const registrationClient = await createWeaverClient({
-  transport: createHttpTransport({ baseUrl: "http://localhost:3000/config" }),
+  transport: createHttpTransport({ baseUrl: "http://localhost:3399" }),
 });
 await registrationClient.registerSchema(request);
 await registrationClient.close();
@@ -57,7 +57,7 @@ interface MyConfig {
 }
 
 const client = await createWeaverClient({
-  transport: createHttpTransport({ baseUrl: "http://localhost:3000/config" }),
+  transport: createHttpTransport({ baseUrl: "http://localhost:3399" }),
   schemas: true,
 });
 const config = client.namespace<MyConfig>("my-service");
