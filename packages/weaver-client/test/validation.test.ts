@@ -11,15 +11,16 @@ function createMockRegistry(
     getSchema: () => undefined,
     isSensitive: () => false,
     getReloadBehavior: () => undefined,
-    getRestartRequiredKeys: () => [],
-    validate: () => ({ valid: true }),
+    validate: () => ({ valid: true, errors: [] }),
     ...overrides,
   };
 }
 
 describe("validateOnRead", () => {
   it("passes valid value through", () => {
-    const registry = createMockRegistry({ validate: () => ({ valid: true }) });
+    const registry = createMockRegistry({
+      validate: () => ({ valid: true, errors: [] }),
+    });
     const result = validateOnRead("key", 42, registry, {
       warnOnMismatch: true,
     });
@@ -30,7 +31,14 @@ describe("validateOnRead", () => {
     const registry = createMockRegistry({
       validate: () => ({
         valid: false,
-        errors: [{ path: "", message: "bad type" }],
+        errors: [
+          {
+            code: "invalid-type",
+            path: "",
+            segments: [],
+            message: "bad type",
+          },
+        ],
       }),
     });
     const warns: string[] = [];
@@ -55,7 +63,14 @@ describe("validateOnRead", () => {
     const registry = createMockRegistry({
       validate: () => ({
         valid: false,
-        errors: [{ path: "", message: "bad" }],
+        errors: [
+          {
+            code: "invalid-type",
+            path: "",
+            segments: [],
+            message: "bad",
+          },
+        ],
       }),
     });
     const warns: string[] = [];
@@ -71,13 +86,22 @@ describe("validateOnRead", () => {
 
 describe("validateOnWrite", () => {
   it("returns valid for valid value", () => {
-    const registry = createMockRegistry({ validate: () => ({ valid: true }) });
+    const registry = createMockRegistry({
+      validate: () => ({ valid: true, errors: [] }),
+    });
     const result = validateOnWrite("key", 42, registry);
-    expect(result).toEqual({ valid: true });
+    expect(result).toEqual({ valid: true, errors: [] });
   });
 
   it("returns invalid for bad value", () => {
-    const errors = [{ path: "", message: "Expected number, got string" }];
+    const errors = [
+      {
+        code: "invalid-type" as const,
+        path: "",
+        segments: [],
+        message: "Expected number, got string",
+      },
+    ];
     const registry = createMockRegistry({
       validate: () => ({ valid: false, errors }),
     });
@@ -114,7 +138,170 @@ function createMockTransport(
   };
 }
 
+const literalMemberSchemas = {
+  "/app:default": {
+    type: "object" as const,
+    properties: {
+      editor: {
+        type: "object" as const,
+        properties: {
+          "theme.dark": { type: "number" as const },
+          theme: {
+            type: "object" as const,
+            properties: { dark: { type: "string" as const } },
+          },
+          instances: {
+            type: "object" as const,
+            properties: {
+              "panel.one": {
+                type: "object" as const,
+                properties: {
+                  "theme.dark": { type: "number" as const },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+async function trackedClient() {
+  const writes: unknown[][] = [];
+  const transport = createMockTransport({
+    set: async (...args) => {
+      writes.push(["set", ...args]);
+      return { success: true };
+    },
+    setMany: async (...args) => {
+      writes.push(["setMany", ...args]);
+      return { success: true };
+    },
+    fetchSchemas: async () => ({
+      "/app:default": {
+        type: "object",
+        properties: {
+          port: { type: "number" },
+          name: { type: "string" },
+          instances: {
+            type: "object",
+            additionalProperties: {
+              type: "object",
+              properties: { port: { type: "number" } },
+            },
+          },
+        },
+      },
+    }),
+  });
+  return {
+    client: await createWeaverClient({ transport, schemas: true }),
+    writes,
+  };
+}
+
 describe("client validation integration", () => {
+  it("validates bracket-safe namespace and instance targets without treating slashes as aliases", async () => {
+    const writes: unknown[][] = [];
+    const transport = createMockTransport({
+      set: async (...args) => {
+        writes.push(args);
+        return { success: true };
+      },
+      fetchSchemas: async () => literalMemberSchemas,
+    });
+    const client = await createWeaverClient({ transport, schemas: true });
+    const namespace = client.namespace<{ "theme.dark": number }>("app.editor");
+    expect(
+      (await namespace.set("theme.dark", "wrong" as unknown as number)).error
+        ?.code,
+    ).toBe("VALIDATION_ERROR");
+    expect(
+      (
+        await namespace
+          .instance("panel.one")
+          .set("theme.dark", "wrong" as unknown as number)
+      ).error?.code,
+    ).toBe("VALIDATION_ERROR");
+    expect(writes).toEqual([]);
+    expect(client.validate("/app/editor[theme.dark]", "wrong").valid).toBe(
+      true,
+    );
+    expect(
+      (await namespace.instance("panel.one").set("theme.dark", 12)).success,
+    ).toBe(true);
+    expect(writes).toEqual([
+      ["app.editor.instances[panel.one][theme.dark]", 12, undefined],
+    ]);
+    await client.close();
+  });
+
+  it("preflights every batch entry and every facade write before transport effects", async () => {
+    const { client, writes } = await trackedClient();
+    const namespace = client.namespace<{ port: number; name: string }>("app");
+    const options = { layer: "user" };
+    const rejected = [
+      await client.setMany({ "app.name": "ok", "app.port": "wrong" }, options),
+      await client.setMany({ "app.port": "wrong", "app.name": "ok" }, options),
+      await client.setNamespace("app", { port: "wrong", name: "ok" }, options),
+      await namespace.set("port", "wrong" as unknown as number, options),
+      await namespace.setMany(
+        { name: "ok", port: "wrong" as unknown as number },
+        options,
+      ),
+      await client
+        .instance<{ port: number }>("app", "one")
+        .set("port", "wrong" as unknown as number, options),
+      await namespace
+        .instance("one")
+        .set("port", "wrong" as unknown as number, options),
+    ];
+    for (const result of rejected) {
+      expect(result).toMatchObject({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          details: { errors: expect.any(Array) },
+        },
+      });
+      expect(result.error?.details?.errors).not.toHaveLength(0);
+    }
+    expect(writes).toEqual([]);
+    await client.close();
+  });
+
+  it("preserves one transport call and options for each valid facade write", async () => {
+    const { client, writes } = await trackedClient();
+    const namespace = client.namespace<{ port: number; name: string }>("app");
+    const options = { layer: "user" };
+    expect(
+      (await client.setMany({ "app.port": 80, "app.name": "ok" }, options))
+        .success,
+    ).toBe(true);
+    expect(
+      (await client.setNamespace("app", { port: 80, name: "ok" }, options))
+        .success,
+    ).toBe(true);
+    expect((await namespace.set("port", 80, options)).success).toBe(true);
+    expect(
+      (await namespace.setMany({ port: 80, name: "ok" }, options)).success,
+    ).toBe(true);
+    expect(
+      (
+        await client
+          .instance<{ port: number }>("app", "one")
+          .set("port", 80, options)
+      ).success,
+    ).toBe(true);
+    expect(
+      (await namespace.instance("one").set("port", 80, options)).success,
+    ).toBe(true);
+    expect(writes).toHaveLength(6);
+    expect(writes.every((call) => call.at(-1) === options)).toBe(true);
+    await client.close();
+  });
+
   it("set() rejects invalid value without calling transport", async () => {
     let transportCalled = false;
     const transport = createMockTransport({
@@ -131,7 +318,7 @@ describe("client validation integration", () => {
     });
     // Add fetchSchemas to transport
     (transport as Record<string, unknown>).fetchSchemas = async () => ({
-      "app.port": { type: "number" as const },
+      "/app/port:default": { type: "number" as const },
     });
 
     const client = await createWeaverClient({ transport, schemas: true });
@@ -150,7 +337,7 @@ describe("client validation integration", () => {
       },
     });
     (transport as Record<string, unknown>).fetchSchemas = async () => ({
-      "app.port": { type: "number" as const },
+      "/app/port:default": { type: "number" as const },
     });
 
     const client = await createWeaverClient({ transport, schemas: true });
@@ -162,7 +349,7 @@ describe("client validation integration", () => {
   it("validate() returns ValidationResult", async () => {
     const transport = createMockTransport();
     (transport as Record<string, unknown>).fetchSchemas = async () => ({
-      "app.name": { type: "string" as const },
+      "/app/name:default": { type: "string" as const },
     });
 
     const client = await createWeaverClient({ transport, schemas: true });
@@ -175,11 +362,11 @@ describe("client validation integration", () => {
   it("isSensitive() returns correct boolean", async () => {
     const transport = createMockTransport();
     (transport as Record<string, unknown>).fetchSchemas = async () => ({
-      "db.password": {
+      "/db/password:default": {
         type: "string" as const,
         "x-weaver": { sensitive: true },
       },
-      "app.name": { type: "string" as const },
+      "/app/name:default": { type: "string" as const },
     });
 
     const client = await createWeaverClient({ transport, schemas: true });
@@ -191,7 +378,26 @@ describe("client validation integration", () => {
     const transport = createMockTransport();
     const client = await createWeaverClient({ transport });
     // validate/isSensitive still work, just return defaults
-    expect(client.validate("any", "val")).toEqual({ valid: true });
+    expect(client.validate("any", "val")).toEqual({
+      valid: true,
+      errors: [],
+    });
     expect(client.isSensitive("any")).toBe(false);
+  });
+
+  it("validates explicit schema environments through the registration contract", async () => {
+    const transport = createMockTransport();
+    (transport as Record<string, unknown>).fetchSchemas = async () => ({
+      "/app/value:default": { type: "string" as const },
+      "/app/value:production": { type: "number" as const },
+    });
+    const client = await createWeaverClient({
+      transport,
+      schemas: { environment: "production" },
+    });
+    expect(client.validate("app.value", 1).valid).toBe(true);
+    await expect(
+      createWeaverClient({ transport, schemas: { environment: "__proto__" } }),
+    ).rejects.toThrow();
   });
 });

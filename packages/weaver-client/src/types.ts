@@ -35,6 +35,8 @@ export type ClientMode = "live" | "cached" | "degraded";
 
 /** Options for enabling schema validation on the client. */
 export interface SchemaOptions {
+  /** Schema registration environment to load (default: "default") */
+  environment?: string;
   /** Subscribe to schema changes from server (default: true) */
   live?: boolean;
   /** Log warnings when values don't match server schema (default: true) */

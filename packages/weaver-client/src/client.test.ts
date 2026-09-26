@@ -1,6 +1,47 @@
 import { createWeaverClient } from "./client";
+import type { WeaverClient } from "./client-types";
 import { createLocalTransport } from "./local-transport";
+import type { InstanceClient, NamespaceClient } from "./namespace";
 import type { ConfigSnapshot } from "./types";
+
+interface TypedEditorConfig {
+  fontSize: number;
+  theme: "light" | "dark";
+  wordWrap: boolean;
+}
+
+function compileNamespaceContract(client: WeaverClient): void {
+  const editor = client.namespace<TypedEditorConfig>("editor");
+  const fontSize: number | undefined = editor.get("fontSize");
+  const theme: "light" | "dark" = editor.getOrDefault("theme", "light");
+  const all: Partial<TypedEditorConfig> = editor.getAll();
+  const scoped: NamespaceClient<TypedEditorConfig> = editor.withScope([]);
+  const nested: InstanceClient<TypedEditorConfig> = editor.instance("panel");
+  const direct: InstanceClient<TypedEditorConfig> =
+    client.instance<TypedEditorConfig>("editor", "panel");
+  void fontSize;
+  void theme;
+  void all;
+  void scoped;
+  void nested;
+  void direct;
+
+  editor.set("fontSize", 18);
+  editor.setMany({ theme: "dark", wordWrap: true });
+  client.namespace("dynamic").set("arbitrary", { nested: true });
+  // @ts-expect-error unknown keys are rejected for a typed namespace
+  editor.get("missing");
+  // @ts-expect-error values must match the selected key
+  editor.set("fontSize", "large");
+  // @ts-expect-error defaults must match the selected key
+  editor.getOrDefault("wordWrap", "yes");
+  // @ts-expect-error setMany values remain keyed by the config interface
+  editor.setMany({ theme: "blue" });
+  // @ts-expect-error instance keys remain constrained by the config interface
+  direct.set("missing", true);
+}
+
+void compileNamespaceContract;
 
 function makeSnapshot(
   entries: Record<string, unknown> = {},
@@ -97,6 +138,53 @@ describe("WeaverClient", () => {
     const client = await createWeaverClient({ transport });
     const result = await client.remove("app.old");
     expect(result.success).toBe(true);
+  });
+
+  it("registered path methods ignore the legacy namespace prefix", async () => {
+    const transport = createLocalTransport({ snapshot: makeSnapshot() });
+    const calls: string[] = [];
+    transport.setRegisteredObject = async (anchorPath) => {
+      calls.push(anchorPath);
+      return { success: true };
+    };
+    transport.patchRegisteredPath = async (path) => {
+      calls.push(path);
+      return { success: true };
+    };
+    transport.validateRegisteredEffective = async (options) => {
+      calls.push(options.anchorPath);
+      return { valid: true, errors: [] };
+    };
+    const client = await createWeaverClient({ transport, namespace: "legacy" });
+    await client.setRegisteredObject("/checkout", {});
+    await client.patchRegisteredPath("/checkout/db/host", "db.internal");
+    await client.validateRegisteredEffective({ anchorPath: "/checkout" });
+    expect(calls).toEqual(["/checkout", "/checkout/db/host", "/checkout"]);
+  });
+
+  it("path-first registration returns canonical metadata", async () => {
+    const transport = createLocalTransport({ snapshot: makeSnapshot() });
+    let captured: unknown;
+    const expected = {
+      success: true,
+      isNewSchema: true,
+      hasBreakingChanges: false,
+    } as const;
+    transport.registerSchema = async (request) => {
+      captured = request;
+      return expected;
+    };
+    const client = await createWeaverClient({ transport });
+    const request = {
+      serviceId: "checkout",
+      environment: "default",
+      owner: { name: "Checkout", contact: "checkout@example.com" },
+      schema: { type: "object" },
+      fragmentSlots: [],
+    } as const;
+    const response = await client.registerSchema(request);
+    expect(captured).toBe(request);
+    expect(response).toBe(expected);
   });
 
   it("listScopes() delegates to transport", async () => {

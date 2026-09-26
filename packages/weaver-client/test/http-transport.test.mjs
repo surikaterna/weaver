@@ -20,6 +20,12 @@ function createMockFetch(responses) {
 }
 
 describe("HttpTransport", () => {
+  const writeCases = [
+    { name: "set", route: "PUT /v1/config/key", run: (transport) => transport.set("key", "value") },
+    { name: "setMany", route: "PATCH /v1/config", run: (transport) => transport.setMany({ key: "value" }) },
+    { name: "remove", route: "DELETE /v1/config/key", run: (transport) => transport.remove("key") },
+  ];
+
   it("resolveAll makes GET /v1/config", async () => {
     const snapshot = { entries: { "app.name": "test" }, scopes: {}, revision: "rev-1", timestamp: "2026-01-01" };
     const { fetch, calls } = createMockFetch({
@@ -136,5 +142,41 @@ describe("HttpTransport", () => {
     const result = await transport.set("key", "val");
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe("VALIDATION_ERROR");
+  });
+
+  it.each(writeCases)("$name preserves valid error results", async ({ route, run }) => {
+    const { fetch } = createMockFetch({
+      [route]: {
+        status: 400,
+        body: {
+          data: null,
+          error: { code: "VALIDATION_ERROR", message: "bad", details: { key: "key" } },
+        },
+      },
+    });
+    await expect(run(createHttpTransport({ baseUrl: "http://localhost:3399", fetch }))).resolves.toEqual({
+      success: false,
+      error: { code: "VALIDATION_ERROR", message: "bad", details: { key: "key" } },
+    });
+  });
+
+  it.each(
+    writeCases.flatMap((writeCase) => [
+      { ...writeCase, body: { meta: {} }, caseName: "missing success data" },
+      { ...writeCase, body: { data: { success: "yes" } }, caseName: "malformed success data" },
+    ]),
+  )("$name rejects $caseName", async ({ route, run, body }) => {
+    const { fetch } = createMockFetch({ [route]: { status: 200, body } });
+    await expect(run(createHttpTransport({ baseUrl: "http://localhost:3399", fetch }))).rejects.toThrow();
+  });
+
+  it.each(writeCases)("$name rejects malformed errors", async ({ route, run }) => {
+    const { fetch } = createMockFetch({
+      [route]: {
+        status: 400,
+        body: { data: null, error: { code: "NOT_A_WEAVER_CODE", message: "bad" } },
+      },
+    });
+    await expect(run(createHttpTransport({ baseUrl: "http://localhost:3399", fetch }))).rejects.toThrow();
   });
 });
