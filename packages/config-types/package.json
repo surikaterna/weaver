@@ -1,6 +1,6 @@
 {
   "name": "@weaver-conf/config-types",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Core type definitions, Zod schemas, and the defineWeaver() builder for declaring layered configuration stacks",
   "license": "MIT",
   "repository": {

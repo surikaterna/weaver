@@ -1,6 +1,6 @@
 {
   "name": "@weaver-conf/config-auth",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Role-based access control extension for Weaver configuration via withAuth() composition",
   "license": "MIT",
   "repository": {

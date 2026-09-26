@@ -1,6 +1,6 @@
 {
   "name": "@weaver-conf/config-sessions",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Override session provider with expiration, audit logging, and ephemeral storage for Weaver",
   "license": "MIT",
   "repository": {
