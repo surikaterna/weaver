@@ -6,10 +6,13 @@ import type {
 import {
   assertPublicConfigPath,
   parseCanonicalConfigPath,
-  validateConfigurationPatch,
   validateEffectiveConfiguration,
   validatePartialConfiguration,
 } from "@weaver-conf/config-engine";
+import {
+  type ConfigurationValidationSession,
+  createConfigurationValidationSession,
+} from "@weaver-conf/config-engine/internal/schema-validation-session";
 import type { ScopeInstance, WriteResult } from "@weaver-conf/config-types";
 import {
   buildSchemaPatch,
@@ -148,12 +151,10 @@ export async function prepareRegisteredPatchWrite(
   const relativeSegments = resolved.segments.slice(anchor.segments.length);
   const targetFailure = validatePatchTarget(resolved, relativeSegments);
   if (targetFailure !== null) return targetFailure;
-  const patchValidation = validateConfigurationPatch(
-    resolved.anchor.schema,
-    relativeSegments,
-    value,
-    { path: anchor.segments },
-  );
+  const session = createConfigurationValidationSession(resolved.anchor.schema, {
+    path: anchor.segments,
+  });
+  const patchValidation = session.validatePatch(relativeSegments, value);
   if (!patchValidation.valid)
     return validationFailure(patchValidation, resolved);
   return preparePatchedValue(
@@ -161,6 +162,7 @@ export async function prepareRegisteredPatchWrite(
     anchor,
     relativeSegments,
     value,
+    session,
     getLayerValue,
   );
 }
@@ -170,10 +172,15 @@ async function preparePatchedValue(
   anchor: CanonicalConfigPath,
   segments: readonly string[],
   value: unknown,
+  session: ConfigurationValidationSession,
   getLayerValue: (key: string) => Promise<unknown>,
 ): Promise<SchemaWritePreparation> {
   const baseValue = await getLayerValue(anchor.storageKey);
-  const baseValidation = validateExistingLayerValue(baseValue, resolved);
+  const baseValidation = validateExistingLayerValue(
+    baseValue,
+    resolved,
+    session,
+  );
   if (!baseValidation.success) return baseValidation;
   const patch = buildSchemaPatch(
     baseValue,
@@ -182,11 +189,7 @@ async function preparePatchedValue(
     resolved.anchor.schema,
   );
   if (!patch.success) return patchFailure(patch, resolved);
-  const validation = validatePartialConfiguration(
-    resolved.anchor.schema,
-    patch.value,
-    { path: anchor.segments },
-  );
+  const validation = session.validatePartial(patch.value);
   if (!validation.valid) return validationFailure(validation, resolved);
   return preparedWrite(resolved.anchor, patch.value);
 }
@@ -268,13 +271,10 @@ async function resolveWriteAnchor(
 function validateExistingLayerValue(
   value: unknown,
   resolved: ResolvedWriteAnchor,
+  session: ConfigurationValidationSession,
 ): SchemaWritePreparation {
   if (value === undefined) return preparedWrite(resolved.anchor, value);
-  const validation = validatePartialConfiguration(
-    resolved.anchor.schema,
-    value,
-    { path: parseCanonicalConfigPath(resolved.anchor.path).segments },
-  );
+  const validation = session.validatePartial(value);
   return validation.valid
     ? preparedWrite(resolved.anchor, value)
     : validationFailure(validation, resolved);

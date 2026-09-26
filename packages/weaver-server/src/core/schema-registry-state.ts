@@ -97,11 +97,6 @@ export function evaluateRegistration(
   request: SchemaRegistrationRequest,
   _context?: SchemaRegistrationContext,
 ): RegistrationEvaluation {
-  if (!isObjectCompatibleRoot(request.schema)) {
-    return validationFailure(
-      'Registered schema root must declare type exactly "object"',
-    );
-  }
   const parsed = parseRegistrationRequest(request);
   if (!parsed.success) return { result: parsed.result };
 
@@ -132,16 +127,6 @@ export function evaluateRegistration(
       schemaKey(slot.canonicalSlotPath, slot.environment),
     ),
   };
-}
-
-function isObjectCompatibleRoot(schema: unknown): boolean {
-  return (
-    schema !== null &&
-    typeof schema === "object" &&
-    !Array.isArray(schema) &&
-    "type" in schema &&
-    schema.type === "object"
-  );
 }
 
 function findRemovedSlots(
@@ -187,7 +172,8 @@ function parseServiceRegistration(
   request: SchemaRegistrationRequest,
 ): ParsedRegistration {
   const parsed = serviceSchemaRegistrationRequestSchema.safeParse(request);
-  if (!parsed.success) return parsedValidationFailure(parsed.error.message);
+  if (!parsed.success)
+    return parsedValidationFailure(firstIssueMessage(parsed.error));
   const data = parsed.data;
   const service = deriveServicePath(data.serviceId);
   const metadata: SchemaRegistrationMetadata = {
@@ -245,7 +231,8 @@ function parseFragmentRegistration(
   request: SchemaRegistrationRequest,
 ): ParsedRegistration {
   const parsed = fragmentSchemaRegistrationRequestSchema.safeParse(request);
-  if (!parsed.success) return parsedValidationFailure(parsed.error.message);
+  if (!parsed.success)
+    return parsedValidationFailure(firstIssueMessage(parsed.error));
   const data = parsed.data;
   const derived = deriveFragmentPath(
     data.serviceId,
@@ -356,4 +343,10 @@ function validationFailure(message: string): RegistrationEvaluation {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function firstIssueMessage(error: {
+  readonly issues: readonly { readonly message: string }[];
+}): string {
+  return error.issues[0]?.message ?? "Invalid schema registration request";
 }

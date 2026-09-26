@@ -22,24 +22,36 @@ export function validateValueConstraints(state: ValidationState): void {
 function validateConstAndEnum(state: ValidationState): void {
   if (
     state.schema.const !== undefined &&
-    !deepEqual(state.value, state.schema.const)
+    !constraintEqual(state.value, state.schema.const)
   ) {
     addError(state, "invalid-value", "Value does not match const constraint");
   }
   if (
     state.schema.enum !== undefined &&
-    !state.schema.enum.some((item) => deepEqual(item, state.value))
+    !state.schema.enum.some((item) => constraintEqual(item, state.value))
   ) {
     addError(state, "invalid-value", "Value is not in the allowed enum values");
   }
 }
 
+function constraintEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (typeof left !== "object" || left === null) return false;
+  if (typeof right !== "object" || right === null) return false;
+  return deepEqual(left, right);
+}
+
 function validateStringConstraints(state: ValidationState): void {
   const value = state.value;
   if (typeof value !== "string") return;
-  const length = countCodePoints(value);
-  addBoundedError(state, "minLength", length, state.schema.minLength, ">=");
-  addBoundedError(state, "maxLength", length, state.schema.maxLength, "<=");
+  if (
+    state.schema.minLength !== undefined ||
+    state.schema.maxLength !== undefined
+  ) {
+    const length = countCodePoints(value);
+    addBoundedError(state, "minLength", length, state.schema.minLength, ">=");
+    addBoundedError(state, "maxLength", length, state.schema.maxLength, "<=");
+  }
   if (state.schema.pattern === undefined) return;
   const regex = compileSchemaPattern(
     state.schema.pattern,
@@ -64,23 +76,29 @@ function countCodePoints(value: string): number {
 function validateNumberConstraints(state: ValidationState): void {
   const value = state.value;
   if (typeof value !== "number") return;
-  addBoundedError(state, "minimum", value, state.schema.minimum, ">=");
-  addBoundedError(state, "maximum", value, state.schema.maximum, "<=");
-  addBoundedError(
-    state,
-    "exclusiveMinimum",
-    value,
-    state.schema.exclusiveMinimum,
-    ">",
-  );
-  addBoundedError(
-    state,
-    "exclusiveMaximum",
-    value,
-    state.schema.exclusiveMaximum,
-    "<",
-  );
-  validateMultipleOf(state, value);
+  if (state.schema.minimum !== undefined)
+    addBoundedError(state, "minimum", value, state.schema.minimum, ">=");
+  if (state.schema.maximum !== undefined)
+    addBoundedError(state, "maximum", value, state.schema.maximum, "<=");
+  if (state.schema.exclusiveMinimum !== undefined) {
+    addBoundedError(
+      state,
+      "exclusiveMinimum",
+      value,
+      state.schema.exclusiveMinimum,
+      ">",
+    );
+  }
+  if (state.schema.exclusiveMaximum !== undefined) {
+    addBoundedError(
+      state,
+      "exclusiveMaximum",
+      value,
+      state.schema.exclusiveMaximum,
+      "<",
+    );
+  }
+  if (state.schema.multipleOf !== undefined) validateMultipleOf(state, value);
 }
 
 function validateMultipleOf(state: ValidationState, value: number): void {

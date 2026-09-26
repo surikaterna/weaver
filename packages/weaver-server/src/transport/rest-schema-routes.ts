@@ -45,7 +45,6 @@ import {
   restSchemaAuditIdentity,
   schemaRegistrationAuditContext,
   schemaRegistrationAuditOutcome,
-  schemaRegistrationPersistenceContext,
   schemaWriteAuditOutcome,
 } from "./schema-operation-audit";
 import { runRestSchemaOperation } from "./schema-operation-runner";
@@ -200,11 +199,7 @@ function registerServiceRoute(deps: SchemaRouteDeps): RestRoute {
       const result = await runRestSchemaOperation(
         deps.auditService,
         schemaRegistrationAuditContext(body, identity),
-        () =>
-          schemaRegistry.register(
-            body,
-            schemaRegistrationPersistenceContext(identity),
-          ),
+        () => schemaRegistry.register(body),
         "service schema registration",
         schemaRegistrationResponseSchema,
         schemaRegistrationAuditOutcome,
@@ -230,11 +225,7 @@ function registerFragmentRoute(deps: SchemaRouteDeps): RestRoute {
       const result = await runRestSchemaOperation(
         deps.auditService,
         schemaRegistrationAuditContext(body, identity),
-        () =>
-          schemaRegistry.register(
-            body,
-            schemaRegistrationPersistenceContext(identity),
-          ),
+        () => schemaRegistry.register(body),
         "fragment schema registration",
         schemaRegistrationResponseSchema,
         schemaRegistrationAuditOutcome,

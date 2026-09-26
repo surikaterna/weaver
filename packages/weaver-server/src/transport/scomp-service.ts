@@ -32,7 +32,6 @@ import {
   schemaWriteAuditContext,
   schemaWriteAuditOutcome,
   scompSchemaAuditIdentity,
-  scompSchemaRegistrationContext,
 } from "./schema-operation-audit";
 import { runSchemaOperation } from "./schema-operation-runner";
 
@@ -175,8 +174,7 @@ function schemaHandlers(
           input,
           scompSchemaAuditIdentity(),
         ),
-        execute: () =>
-          schemaRegistry.register(input, scompSchemaRegistrationContext()),
+        execute: () => schemaRegistry.register(input),
         parse: (response) => schemaRegistrationResponseSchema.parse(response),
         outcome: schemaRegistrationAuditOutcome,
       });
