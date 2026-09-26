@@ -69,7 +69,7 @@ await config.set("theme", "dark");
 
 Registration uses canonical slash anchors. The request above owns `/my-service`; a fragment can own an anchor such as `/my-service/plugins/analytics`. Client reads and writes instead use dotted or bracket-aware storage keys such as `my-service.theme` and `my-service[feature.flag]`. Slash anchors are not accepted as client storage-key aliases.
 
-`schemas: true` loads the `default` schema environment for client preflight validation and metadata. Use `schemas: { environment: "production" }` to select the `production` schema environment.
+`schemas: true` loads the `default` schema environment at boot for client preflight validation and metadata. Use `schemas: { environment: "production" }` to select the `production` schema environment. `SchemaOptions.live` does not automatically subscribe to schema changes: restart the client to load newly registered schemas. If migrating from Zod-based namespace definitions, register JSON Schema directly and keep the TypeScript interface separate; no automatic conversion or schema-to-type inference runs in the client.
 
 ## Architecture
 

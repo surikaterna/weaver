@@ -99,6 +99,8 @@ await worker.set("enabled", true);
 
 The `MyConfig` generic constrains keys and values only at compile time. It is erased at runtime and does not prove that stored values match the interface. Server-side validation is authoritative; `schemas` adds client-side preflight validation and metadata using the server's registered schemas.
 
+Batch writes (`client.setMany`, `client.setNamespace`, and namespace `setMany`) preflight every entry against the loaded schemas before sending a write. If any entry is invalid, the batch returns `VALIDATION_ERROR` without a transport write. Member names and instance IDs containing literal dots use bracket-safe storage keys, for example `my-service[feature.flag]`, not slash registration anchors.
+
 Types can be handwritten, as above, or produced by external JSON-Schema-to-TypeScript tooling. Weaver ships no generator or Zod adapter in this flow.
 
 ## Schema Environments
@@ -115,13 +117,16 @@ const productionClient = await createWeaverClient({
 });
 ```
 
-`schemas: true` selects the `default` schema registration environment. The object form selects the named environment exactly. This setting chooses validation and metadata schemas; configure value and write routing separately through the relevant transport and write options.
+`schemas: true` selects the `default` schema registration environment at boot. The object form selects the named environment exactly. This setting chooses validation and metadata schemas; configure value and write routing separately through the relevant transport and write options. `SchemaOptions.live` does not automatically subscribe to schema changes; reboot the client to refresh its schema registry after registration changes.
+
+When migrating from a Zod-based namespace definition, register a `ConfigurationPropertySchema` directly and provide the generic interface yourself (or use external tooling). Weaver does not convert a Zod shape or infer the generic type from the registered schema.
 
 ## Main API
 
 - `createWeaverClient(options)` — creates a connected client with optional persistence and schema loading
 - `client.namespace<T>(storagePrefix)` — creates a compile-time typed namespace view
 - `namespace.withScope(scopePath)` — preserves the namespace type for scoped access
+- `client.preloadScope(scopePath)` — loads one scope path on demand; call separately for each scope path to warm
 - `namespace.instance(instanceId)` and `client.instance<T>(basePath, instanceId)` — create typed instance views
 - `client.registerSchema(request)` — registers a service or fragment JSON Schema request
 - `createHttpTransport(options)` and `createLocalTransport(options)` — provide HTTP or in-memory transport

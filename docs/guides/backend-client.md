@@ -88,7 +88,7 @@ const productionClient = await createWeaverClient({
 });
 ```
 
-This option selects validation and metadata schemas, not configuration value or write routing. The server remains authoritative for runtime validation.
+This option selects validation and metadata schemas at boot, not configuration value or write routing. `SchemaOptions.live` does not automatically subscribe to schema changes: recreate the client to pick up registrations made later. The server remains authoritative for runtime validation.
 
 ## Typed, Scoped, and Instance Access
 
@@ -114,6 +114,10 @@ await workerBilling.set("retryLimit", 3);
 ```
 
 Generic arguments are erased compile-time assertions. They constrain keys and values in TypeScript but do not validate, parse, or coerce runtime data. Keep the interface aligned manually or generate it with external JSON-Schema-to-TypeScript tooling; Weaver ships no generator or Zod adapter for this flow.
+
+When migrating from a Zod namespace definition, register `ConfigurationPropertySchema` directly rather than relying on automatic conversion or generic type inference. Invalid entries in `client.setMany`, `client.setNamespace`, or namespace `setMany` fail preflight with `VALIDATION_ERROR` before any transport write; the server validates accepted writes again. A literal-dot member or instance ID must remain one bracket-safe storage-key segment, not a slash registration path.
+
+To warm a specific scope, call `await client.preloadScope([{ scopeId: "tenant", value: "acme" }])`. This loads that one scope path on demand, not all tenant scopes.
 
 ## Subscribe and Shut Down
 

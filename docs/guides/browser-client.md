@@ -35,7 +35,7 @@ const productionClient = await createWeaverClient({
 });
 ```
 
-Schema environment selection controls client validation and metadata. Runtime validation by the server remains authoritative.
+Schema environment selection controls client validation and metadata loaded at boot. `SchemaOptions.live` does not automatically subscribe to schema changes; recreate the client to load newly registered schemas. Runtime validation by the server remains authoritative.
 
 ## Access Typed Configuration
 
@@ -56,6 +56,8 @@ const current = config.getAll(); // Partial<MyConfig>
 
 The generic is an erased compile-time assertion. It constrains calls but does not parse values or prove that local state matches `MyConfig`. Weaver ships no type generator or Zod adapter; server validation and the registered JSON Schema are the runtime authority.
 
+When migrating from a Zod namespace definition, register `ConfigurationPropertySchema` directly (see the [backend guide](./backend-client.md)), then supply a handwritten interface or one produced by external tooling. The client does not infer its generic from the schema.
+
 ## Storage Keys and Registration Anchors
 
 Schema registration derives canonical slash anchors such as `/my-service` and `/my-service/plugins/analytics`. Client APIs do not accept those anchors as aliases. They use dotted or bracket-aware storage keys:
@@ -67,6 +69,7 @@ client.get<number>("my-service.plugins.analytics.sampleRate");
 ```
 
 Use slash paths for registration and storage keys for client access; do not interchange the formats.
+For namespace members or instance IDs containing a literal dot, use bracket-safe storage keys rather than splitting the dot into path segments.
 
 ## Scoped and Instance Access
 
@@ -76,12 +79,16 @@ const tenantConfig = config.withScope([
 ]);
 const tenantMode = tenantConfig.get("mode");
 
+// Warm this one scope path on demand, not every scope or a schema subscription:
+await client.preloadScope([{ scopeId: "tenant", value: "acme" }]);
+
 const panel = config.instance("panel-1");
 const panelMode = panel.get("mode");
 await panel.set("mode", "light");
 ```
 
 An instance reads its override first and falls back to the base namespace value. Its writes target the instance path.
+An invalid entry in `client.setMany` or a namespace batch fails local schema preflight with `VALIDATION_ERROR` before any transport write; the server still validates all writes authoritatively.
 
 ## Subscribe to Changes
 
