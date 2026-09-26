@@ -1,13 +1,19 @@
 // REST route definitions for config and scope endpoints
 
 import { buildPath } from "@weaver-conf/config-engine";
+import type { AuditService } from "../audit/audit-service";
 import type { WeaverConfigService, WriteContext } from "../core/config-service";
 import type { SchemaRegistry } from "../core/schema-registry";
 import type { ScopeManager } from "../core/scope-manager";
 import { parseScopeQuery } from "../core/scope-utils";
 import { createWeaverError } from "../types/index";
 import type { AuthGate } from "./auth-gate";
-import type { RestRequest, RestResponse, RestRoute } from "./rest-adapter";
+import type {
+  RegisteredRestOperationRunner,
+  RestRequest,
+  RestResponse,
+  RestRoute,
+} from "./rest-adapter";
 import {
   extractExpectedRevision,
   v1Error,
@@ -26,6 +32,9 @@ export interface RouteFactoryDeps {
   schemaRegistry?: SchemaRegistry | undefined;
   scopeManager?: ScopeManager | undefined;
   authGate?: AuthGate | undefined;
+  auditService?: AuditService | undefined;
+  defaultEnvironment?: string | undefined;
+  runRegisteredOperation: RegisteredRestOperationRunner;
 }
 
 function param(params: Record<string, string>, name: string): string {
@@ -48,9 +57,16 @@ function queryOpt(
 }
 
 export function buildRoutes(deps: RouteFactoryDeps): RestRoute[] {
-  const { configService, schemaRegistry, authGate } = deps;
+  const { configService, schemaRegistry, authGate, auditService } = deps;
   return [
-    ...buildSchemaRoutes({ configService, schemaRegistry, authGate }),
+    ...buildSchemaRoutes({
+      configService,
+      schemaRegistry,
+      authGate,
+      auditService,
+      defaultEnvironment: deps.defaultEnvironment,
+      runRegisteredOperation: deps.runRegisteredOperation,
+    }),
     configListRoute(deps),
     configGetRoute(deps),
     configSetRoute(deps),
