@@ -1,6 +1,6 @@
 # Browser Client Guide
 
-Use `@weaver-conf/weaver-client` in a browser single-page application for typed, real-time configuration with offline support.
+Use `@weaver-conf/weaver-client` in a browser application for compile-time typed, real-time configuration with offline support.
 
 ## Installation
 
@@ -8,263 +8,109 @@ Use `@weaver-conf/weaver-client` in a browser single-page application for typed,
 pnpm add @weaver-conf/weaver-client
 ```
 
-## Define Namespaces
-
-Namespaces give you compile-time type safety for configuration keys. Define them using Zod schemas:
-
-```typescript
-import { defineNamespace } from "@weaver-conf/weaver-client";
-import { z } from "zod";
-
-const theme = defineNamespace("ui.theme", {
-  mode: z.enum(["light", "dark"]),
-  accent: z.string(),
-});
-
-const features = defineNamespace("ui.features", {
-  betaEnabled: z.boolean(),
-  maxItems: z.number().int().min(1).max(100),
-});
-```
-
-`defineNamespace` takes a prefix string and a Zod raw shape. The prefix determines which keys in the configuration store belong to this namespace.
-
 ## Create the Client
 
-Connect to a running weaver-server using the HTTP transport:
+The owning service should register its `ConfigurationPropertySchema` before browser clients start. It is Weaver's sole runtime schema model. Enable schema loading when creating the browser client:
 
 ```typescript
 import {
-  createWeaverClient,
   createHttpTransport,
+  createIndexedDbPersistence,
+  createWeaverClient,
 } from "@weaver-conf/weaver-client";
 
 const client = await createWeaverClient({
-  transport: createHttpTransport({ baseUrl: "http://localhost:3399" }),
+  transport: createHttpTransport({ baseUrl: "/api/config" }),
+  persistence: createIndexedDbPersistence({ dbName: "my-app-config" }),
+  schemas: true,
 });
 ```
 
-`createWeaverClient` is async — it connects to the server and fetches an initial configuration snapshot before returning.
-
-## Read and Write Typed Config
-
-Access a namespace to get a typed accessor:
+`schemas: true` loads schemas registered in the `default` environment. To use another schema environment, select it explicitly:
 
 ```typescript
-const themeNs = client.namespace(theme);
-
-// Read — fully typed, returns `"light" | "dark" | undefined`
-const mode = themeNs.get("mode");
-
-// Write — type-checked value
-await themeNs.set("mode", "dark");
-
-// Get all values in the namespace
-const allTheme = themeNs.getAll();
-// => { mode: "dark", accent: "#3b82f6" }
+const productionClient = await createWeaverClient({
+  transport: createHttpTransport({ baseUrl: "/api/config" }),
+  schemas: { environment: "production" },
+});
 ```
 
-Writes are sent to the server immediately. The returned promise resolves when the server acknowledges the write.
+Schema environment selection controls client validation and metadata loaded at boot. `SchemaOptions.live` does not automatically subscribe to schema changes; recreate the client to load newly registered schemas. Runtime validation by the server remains authoritative.
+
+## Access Typed Configuration
+
+Provide a handwritten interface or one created by external tooling, then select a storage prefix:
+
+```typescript
+interface MyConfig {
+  mode: "light" | "dark";
+  accent: string;
+  betaEnabled: boolean;
+}
+
+const config = client.namespace<MyConfig>("my-service");
+const mode = config.get("mode"); // "light" | "dark" | undefined
+await config.set("mode", "dark");
+const current = config.getAll(); // Partial<MyConfig>
+```
+
+The generic is an erased compile-time assertion. It constrains calls but does not parse values or prove that local state matches `MyConfig`. Weaver ships no type generator or Zod adapter; server validation and the registered JSON Schema are the runtime authority.
+
+When migrating from a Zod namespace definition, register `ConfigurationPropertySchema` directly (see the [backend guide](./backend-client.md)), then supply a handwritten interface or one produced by external tooling. The client does not infer its generic from the schema.
+
+## Storage Keys and Registration Anchors
+
+Schema registration derives canonical slash anchors such as `/my-service` and `/my-service/plugins/analytics`. Client APIs do not accept those anchors as aliases. They use dotted or bracket-aware storage keys:
+
+```typescript
+client.get<boolean>("my-service.betaEnabled");
+client.get<boolean>("my-service[feature.flag]"); // literal-dot member
+client.get<number>("my-service.plugins.analytics.sampleRate");
+```
+
+Use slash paths for registration and storage keys for client access; do not interchange the formats.
+For namespace members or instance IDs containing a literal dot, use bracket-safe storage keys rather than splitting the dot into path segments.
+
+## Scoped and Instance Access
+
+```typescript
+const tenantConfig = config.withScope([
+  { scopeId: "tenant", value: "acme" },
+]);
+const tenantMode = tenantConfig.get("mode");
+
+// Warm this one scope path on demand, not every scope or a schema subscription:
+await client.preloadScope([{ scopeId: "tenant", value: "acme" }]);
+
+const panel = config.instance("panel-1");
+const panelMode = panel.get("mode");
+await panel.set("mode", "light");
+```
+
+An instance reads its override first and falls back to the base namespace value. Its writes target the instance path.
+An invalid entry in `client.setMany` or a namespace batch fails local schema preflight with `VALIDATION_ERROR` before any transport write; the server still validates all writes authoritatively.
 
 ## Subscribe to Changes
 
-React to configuration changes in real-time:
-
 ```typescript
-// Watch a specific key
-const unsubscribe = themeNs.onChange("mode", (newMode) => {
-  // newMode: "light" | "dark"
-  document.documentElement.dataset.theme = newMode;
+const unsubscribe = config.onChange("mode", (nextMode) => {
+  if (nextMode !== undefined) {
+    document.documentElement.dataset.theme = nextMode;
+  }
 });
 
-// Watch any key in the namespace
-const unsubAll = themeNs.onAny((key, value) => {
-  console.log(`${key} changed to`, value);
-});
-
-// Clean up when done
+// During application teardown:
 unsubscribe();
-unsubAll();
+await client.close();
 ```
 
-Changes arrive via Server-Sent Events (SSE) from weaver-server. The client maintains a persistent connection and applies deltas to local state automatically.
+Changes arrive through the configured transport and update the client's local state.
 
 ## Offline Persistence
 
-Add IndexedDB persistence so the client works offline and loads instantly on repeat visits:
-
-```typescript
-import {
-  createWeaverClient,
-  createHttpTransport,
-  createIndexedDbPersistence,
-} from "@weaver-conf/weaver-client";
-
-const client = await createWeaverClient({
-  transport: createHttpTransport({ baseUrl: "http://localhost:3399" }),
-  persistence: createIndexedDbPersistence({ dbName: "my-app-config" }),
-});
-```
-
-With persistence enabled:
-
-1. On first load, the client fetches from the server and caches to IndexedDB
-2. On subsequent loads, the client returns cached values immediately, then syncs with the server in the background
-3. If the server is unreachable, the client serves from cache (degraded mode)
-
-## Staleness Detection
-
-Monitor whether your configuration data is fresh:
-
-```typescript
-import { createStalenessMonitor } from "@weaver-conf/weaver-client";
-
-const monitor = createStalenessMonitor({ maxAgeMs: 30_000 });
-
-// Check current staleness
-if (monitor.isStale) {
-  showBanner("Configuration may be outdated");
-}
-
-// React to staleness changes
-monitor.onStale(() => {
-  showBanner("Lost connection to config server");
-});
-
-monitor.onFresh(() => {
-  hideBanner();
-});
-```
-
-The staleness monitor tracks the time since the last successful server sync. If `maxAgeMs` elapses without a sync, the data is considered stale.
-
-## Instance Overrides
-
-For multi-instance widgets (e.g., multiple dashboard panels of the same type), use instance overrides to store per-instance configuration:
-
-```typescript
-const panel = defineNamespace("dashboard.panel", {
-  title: z.string(),
-  refreshInterval: z.number(),
-  collapsed: z.boolean(),
-});
-
-const panelNs = client.namespace(panel);
-
-// Get an instance-specific accessor
-const myPanel = panelNs.instance("panel-abc-123");
-
-// Read/write scoped to this instance
-const title = myPanel.get("title");
-await myPanel.set("collapsed", true);
-
-// Changes to one instance don't affect others
-const otherPanel = panelNs.instance("panel-xyz-789");
-otherPanel.get("collapsed"); // independent value
-```
-
-Instance overrides are stored on the user layer by default, so each user has their own panel configurations.
-
-## Untyped Escape Hatch
-
-For dynamic keys or cross-namespace reads where you don't have a namespace definition:
-
-```typescript
-const untyped = client.untyped();
-
-// Read any key (returns unknown)
-const value = untyped.get("some.dynamic.key");
-
-// Write any key
-await untyped.set("some.dynamic.key", "hello");
-
-// Subscribe to any key
-untyped.onChange("some.dynamic.key", (val) => {
-  console.log("changed:", val);
-});
-```
-
-Use this sparingly — prefer typed namespaces for compile-time safety.
-
-## Framework Integration: React
-
-Use `useSyncExternalStore` for zero-dependency React integration:
-
-```typescript
-import { useSyncExternalStore, useCallback } from "react";
-import { createWeaverClient, createHttpTransport, defineNamespace } from "@weaver-conf/weaver-client";
-import { z } from "zod";
-
-const theme = defineNamespace("ui.theme", {
-  mode: z.enum(["light", "dark"]),
-  accent: z.string(),
-});
-
-// Create client once at module level
-const client = await createWeaverClient({
-  transport: createHttpTransport({ baseUrl: "/api/config" }),
-});
-const themeNs = client.namespace(theme);
-
-// Generic hook for any namespace key
-function useConfigValue<K extends keyof typeof theme.shape & string>(key: K) {
-  const subscribe = useCallback(
-    (onStoreChange: () => void) => themeNs.onChange(key, onStoreChange),
-    [key],
-  );
-  const getSnapshot = useCallback(() => themeNs.get(key), [key]);
-
-  return useSyncExternalStore(subscribe, getSnapshot);
-}
-
-// Usage in components
-function ThemeToggle() {
-  const mode = useConfigValue("mode");
-
-  return (
-    <button onClick={() => themeNs.set("mode", mode === "dark" ? "light" : "dark")}>
-      Current: {mode}
-    </button>
-  );
-}
-```
-
-This pattern works with any React version that supports `useSyncExternalStore` (React 18+). The subscription is efficient — React only re-renders when the specific key changes.
-
-## Client Lifecycle
-
-Always clean up the client when your application unmounts:
-
-```typescript
-// In a SPA, typically on page unload or app teardown
-await client.dispose();
-```
-
-This closes the SSE connection, flushes any pending writes, and releases IndexedDB handles.
-
-## Connection Modes
-
-The client operates in one of three modes:
-
-| Mode | Description |
-|------|-------------|
-| `"live"` | Connected to server, receiving real-time updates |
-| `"cached"` | Serving from persistence, server unreachable |
-| `"degraded"` | Connected but data may be stale |
-
-```typescript
-// Check current mode
-console.log(client.mode); // "live" | "cached" | "degraded"
-
-// React to mode changes
-client.onMode((mode) => {
-  if (mode === "cached") {
-    showOfflineBanner();
-  }
-});
-```
+With IndexedDB persistence, the client stores the last snapshot. A later boot can use that snapshot when the server is unavailable if offline boot is enabled. Treat cached data as potentially stale and use the client's `mode`, `lastSyncedAt`, and `staleSince` health properties when presenting offline state.
 
 ## Next Steps
 
-- [Server Quickstart](./server-quickstart.md) — Set up the weaver-server this client connects to
-- [Backend Client Guide](./backend-client.md) — Use weaver-client in a Node.js/Bun service
+- [Backend Client Guide](./backend-client.md) — register service and fragment schemas
+- [Server Quickstart](./server-quickstart.md) — run the server used by this client
