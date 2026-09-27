@@ -3,9 +3,10 @@ import type { AuthContext, AuthMiddleware } from "./auth/auth-middleware";
 import type { HealthEndpoints } from "./health";
 import { parseRequestTarget } from "./request-target";
 import type { RestAdapter, RestRequest } from "./transport/rest-adapter";
-import { corsHeaders } from "./transport/rest-helpers";
+import { corsHeaders, errorEnvelope } from "./transport/rest-helpers";
 import type { SSEAdapter } from "./transport/sse-adapter";
 import type { SSEMessage } from "./transport/sse-events";
+import { createWeaverError } from "./types/index";
 
 export function createRequestHandler(
   health: HealthEndpoints,
@@ -19,12 +20,17 @@ export function createRequestHandler(
     res: Response,
   ): Promise<void> {
     const host = req.get("host") ?? "localhost";
-    const target = parseRequestTarget(
-      req.originalUrl ?? req.url,
-      `${req.protocol}://${host}`,
-    );
+    const rawTarget = req.originalUrl ?? req.url;
+    const target = parseRequestTarget(rawTarget, `${req.protocol}://${host}`);
     if (!target.success) {
-      res.status(400).json({ error: "invalid request target" });
+      if (isRawRestTarget(rawTarget)) {
+        applyOuterRestError(
+          res,
+          outerRestError(400, "VALIDATION_ERROR", "invalid request target"),
+        );
+      } else {
+        res.status(400).json({ error: "invalid request target" });
+      }
       return;
     }
     const { pathname, query, url } = target;
@@ -56,6 +62,12 @@ export function createRequestHandler(
   };
 }
 
+function isRawRestTarget(target: string): boolean {
+  const path = target.split("?", 1)[0];
+  if (path === "/v1/events" || path?.startsWith("/v1/events/")) return false;
+  return path === "/v1" || path?.startsWith("/v1/") === true;
+}
+
 async function handleRest(
   req: Request,
   res: Response,
@@ -72,7 +84,7 @@ async function handleRest(
     authMiddleware,
   );
   if (isHttpErrorResponse(authResult)) {
-    applyResponse(res, authResult);
+    applyOuterRestError(res, authResult);
     return;
   }
   const restRequest: RestRequest = {
@@ -156,8 +168,7 @@ function sseClientOptions(url: URL): Record<string, string> {
 
 interface HttpErrorResponse {
   status: number;
-  body: { error: { code: string; message: string } };
-  headers: Record<string, string>;
+  body: ReturnType<typeof errorEnvelope>;
 }
 
 function isWriteMethod(method: string): boolean {
@@ -165,10 +176,17 @@ function isWriteMethod(method: string): boolean {
 }
 
 function unauthorized(message: string): HttpErrorResponse {
+  return outerRestError(401, "UNAUTHORIZED", message);
+}
+
+function outerRestError(
+  status: number,
+  code: "UNAUTHORIZED" | "VALIDATION_ERROR",
+  message: string,
+): HttpErrorResponse {
   return {
-    status: 401,
-    body: { error: { code: "UNAUTHORIZED", message } },
-    headers: { "content-type": "application/json" },
+    status,
+    body: errorEnvelope(createWeaverError(code, message), ""),
   };
 }
 
@@ -186,6 +204,12 @@ function applyResponse(
     res.setHeader(key, value);
   }
   res.status(response.status).json(response.body);
+}
+
+function applyOuterRestError(res: Response, response: HttpErrorResponse): void {
+  res.status(response.status);
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(response.body));
 }
 
 async function authenticateRestRequest(
