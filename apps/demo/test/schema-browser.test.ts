@@ -331,3 +331,60 @@ test("UI list-first, exact detail selection, slot, out-of-order and inert JSON",
     });
   }
 });
+
+test("schema-valid mismatched detail identities clear stale JSON as malformed", async () => {
+  const original = globalThis.document;
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { createElement: (tag: string) => new ElementStub(tag) },
+  });
+  try {
+    for (const mismatch of [
+      { path: "/app/plugins/demo.notifications" },
+      { environment: "staging" },
+      { kind: "fragment" },
+    ] as const) {
+      const base = createDemoTransport();
+      let detailCalls = 0;
+      const client = await createWeaverClient({
+        transport: {
+          ...base,
+          async getRegisteredSchema(path, environment) {
+            detailCalls++;
+            const detail = await base.getRegisteredSchema(path, environment);
+            return detailCalls === 1 ? detail : { ...detail, ...mismatch };
+          },
+        },
+      });
+      const container = new ElementStub("section");
+      renderSchemaBrowser(container as unknown as HTMLElement, client);
+      await tick();
+      const select = container.children[3];
+      const status = container.children[5];
+      const code = container.children[6]?.children[0];
+      assert.ok(select && status && code);
+      select.selectedIndex = 1;
+      select.dispatch("change");
+      await tick();
+      assert.deepEqual(JSON.parse(code.textContent).required, [
+        "ui",
+        "network",
+      ]);
+      select.dispatch("change");
+      await tick();
+      assert.equal(detailCalls, 2);
+      assert.equal(code.textContent, "");
+      assert.match(
+        status.textContent,
+        /^Malformed schema response or request\.$/,
+      );
+      assert.doesNotMatch(status.textContent, /network|transport/i);
+      await client.close();
+    }
+  } finally {
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: original,
+    });
+  }
+});

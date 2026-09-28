@@ -17,7 +17,11 @@ type BrowseState = {
   request: number;
 };
 
+class SchemaIdentityMismatchError extends Error {}
+
 export function schemaBrowseError(error: unknown): string {
+  if (error instanceof SchemaIdentityMismatchError)
+    return "Malformed schema response or request.";
   const text = error instanceof Error ? error.message : String(error);
   if (error instanceof WeaverErrorInstance) {
     if (error.code === "UNSUPPORTED_OPERATION")
@@ -152,7 +156,7 @@ async function select(
       detail.environment !== selected.environment ||
       detail.kind !== selected.kind
     )
-      throw new Error("Malformed schema response: identity mismatch");
+      throw new SchemaIdentityMismatchError("Schema detail identity mismatch");
     panel.code.textContent = JSON.stringify(detail.schema, null, 2);
     panel.status.textContent = `Full ${detail.kind} schema · owner: ${detail.metadata.owner.name}`;
   } catch (error) {
