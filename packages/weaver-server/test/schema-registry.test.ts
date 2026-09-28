@@ -177,7 +177,13 @@ describe("SchemaRegistry", () => {
       ),
     );
     const identityBytes = Buffer.byteLength(JSON.stringify(identities));
+    const bulkBytes = Buffer.byteLength(JSON.stringify(registry.listAll()));
     expect(identityBytes).toBeLessThan(detailBytes);
+    expect(identityBytes).toBeLessThan(bulkBytes);
+    console.info(
+      "SCHEMA_BROWSE_FIXTURE_BYTES",
+      JSON.stringify({ identityBytes, bulkBytes, detailBytes }),
+    );
     expect(
       registry.getRegisteredSchema("/example-service", "default"),
     ).toMatchObject({

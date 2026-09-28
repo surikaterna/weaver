@@ -378,6 +378,32 @@ async function assertRegisteredBrowse(
   ]) {
     expect((await rawRequest(port, target, admin)).status).toBe(404);
   }
+  await assertColonAliasIsNotAnotherAnchor(port, base, admin);
+}
+
+async function assertColonAliasIsNotAnotherAnchor(
+  port: number,
+  base: string,
+  admin: Record<string, string>,
+): Promise<void> {
+  const response = await fetch(`http://localhost:${port}${base}/services`, {
+    method: "POST",
+    headers: { ...admin, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      serviceId: "app",
+      environment: "dev:prod",
+      owner: { name: "App", contact: "app@example.com" },
+      schema: { type: "object" },
+      fragmentSlots: [],
+    }),
+  });
+  expect(response.status).toBe(201);
+  expect(
+    (await rawRequest(port, `${base}/anchors/app?env=dev:prod`, admin)).status,
+  ).toBe(200);
+  expect(
+    (await rawRequest(port, `${base}/anchors/app:dev?env=prod`, admin)).status,
+  ).toBe(404);
 }
 
 async function registerServiceForBrowse(
