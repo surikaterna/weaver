@@ -1,7 +1,12 @@
 import { deepGet, deepRemove, deepSet } from "@weaver-conf/config-engine";
 import type { ConfigDelta, ConfigSnapshot } from "@weaver-conf/config-types";
-import type { LocalTransport, WriteOptions } from "@weaver-conf/weaver-client";
+import type {
+  LocalTransport,
+  WeaverTransport,
+  WriteOptions,
+} from "@weaver-conf/weaver-client";
 import { createLocalTransport } from "@weaver-conf/weaver-client";
+import { registeredSchemaFixtures } from "./registered-schema-fixtures";
 import { ALL_KEYS, APP_SEED, CORE_SEED, SEED_SNAPSHOT } from "./seed-data";
 
 type Layer = "core" | "app" | "user";
@@ -104,7 +109,8 @@ function writeMethods(
   };
 }
 
-export function createDemoTransport(): LocalTransport {
+export function createDemoTransport(): LocalTransport &
+  Required<Pick<WeaverTransport, "fetchSchemas">> {
   const layers: Layers = {
     core: structuredClone(CORE_SEED),
     app: structuredClone(APP_SEED),
@@ -115,6 +121,9 @@ export function createDemoTransport(): LocalTransport {
   return {
     ...local,
     ...writeMethods(layers, snapshot, local),
+    async fetchSchemas() {
+      return registeredSchemaFixtures();
+    },
     async resolveAll() {
       return structuredClone(snapshot);
     },

@@ -1,5 +1,6 @@
 import type {
   RegisteredEffectiveValidationResponse,
+  RegisteredSchemasResponse,
   SchemaRegistrationRequest,
   SchemaRegistrationResponse,
   ScopeDefinition,
@@ -128,6 +129,8 @@ export interface WeaverClient {
   registerSchema(
     request: SchemaRegistrationRequest,
   ): Promise<SchemaRegistrationResponse>;
+  /** Fresh transport listing; null means unsupported. Boot validation is not browsing authorization. */
+  fetchSchemas(): Promise<RegisteredSchemasResponse | null>;
 
   // ── Instances ──
   instance<TConfig extends object = Record<string, unknown>>(

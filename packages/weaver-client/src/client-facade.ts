@@ -176,6 +176,7 @@ function registeredMethods(
   | "patchRegisteredPath"
   | "validateRegisteredEffective"
   | "registerSchema"
+  | "fetchSchemas"
 > {
   return {
     async setRegisteredObject(path, value, options) {
@@ -201,6 +202,10 @@ function registeredMethods(
         runtime.transport.registerSchema?.(request) ??
         unsupportedRegistration("registerSchema")
       );
+    },
+    async fetchSchemas() {
+      if (!runtime.transport.fetchSchemas) return null;
+      return { schemas: await runtime.transport.fetchSchemas() };
     },
   };
 }
