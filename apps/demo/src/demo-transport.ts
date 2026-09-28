@@ -6,7 +6,11 @@ import type {
   WriteOptions,
 } from "@weaver-conf/weaver-client";
 import { createLocalTransport } from "@weaver-conf/weaver-client";
-import { registeredSchemaFixtures } from "./registered-schema-fixtures";
+import {
+  registeredSchemaFixtures,
+  seededSchemaDetail,
+  seededSchemaIdentities,
+} from "./registered-schema-fixtures";
 import { ALL_KEYS, APP_SEED, CORE_SEED, SEED_SNAPSHOT } from "./seed-data";
 
 type Layer = "core" | "app" | "user";
@@ -110,7 +114,12 @@ function writeMethods(
 }
 
 export function createDemoTransport(): LocalTransport &
-  Required<Pick<WeaverTransport, "fetchSchemas">> {
+  Required<
+    Pick<
+      WeaverTransport,
+      "fetchSchemas" | "listRegisteredSchemaIdentities" | "getRegisteredSchema"
+    >
+  > {
   const layers: Layers = {
     core: structuredClone(CORE_SEED),
     app: structuredClone(APP_SEED),
@@ -123,6 +132,12 @@ export function createDemoTransport(): LocalTransport &
     ...writeMethods(layers, snapshot, local),
     async fetchSchemas() {
       return registeredSchemaFixtures();
+    },
+    async listRegisteredSchemaIdentities() {
+      return seededSchemaIdentities();
+    },
+    async getRegisteredSchema(anchorPath, environment) {
+      return seededSchemaDetail(anchorPath, environment);
     },
     async resolveAll() {
       return structuredClone(snapshot);
