@@ -31,10 +31,14 @@ test("read-only view distinguishes unsupported, empty, missing, and literal host
   assert.match(schemaView({ schemas: {} }, "/app:default"), /empty/);
   assert.match(
     schemaView(
-      { schemas: { "/app:prod": { type: "string" } } },
+      {
+        schemas: {
+          "/app/plugins/demo.notifications:default": SCHEMA_FIXTURES[1].schema,
+        },
+      },
       "/app:default",
     ),
-    /No registration/,
+    /^No registration for \/app:default\.$/,
   );
   assert.match(
     schemaView(
