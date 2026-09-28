@@ -45,7 +45,10 @@ test("offline identities carry no schemas, declared empty slot, and exact cloned
     })),
   );
   assert.equal(list.slots.length, 2);
-  assert.equal(list.slots[1]?.path, "/app/plugins/demo.empty");
+  assert.deepEqual(
+    list.slots.map(({ path }) => path),
+    ["/app/plugins", "/app/extensions"],
+  );
   assert.ok(
     JSON.stringify(list).length <
       JSON.stringify(await transport.fetchSchemas()).length,
@@ -85,6 +88,10 @@ test("offline identities carry no schemas, declared empty slot, and exact cloned
     assert.deepEqual(detail.schema, fixture.schema);
     assert.equal(detail.path, fixture.anchor);
     assert.equal(detail.metadata.owner.name, "Demo seed");
+    if (fixture.kind === "fragment") {
+      assert.equal(detail.metadata.canonicalSlotPath, "/app/plugins");
+      assert.equal(detail.metadata.fragmentPath, fixture.anchor);
+    }
     detail.schema.description = "mutated";
     assert.deepEqual(
       (await client.getRegisteredSchema(fixture.anchor, "default")).schema,
@@ -93,7 +100,8 @@ test("offline identities carry no schemas, declared empty slot, and exact cloned
   }
   for (const [path, env] of [
     ["/app", "production"],
-    ["/app/plugins/demo.empty", "default"],
+    ["/app/extensions", "default"],
+    ["/app/plugins", "default"],
     ["/app/plugins/demo.notifications/child", "default"],
   ] as const) {
     await assert.rejects(
@@ -109,7 +117,8 @@ test("offline identities carry no schemas, declared empty slot, and exact cloned
       "/app/plugins/demo.notifications:default",
       "/app/plugins/demo.notifications:default",
       "/app:production",
-      "/app/plugins/demo.empty:default",
+      "/app/extensions:default",
+      "/app/plugins:default",
       "/app/plugins/demo.notifications/child:default",
     ],
     bulk: 0,
@@ -306,7 +315,7 @@ test("UI list-first, exact detail selection, slot, out-of-order and inert JSON",
     assert.equal(code.textContent, "");
     select.selectedIndex = 4;
     select.dispatch("change");
-    assert.match(identity.textContent, /demo.empty/);
+    assert.match(identity.textContent, /extensions/);
     assert.match(status.textContent, /empty/);
     assert.equal(code.textContent, "");
     select.selectedIndex = 1;
@@ -379,6 +388,88 @@ test("schema-valid mismatched detail identities clear stale JSON as malformed", 
         /^Malformed schema response or request\.$/,
       );
       assert.doesNotMatch(status.textContent, /network|transport/i);
+      await client.close();
+    }
+  } finally {
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: original,
+    });
+  }
+});
+
+test("slot declarations use strict same-environment descendant identity, nearest slot wins", async () => {
+  const original = globalThis.document;
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { createElement: (tag: string) => new ElementStub(tag) },
+  });
+  try {
+    const slot = (path: string) => ({
+      kind: "slot" as const,
+      path,
+      environment: "default",
+      accepts: "object" as const,
+    });
+    for (const [fragmentPath, environment, slots, expected] of [
+      [
+        "/app/plugins/demo.notifications",
+        "default",
+        [slot("/app/plugins"), slot("/app/extensions")],
+        [true, false],
+      ],
+      ["/app/plugins", "default", [slot("/app/plugins")], [false]],
+      ["/app/plugins2/demo", "default", [slot("/app/plugins")], [false]],
+      ["/app/plugins/demo", "staging", [slot("/app/plugins")], [false]],
+      [
+        "/app/plugins/nested/demo",
+        "default",
+        [slot("/app/plugins"), slot("/app/plugins/nested")],
+        [false, true],
+      ],
+    ] as const) {
+      const base = createDemoTransport();
+      let detailCalls = 0;
+      const list = registeredSchemaIdentityListResponseSchema.parse({
+        anchors: [{ kind: "fragment", path: fragmentPath, environment }],
+        slots,
+      });
+      const client = await createWeaverClient({
+        transport: {
+          ...base,
+          async listRegisteredSchemaIdentities() {
+            return list;
+          },
+          async getRegisteredSchema(path, env) {
+            detailCalls++;
+            return base.getRegisteredSchema(path, env);
+          },
+        },
+      });
+      const container = new ElementStub("section");
+      renderSchemaBrowser(container as unknown as HTMLElement, client);
+      await tick();
+      const toggle = container.children[2]?.children[0];
+      const select = container.children[3];
+      const status = container.children[5];
+      const code = container.children[6]?.children[0];
+      assert.ok(toggle && select && status && code);
+      toggle.checked = true;
+      toggle.dispatch("change");
+      for (const [index, declaration] of slots.entries()) {
+        const selectedIndex = select.options.findIndex(
+          (option) => option.value === `slot:${declaration.path}:default`,
+        );
+        assert.ok(selectedIndex > 0);
+        select.selectedIndex = selectedIndex;
+        select.dispatch("change");
+        assert.match(
+          status.textContent,
+          expected[index] ? /registered fragment/ : /empty/,
+        );
+        assert.equal(code.textContent, "");
+      }
+      assert.equal(detailCalls, 0);
       await client.close();
     }
   } finally {

@@ -47,7 +47,7 @@ export const SCHEMA_FIXTURES = [
     },
   },
   {
-    label: "Fragment object (declared slot: /app/plugins/demo.notifications)",
+    label: "Fragment object (declared slot: /app/plugins)",
     kind: "fragment",
     anchor: "/app/plugins/demo.notifications",
     environment: "default",
@@ -88,13 +88,13 @@ const identities = registeredSchemaIdentityListResponseSchema.parse({
   slots: [
     {
       kind: "slot",
-      path: "/app/plugins/demo.notifications",
+      path: "/app/plugins",
       environment: "default",
       accepts: "object",
     },
     {
       kind: "slot",
-      path: "/app/plugins/demo.empty",
+      path: "/app/extensions",
       environment: "default",
       accepts: "object",
     },
@@ -121,7 +121,7 @@ const details = SCHEMA_FIXTURES.map((fixture) =>
             servicePath: "/app",
             environment: "default",
             providerId: "demo.notifications",
-            canonicalSlotPath: fixture.anchor,
+            canonicalSlotPath: "/app/plugins",
             fragmentPath: fixture.anchor,
             owner: { name: "Demo seed", contact: "offline@example.invalid" },
           },

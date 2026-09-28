@@ -117,6 +117,22 @@ function populate(
   );
 }
 
+function slotHasFragment(slot: Selection, selections: Selection[]): boolean {
+  return selections.some(
+    (anchor) =>
+      anchor.kind === "fragment" &&
+      anchor.environment === slot.environment &&
+      anchor.path.startsWith(`${slot.path}/`) &&
+      !selections.some(
+        (inner) =>
+          inner.kind === "slot" &&
+          inner.environment === slot.environment &&
+          inner.path.startsWith(`${slot.path}/`) &&
+          anchor.path.startsWith(`${inner.path}/`),
+      ),
+  );
+}
+
 async function select(
   panel: Panel,
   state: BrowseState,
@@ -124,13 +140,7 @@ async function select(
 ): Promise<void> {
   const selected = state.selections[panel.selector.selectedIndex - 1];
   const filledSlot =
-    selected?.kind === "slot" &&
-    state.selections.some(
-      (anchor) =>
-        anchor.kind === "fragment" &&
-        anchor.path === selected.path &&
-        anchor.environment === selected.environment,
-    );
+    selected?.kind === "slot" && slotHasFragment(selected, state.selections);
   panel.identity.textContent = selected
     ? `${selected.kind}: ${selected.path} · environment: ${selected.environment}`
     : "";
