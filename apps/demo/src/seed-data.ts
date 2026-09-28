@@ -1,3 +1,4 @@
+import { deepSet } from "@weaver-conf/config-engine";
 import type { ConfigSnapshot } from "@weaver-conf/weaver-client";
 
 const CORE_DEFAULTS: Record<string, unknown> = {
@@ -48,29 +49,55 @@ const LOCATION_NLEUR_DEFAULTS: Record<string, unknown> = {
   "app.feature.analytics.enabled": true,
 };
 
-/** Merged base entries (core + app defaults, app wins). */
-const BASE_ENTRIES: Record<string, unknown> = {
-  ...CORE_DEFAULTS,
-  ...APP_DEFAULTS,
-};
+function nestedEntries(
+  values: Record<string, unknown>,
+): Record<string, unknown> {
+  const entries: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(values))
+    deepSet(entries, key, value);
+  return entries;
+}
+
+const BASE_DEFAULTS = { ...CORE_DEFAULTS, ...APP_DEFAULTS };
+
+function immutableEntries(
+  values: Record<string, unknown>,
+): Record<string, unknown> {
+  const entries = nestedEntries(values);
+  function freeze(node: object): void {
+    for (const child of Object.values(node))
+      if (child !== null && typeof child === "object") freeze(child);
+    Object.freeze(node);
+  }
+  freeze(entries);
+  return entries;
+}
+
+export const CORE_SEED = immutableEntries(CORE_DEFAULTS);
+export const APP_SEED = immutableEntries(APP_DEFAULTS);
 
 /** Snapshot for createLocalTransport — base entries + scoped overrides. */
 export const SEED_SNAPSHOT: ConfigSnapshot = {
-  entries: BASE_ENTRIES,
+  entries: nestedEntries(BASE_DEFAULTS),
   revision: "demo-seed-v1",
   timestamp: new Date().toISOString(),
   scopes: {
-    "country:GB": COUNTRY_GB_DEFAULTS,
-    "country:NL": COUNTRY_NL_DEFAULTS,
-    "country:GB/location:GBDVR": {
+    "country:GB": nestedEntries({ ...BASE_DEFAULTS, ...COUNTRY_GB_DEFAULTS }),
+    "country:NL": nestedEntries({ ...BASE_DEFAULTS, ...COUNTRY_NL_DEFAULTS }),
+    "country:GB/location:GBDVR": nestedEntries({
+      ...BASE_DEFAULTS,
       ...COUNTRY_GB_DEFAULTS,
       ...LOCATION_GBDVR_DEFAULTS,
-    },
-    "country:FR/location:FRCQF": LOCATION_FRCQF_DEFAULTS,
-    "country:NL/location:NLEUR": {
+    }),
+    "country:FR/location:FRCQF": nestedEntries({
+      ...BASE_DEFAULTS,
+      ...LOCATION_FRCQF_DEFAULTS,
+    }),
+    "country:NL/location:NLEUR": nestedEntries({
+      ...BASE_DEFAULTS,
       ...COUNTRY_NL_DEFAULTS,
       ...LOCATION_NLEUR_DEFAULTS,
-    },
+    }),
   },
 };
 
