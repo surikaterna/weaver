@@ -77,6 +77,11 @@ export {
   registeredObjectWriteResponseSchema,
   registeredPathPatchRequestSchema,
   registeredPathPatchResponseSchema,
+  registeredSchemaDetailRequestSchema,
+  registeredSchemaDetailResponseSchema,
+  registeredSchemaIdentityListResponseSchema,
+  registeredSchemaIdentitySchema,
+  registeredSchemaSlotIdentitySchema,
   registeredSchemasResponseSchema,
 } from "../schemas-registered-operations";
 export {

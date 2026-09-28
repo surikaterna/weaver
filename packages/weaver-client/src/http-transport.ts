@@ -1,5 +1,7 @@
 import {
   fetchRegisteredSchemas,
+  getRegisteredSchema,
+  listRegisteredSchemaIdentities,
   patchRegisteredPath as patchRegisteredPathRequest,
   postSchemaRegistration,
   putRegisteredObject,
@@ -46,6 +48,8 @@ function registeredMethods(
 ): Pick<
   WeaverTransport,
   | "fetchSchemas"
+  | "getRegisteredSchema"
+  | "listRegisteredSchemaIdentities"
   | "registerSchema"
   | "setRegisteredObject"
   | "patchRegisteredPath"
@@ -54,6 +58,12 @@ function registeredMethods(
   return {
     async fetchSchemas() {
       return fetchRegisteredSchemas(context);
+    },
+    async listRegisteredSchemaIdentities() {
+      return listRegisteredSchemaIdentities(context);
+    },
+    async getRegisteredSchema(anchorPath, environment) {
+      return getRegisteredSchema(context, anchorPath, environment);
     },
     async registerSchema(request) {
       return postSchemaRegistration(context, request);

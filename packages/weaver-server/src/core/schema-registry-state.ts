@@ -9,6 +9,7 @@ import type {
   ConfigurationPropertySchema,
   FragmentSlotRegistrationMetadata,
   ObjectConfigurationPropertySchema,
+  RegisteredSchemaIdentityListResponse,
   SchemaRegistrationMetadata,
   SchemaRegistrationRequest,
 } from "@weaver-conf/config-types";
@@ -78,6 +79,27 @@ export function listSchemas(
   const result: Record<string, ConfigurationPropertySchema> = {};
   for (const [key, entry] of state.schemas) result[key] = entry.schema;
   return result;
+}
+
+// The projection is linear in registrations and never traverses schema bodies.
+export function listSchemaIdentities(
+  state: RegistryState,
+): RegisteredSchemaIdentityListResponse {
+  return {
+    anchors: [...state.schemas.values()].map(({ kind, path, environment }) => ({
+      kind,
+      path,
+      environment,
+    })),
+    slots: [...state.slots.values()].map(
+      ({ canonicalSlotPath, environment, accepts }) => ({
+        kind: "slot",
+        path: canonicalSlotPath,
+        environment,
+        accepts,
+      }),
+    ),
+  };
 }
 
 export function applyEvaluation(

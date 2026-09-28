@@ -1,6 +1,9 @@
 import {
   createScompTransport,
   registeredObjectWriteRequestSchema,
+  registeredSchemaDetailRequestSchema,
+  registeredSchemaDetailResponseSchema,
+  registeredSchemaIdentityListResponseSchema,
   registeredSchemasResponseSchema,
   serviceSchemaRegistrationRequestSchema,
   WeaverConfig,
@@ -16,6 +19,40 @@ describe("transport-scomp", () => {
   });
 
   it("exports strict registered operation schemas", () => {
+    expect(
+      registeredSchemaIdentityListResponseSchema.safeParse({
+        anchors: [],
+        slots: [],
+      }).success,
+    ).toBe(true);
+    expect(
+      registeredSchemaIdentityListResponseSchema.safeParse({
+        anchors: [
+          {
+            kind: "service",
+            path: "/app",
+            environment: "dev",
+            owner: "secret",
+          },
+        ],
+        slots: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      registeredSchemaDetailRequestSchema.safeParse({
+        anchorPath: "/app",
+        environment: "dev",
+      }).success,
+    ).toBe(true);
+    expect(
+      registeredSchemaDetailResponseSchema.safeParse({
+        kind: "slot",
+        path: "/app",
+        environment: "dev",
+        metadata: {},
+        schema: { type: "object" },
+      }).success,
+    ).toBe(false);
     expect(
       serviceSchemaRegistrationRequestSchema.safeParse({
         serviceId: "checkout",
@@ -70,10 +107,29 @@ describe("transport-scomp", () => {
   it("rejects malformed registered responses instead of passing them through", async () => {
     const peer = {
       consumes: () => ({
+        listRegisteredSchemaIdentities: async () => ({
+          anchors: [
+            {
+              kind: "service",
+              path: "/checkout",
+              environment: "dev",
+              schema: { type: "object" },
+            },
+          ],
+          slots: [],
+        }),
+        getRegisteredSchema: async () => null,
         patchRegisteredPath: async () => ({ success: "yes" }),
       }),
     };
     const transport = createScompTransport({ peer: peer as never });
+
+    await expect(
+      transport.listRegisteredSchemaIdentities?.(),
+    ).rejects.toThrow();
+    await expect(
+      transport.getRegisteredSchema?.("/checkout", "dev"),
+    ).rejects.toThrow();
 
     await expect(
       transport.patchRegisteredPath?.("/checkout/db/host", "db.internal"),

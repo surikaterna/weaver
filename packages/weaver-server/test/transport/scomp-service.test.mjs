@@ -114,6 +114,7 @@ describe("createWeaverScompService", () => {
     const expected = [
       "resolveAll", "get", "getNamespace", "inspect", "set", "setMany",
       "remove", "listScopes", "listScopeValues", "fetchSchemas",
+      "listRegisteredSchemaIdentities", "getRegisteredSchema",
       "registerSchema", "setRegisteredObject", "patchRegisteredPath",
       "validateRegisteredEffective", "subscribe",
     ];

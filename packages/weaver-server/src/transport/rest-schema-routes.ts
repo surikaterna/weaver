@@ -30,6 +30,8 @@ import {
   v1Response,
   writeFailureResponse,
 } from "./rest-route-boundary";
+import { adminDenied, authContextRequired } from "./rest-schema-admin-gate";
+import { schemaBrowseRoutes } from "./rest-schema-browse-routes";
 import {
   fragmentSchemaRegistrationBodySchema,
   parseAdminQuery,
@@ -79,24 +81,6 @@ function writeContext(request: {
     ...(request.ifRevision ? { expectedRevision: request.ifRevision } : {}),
     ...(request.environment ? { environment: request.environment } : {}),
   };
-}
-const schemaRegistryAdminKey = "_weaver.registry.schemas";
-function adminDenied(
-  request: RestRequest,
-  deps: SchemaRouteDeps,
-  operation: "read" | "write",
-): RestResponse | null {
-  const gate = deps.authGate;
-  if (!gate) return null;
-  if (!request.authContext) return authContextRequired(deps.configService);
-  if (!request.authContext.isAdmin) {
-    return v1Error(deps.configService, "FORBIDDEN", "Admin access required");
-  }
-  const context = gate.toAccessContext(request.authContext);
-  if (operation === "read") {
-    return gate.gateRead(context, schemaRegistryAdminKey);
-  }
-  return gate.gateWrite(context, "admin", schemaRegistryAdminKey);
 }
 function registeredWriteDenied(
   request: RestRequest,
@@ -154,13 +138,10 @@ function inaccessibleAnchor(
   );
 }
 
-function authContextRequired(configService: WeaverConfigService): RestResponse {
-  return v1Error(configService, "UNAUTHORIZED", "Authentication required");
-}
-
 export function buildSchemaRoutes(deps: SchemaRouteDeps): RestRoute[] {
   return [
     listSchemasRoute(deps),
+    ...schemaBrowseRoutes(deps),
     registerServiceRoute(deps),
     registerFragmentRoute(deps),
     setRegisteredObjectRoute(deps),

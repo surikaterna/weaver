@@ -116,6 +116,11 @@ export type {
   RegisteredObjectWriteResponse,
   RegisteredPathPatchRequest,
   RegisteredPathPatchResponse,
+  RegisteredSchemaDetailRequest,
+  RegisteredSchemaDetailResponse,
+  RegisteredSchemaIdentity,
+  RegisteredSchemaIdentityListResponse,
+  RegisteredSchemaSlotIdentity,
   RegisteredSchemasResponse,
   RegisteredWriteOptions,
 } from "./registered-operations";
@@ -232,6 +237,11 @@ export {
   registeredObjectWriteResponseSchema,
   registeredPathPatchRequestSchema,
   registeredPathPatchResponseSchema,
+  registeredSchemaDetailRequestSchema,
+  registeredSchemaDetailResponseSchema,
+  registeredSchemaIdentityListResponseSchema,
+  registeredSchemaIdentitySchema,
+  registeredSchemaSlotIdentitySchema,
   registeredSchemasResponseSchema,
 } from "./schemas-registered-operations";
 export {

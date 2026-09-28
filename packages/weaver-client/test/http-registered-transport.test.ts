@@ -46,6 +46,39 @@ const registrationResponse = {
 
 const operations: readonly OperationCase[] = [
   {
+    name: "schema identities",
+    kind: "read",
+    data: {
+      anchors: [{ kind: "service", path: "/checkout", environment: "default" }],
+      slots: [],
+    },
+    status: 200,
+    wrongStatus: 201,
+    run: (transport) =>
+      requireResult(transport.listRegisteredSchemaIdentities?.()),
+  },
+  {
+    name: "exact schema detail",
+    kind: "read",
+    data: {
+      kind: "service",
+      path: "/checkout",
+      environment: "default",
+      schema: { type: "object" },
+      metadata: {
+        serviceId: "checkout",
+        servicePath: "/checkout",
+        environment: "default",
+        providerId: "checkout",
+        owner: serviceRequest.owner,
+      },
+    },
+    status: 200,
+    wrongStatus: 201,
+    run: (transport) =>
+      requireResult(transport.getRegisteredSchema?.("/checkout", "default")),
+  },
+  {
     name: "schema listing",
     kind: "read",
     data: { schemas: { "/checkout": { type: "object" } } },
@@ -828,6 +861,40 @@ describe("registered HTTP request contracts", () => {
       transport.setRegisteredObject?.("/checkout/a\\b", {}),
     ).rejects.toBeInstanceOf(ZodError);
     expect(mock.calls()).toBe(0);
+  });
+
+  it("encodes exact schema detail segments without changing literal dots or colons", async () => {
+    const metadata = {
+      serviceId: "app",
+      servicePath: "/app",
+      environment: "dev",
+      providerId: "app",
+      owner: serviceRequest.owner,
+    };
+    const mock = sequenceFetch([
+      response(200, {
+        kind: "service",
+        path: "/app/plugins/with.dots:and space",
+        environment: "dev",
+        schema: { type: "object" },
+        metadata,
+      }),
+    ]);
+    const transport = transportFor(mock.fetch);
+    await transport.getRegisteredSchema?.(
+      "/app/plugins/with.dots:and space",
+      "dev",
+    );
+    expect(mock.requests[0]?.input).toBe(
+      "http://localhost:3399/v1/admin/schemas/anchors/app/plugins/with.dots:and%20space?env=dev",
+    );
+    await expect(
+      transport.getRegisteredSchema?.("/app/a%2Fb", "dev"),
+    ).rejects.toBeInstanceOf(ZodError);
+    await expect(
+      transport.getRegisteredSchema?.("/app/", "dev"),
+    ).rejects.toBeInstanceOf(ZodError);
+    expect(mock.calls()).toBe(1);
   });
 
   it("preserves validated typed server errors", async () => {

@@ -8,6 +8,11 @@ export {
   registeredObjectWriteResponseSchema,
   registeredPathPatchRequestSchema,
   registeredPathPatchResponseSchema,
+  registeredSchemaDetailRequestSchema,
+  registeredSchemaDetailResponseSchema,
+  registeredSchemaIdentityListResponseSchema,
+  registeredSchemaIdentitySchema,
+  registeredSchemaSlotIdentitySchema,
   registeredSchemasResponseSchema,
   schemaRegistrationResponseSchema,
   serviceSchemaRegistrationRequestSchema,
@@ -24,6 +29,9 @@ import type {
   RegisteredObjectWriteResponse,
   RegisteredPathPatchRequest,
   RegisteredPathPatchResponse,
+  RegisteredSchemaDetailRequest,
+  RegisteredSchemaDetailResponse,
+  RegisteredSchemaIdentityListResponse,
   SchemaRegistrationRequest,
   SchemaRegistrationResponse,
   ScopeDefinition,
@@ -119,6 +127,12 @@ export interface WeaverConfigContract {
   fetchSchemas(
     input: FetchSchemasInput,
   ): Promise<{ schemas: Record<string, ConfigurationPropertySchema> }>;
+  listRegisteredSchemaIdentities(
+    input: EmptyInput,
+  ): Promise<RegisteredSchemaIdentityListResponse>;
+  getRegisteredSchema(
+    input: RegisteredSchemaDetailRequest,
+  ): Promise<RegisteredSchemaDetailResponse>;
   registerSchema(
     input: RegisterSchemaInput,
   ): Promise<SchemaRegistrationResponse>;

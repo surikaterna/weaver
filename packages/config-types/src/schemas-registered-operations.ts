@@ -1,9 +1,76 @@
 import { z } from "zod";
-import type { RegisteredSchemasResponse } from "./registered-operations";
-import { configurationPropertySchemaSchema } from "./schemas-property";
+import type {
+  RegisteredSchemaDetailRequest,
+  RegisteredSchemaDetailResponse,
+  RegisteredSchemaIdentity,
+  RegisteredSchemaIdentityListResponse,
+  RegisteredSchemaSlotIdentity,
+  RegisteredSchemasResponse,
+} from "./registered-operations";
+import {
+  configurationPropertySchemaSchema,
+  objectConfigurationPropertySchemaSchema,
+} from "./schemas-property";
 import { writeResultSchema } from "./schemas-providers";
-import { publicConfigPathSchema } from "./schemas-registration-paths";
+import {
+  publicConfigPathSchema,
+  registrationEnvironmentSchema,
+} from "./schemas-registration-paths";
+import { schemaRegistrationMetadataSchema } from "./schemas-schema-registration";
 import { schemaValidationResultSchema } from "./schemas-schema-validation";
+
+const registeredAnchorPathSchema = publicConfigPathSchema.refine(
+  (path) =>
+    !path.endsWith("/") &&
+    path
+      .slice(1)
+      .split("/")
+      .every(
+        (segment) =>
+          segment !== "." &&
+          segment !== ".." &&
+          !segment.includes("\\") &&
+          !/%[0-9A-Fa-f]{2}/.test(segment) &&
+          !/\p{Cc}/u.test(segment),
+      ),
+  "Anchor path must use canonical, unambiguous segments",
+);
+
+const identityFields = {
+  kind: z.enum(["service", "fragment"]),
+  path: registeredAnchorPathSchema,
+  environment: registrationEnvironmentSchema,
+};
+
+export const registeredSchemaIdentitySchema: z.ZodType<RegisteredSchemaIdentity> =
+  z.strictObject(identityFields);
+
+export const registeredSchemaSlotIdentitySchema: z.ZodType<RegisteredSchemaSlotIdentity> =
+  z.strictObject({
+    kind: z.literal("slot"),
+    path: registeredAnchorPathSchema,
+    environment: registrationEnvironmentSchema,
+    accepts: z.literal("object"),
+  });
+
+export const registeredSchemaIdentityListResponseSchema: z.ZodType<RegisteredSchemaIdentityListResponse> =
+  z.strictObject({
+    anchors: z.array(registeredSchemaIdentitySchema),
+    slots: z.array(registeredSchemaSlotIdentitySchema),
+  });
+
+export const registeredSchemaDetailRequestSchema: z.ZodType<RegisteredSchemaDetailRequest> =
+  z.strictObject({
+    anchorPath: registeredAnchorPathSchema,
+    environment: registrationEnvironmentSchema,
+  });
+
+export const registeredSchemaDetailResponseSchema: z.ZodType<RegisteredSchemaDetailResponse> =
+  z.strictObject({
+    ...identityFields,
+    schema: objectConfigurationPropertySchemaSchema,
+    metadata: schemaRegistrationMetadataSchema,
+  });
 
 const registeredWriteOptionsSchema = {
   layer: z.string().min(1).optional(),

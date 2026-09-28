@@ -11,6 +11,9 @@ import {
   registeredEffectiveValidationResponseSchema,
   registeredObjectWriteRequestSchema,
   registeredObjectWriteResponseSchema,
+  registeredSchemaDetailRequestSchema,
+  registeredSchemaDetailResponseSchema,
+  registeredSchemaIdentityListResponseSchema,
   registeredSchemasResponseSchema,
 } from "../src/schemas-registered-operations.js";
 import {
@@ -26,6 +29,80 @@ import {
   schemaRegistrationMetadataSchema,
   serviceSchemaRegistrationRequestSchema,
 } from "../src/schemas-schema-registration.js";
+
+describe("targeted registered schema contracts", () => {
+  it("rejects unsafe identities and noncanonical detail requests", () => {
+    expect(
+      registeredSchemaIdentityListResponseSchema.parse({
+        anchors: [],
+        slots: [],
+      }),
+    ).toEqual({ anchors: [], slots: [] });
+    expect(
+      registeredSchemaIdentityListResponseSchema.safeParse({
+        anchors: [
+          {
+            kind: "fragment",
+            path: "/app/plugin.name",
+            environment: "dev",
+            owner: "hidden",
+          },
+        ],
+        slots: [],
+      }).success,
+    ).toBe(false);
+    for (const path of [
+      "/app/",
+      "/app/../config",
+      "/app/__proto__",
+      "/app/a%2Fb",
+      "/app/a\\b",
+    ]) {
+      expect(
+        registeredSchemaDetailRequestSchema.safeParse({
+          anchorPath: path,
+          environment: "dev",
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      registeredSchemaDetailRequestSchema.safeParse({
+        anchorPath: "/app/plugin.name:one",
+        environment: "dev",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("refuses cycles and strips inherited prototype data at the detail boundary", () => {
+    const metadata = {
+      serviceId: "app",
+      servicePath: "/app",
+      environment: "dev",
+      providerId: "app",
+      owner: { name: "App", contact: "app@example.com" },
+    };
+    const cycle: Record<string, unknown> = { type: "object" };
+    cycle.properties = { self: cycle };
+    const detail = (schema: unknown) => ({
+      kind: "service",
+      path: "/app",
+      environment: "dev",
+      metadata,
+      schema,
+    });
+    expect(
+      registeredSchemaDetailResponseSchema.safeParse(detail(cycle)).success,
+    ).toBe(false);
+    const inherited = Object.assign(Object.create({ inherited: "unsafe" }), {
+      type: "object",
+    });
+    const parsed = registeredSchemaDetailResponseSchema.parse(
+      detail(inherited),
+    );
+    expect(Object.getPrototypeOf(parsed.schema)).toBe(Object.prototype);
+    expect(Object.hasOwn(parsed.schema, "inherited")).toBe(false);
+  });
+});
 
 describe("registered operation schemas", () => {
   it("validates canonical requests and rejects malformed paths", () => {

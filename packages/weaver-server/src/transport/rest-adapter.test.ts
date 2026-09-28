@@ -807,6 +807,36 @@ describe("registered REST canonical requests", () => {
     expect(gateCount(harness.calls)).toBe(1);
     expect(effectCount(harness.calls)).toBe(0);
   });
+
+  it.each([
+    { path: "/v1/admin/schemas/identities", query: { extra: "1" } },
+    { path: "/v1/admin/schemas/anchors/checkout", query: { env: "" } },
+    { path: "/v1/admin/schemas/anchors/checkout", query: {} },
+    {
+      path: "/v1/admin/schemas/anchors/checkout",
+      query: { env: "dev", extra: "1" },
+    },
+    { path: "/v1/admin/schemas/anchors/__proto__", query: { env: "dev" } },
+  ])("gates schema browse before local validation or registry effects: %j", async ({
+    path,
+    query,
+  }) => {
+    const route = { method: "GET", path, query };
+    for (const [policy, context, status] of [
+      ["allow", undefined, 401],
+      ["allow", nonAdminContext, 403],
+      ["deny", adminContext, 403],
+    ] as const) {
+      const harness = createRouteHarness(policy);
+      expect((await send(harness.adapter, route, context)).status).toBe(status);
+      expect(effectCount(harness.calls)).toBe(0);
+      expect(harness.calls.registryResolutions).toEqual([]);
+    }
+    const allowed = createRouteHarness("allow");
+    expect((await send(allowed.adapter, route, adminContext)).status).toBe(400);
+    expect(allowed.calls.gateReads).toEqual(["_weaver.registry.schemas"]);
+    expect(effectCount(allowed.calls)).toBe(0);
+  });
 });
 
 interface CapturedWrite {
@@ -832,6 +862,8 @@ interface RouteCalls {
     environment: string | undefined;
   }>;
   lists: number;
+  browseLists: number;
+  browseDetails: number;
   registrations: number;
   readonly objectWrites: CapturedWrite[];
   readonly pathPatches: CapturedWrite[];
@@ -991,6 +1023,8 @@ function createRouteCalls(): RouteCalls {
     gateWrites: [],
     registryResolutions: [],
     lists: 0,
+    browseLists: 0,
+    browseDetails: 0,
     registrations: 0,
     objectWrites: [],
     pathPatches: [],
@@ -1016,6 +1050,14 @@ function createCountingRegistry(calls: RouteCalls): SchemaRegistry {
     listAll: () => {
       calls.lists += 1;
       return {};
+    },
+    listRegisteredSchemaIdentities: () => {
+      calls.browseLists += 1;
+      return { anchors: [], slots: [] };
+    },
+    getRegisteredSchema: () => {
+      calls.browseDetails += 1;
+      return null;
     },
   };
 }
@@ -1074,6 +1116,8 @@ function gateCount(calls: RouteCalls): number {
 function effectCount(calls: RouteCalls): number {
   return (
     calls.lists +
+    calls.browseLists +
+    calls.browseDetails +
     calls.registrations +
     calls.objectWrites.length +
     calls.pathPatches.length +

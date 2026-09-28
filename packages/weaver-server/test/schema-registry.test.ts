@@ -111,6 +111,110 @@ function compositionSchema(): ConfigurationPropertySchema {
 }
 
 describe("SchemaRegistry", () => {
+  it("does not mistake a colon-colliding key for the requested anchor identity", async () => {
+    const registry = createSchemaRegistry({ configService });
+    await registry.register(serviceRegistration("prod:dev"));
+    expect(
+      registry.getRegisteredSchema("/example-service", "prod:dev"),
+    ).toMatchObject({ environment: "prod:dev" });
+    expect(
+      registry.getRegisteredSchema("/example-service:prod", "dev"),
+    ).toBeNull();
+  });
+  it("projects schema-free identities, declared slots and exact environment-specific details", async () => {
+    const registry = createSchemaRegistry({ configService });
+    const schema = compositionSchema();
+    const fragmentSchema = {
+      type: "object" as const,
+      properties: {
+        enabled: {
+          type: "boolean" as const,
+          "x-weaver": { visibility: "admin" as const },
+        },
+      },
+    };
+    await registry.register({ ...serviceRegistration(), schema });
+    await registry.register(serviceRegistration("production"));
+    await registry.register({
+      ...fragmentRegistration(),
+      schema: fragmentSchema,
+    });
+    const identities = registry.listRegisteredSchemaIdentities();
+    expect(identities).toEqual({
+      anchors: [
+        { kind: "service", path: "/example-service", environment: "default" },
+        {
+          kind: "service",
+          path: "/example-service",
+          environment: "production",
+        },
+        {
+          kind: "fragment",
+          path: "/example-service/plugins/ghost.settings.panel",
+          environment: "default",
+        },
+      ],
+      slots: [
+        {
+          kind: "slot",
+          path: "/example-service/plugins",
+          environment: "default",
+          accepts: "object",
+        },
+        {
+          kind: "slot",
+          path: "/example-service/plugins",
+          environment: "production",
+          accepts: "object",
+        },
+      ],
+    });
+    expect(JSON.stringify(identities)).not.toContain("properties");
+    expect(JSON.stringify(identities)).not.toContain("owner");
+    const detailBytes = Buffer.byteLength(
+      JSON.stringify(
+        registry.getRegisteredSchema("/example-service", "default"),
+      ),
+    );
+    const identityBytes = Buffer.byteLength(JSON.stringify(identities));
+    const bulkBytes = Buffer.byteLength(JSON.stringify(registry.listAll()));
+    expect(identityBytes).toBeLessThan(detailBytes);
+    expect(identityBytes).toBeLessThan(bulkBytes);
+    console.info(
+      "SCHEMA_BROWSE_FIXTURE_BYTES",
+      JSON.stringify({ identityBytes, bulkBytes, detailBytes }),
+    );
+    expect(
+      registry.getRegisteredSchema("/example-service", "default"),
+    ).toMatchObject({
+      kind: "service",
+      schema,
+      metadata: { owner: serviceRegistration().owner },
+    });
+    expect(
+      registry.getRegisteredSchema(
+        "/example-service/plugins/ghost.settings.panel",
+        "default",
+      ),
+    ).toMatchObject({
+      kind: "fragment",
+      schema: fragmentSchema,
+      metadata: { owner: fragmentRegistration().owner },
+    });
+    for (const path of [
+      "/example-service/plugins",
+      "/example-service/child",
+      "/example-service/plugins/ghost.settings.panel/child",
+    ]) {
+      expect(registry.getRegisteredSchema(path, "default")).toBeNull();
+    }
+    expect(
+      registry.getRegisteredSchema(
+        "/example-service/plugins/ghost.settings.panel",
+        "production",
+      ),
+    ).toBeNull();
+  });
   it("preserves supported composition in transient service and fragment registrations", async () => {
     const registry = createSchemaRegistry({ configService });
     const schema = compositionSchema();
@@ -173,6 +277,30 @@ describe("SchemaRegistry", () => {
     const restarted = await createPersistentSchemaRegistry({
       configService: persistentConfigService,
     });
+    expect(restarted.listRegisteredSchemaIdentities()).toEqual({
+      anchors: [
+        { kind: "service", path: "/example-service", environment: "default" },
+        {
+          kind: "fragment",
+          path: "/example-service/plugins/ghost.settings.panel",
+          environment: "default",
+        },
+      ],
+      slots: [
+        {
+          kind: "slot",
+          path: "/example-service/plugins",
+          environment: "default",
+          accepts: "object",
+        },
+      ],
+    });
+    expect(
+      restarted.getRegisteredSchema(
+        "/example-service/plugins/ghost.settings.panel",
+        "default",
+      )?.schema,
+    ).toEqual(schema);
     expect(await restarted.getSchema("example-service", "default")).toEqual(
       schema,
     );
