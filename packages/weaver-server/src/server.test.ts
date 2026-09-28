@@ -349,23 +349,7 @@ async function assertRegisteredBrowse(
   base: string,
   admin: Record<string, string>,
 ): Promise<void> {
-  const registered = await fetch(`http://localhost:${port}${base}/services`, {
-    method: "POST",
-    headers: { ...admin, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      serviceId: "app",
-      environment: "dev",
-      owner: { name: "App", contact: "app@example.com" },
-      schema: {
-        type: "object",
-        properties: {
-          enabled: { type: "boolean", "x-weaver": { visibility: "admin" } },
-        },
-      },
-      fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }],
-    }),
-  });
-  expect(registered.status).toBe(201);
+  await registerServiceForBrowse(port, base, admin);
   const identities = await rawRequest(port, `${base}/identities`, admin);
   expect(JSON.parse(identities.body).data).toEqual({
     anchors: [{ kind: "service", path: "/app", environment: "dev" }],
@@ -394,6 +378,30 @@ async function assertRegisteredBrowse(
   ]) {
     expect((await rawRequest(port, target, admin)).status).toBe(404);
   }
+}
+
+async function registerServiceForBrowse(
+  port: number,
+  base: string,
+  admin: Record<string, string>,
+): Promise<void> {
+  const registered = await fetch(`http://localhost:${port}${base}/services`, {
+    method: "POST",
+    headers: { ...admin, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      serviceId: "app",
+      environment: "dev",
+      owner: { name: "App", contact: "app@example.com" },
+      schema: {
+        type: "object",
+        properties: {
+          enabled: { type: "boolean", "x-weaver": { visibility: "admin" } },
+        },
+      },
+      fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }],
+    }),
+  });
+  expect(registered.status).toBe(201);
 }
 
 describe("Weaver server error handling", () => {
