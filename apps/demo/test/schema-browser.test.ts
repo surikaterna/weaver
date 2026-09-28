@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  type RegisteredSchemaSlotIdentity,
   registeredSchemaDetailResponseSchema,
   registeredSchemaIdentityListResponseSchema,
 } from "@weaver-conf/config-types";
@@ -398,6 +399,70 @@ test("schema-valid mismatched detail identities clear stale JSON as malformed", 
   }
 });
 
+async function assertSlotScenario(
+  fragmentPath: string,
+  environment: string,
+  slots: ReadonlyArray<RegisteredSchemaSlotIdentity>,
+  expected: ReadonlyArray<boolean>,
+): Promise<void> {
+  const base = createDemoTransport();
+  let detailCalls = 0;
+  const list = registeredSchemaIdentityListResponseSchema.parse({
+    anchors: [{ kind: "fragment", path: fragmentPath, environment }],
+    slots,
+  });
+  const client = await createWeaverClient({
+    transport: {
+      ...base,
+      async listRegisteredSchemaIdentities() {
+        return list;
+      },
+      async getRegisteredSchema(path, env) {
+        detailCalls++;
+        return base.getRegisteredSchema(path, env);
+      },
+    },
+  });
+  try {
+    const container = new ElementStub("section");
+    renderSchemaBrowser(container as unknown as HTMLElement, client);
+    await tick();
+    const toggle = container.children[2]?.children[0];
+    const select = container.children[3];
+    const status = container.children[5];
+    const code = container.children[6]?.children[0];
+    assert.ok(toggle && select && status && code);
+    toggle.checked = true;
+    toggle.dispatch("change");
+    assertSlotOptions(select, status, code, slots, expected);
+    assert.equal(detailCalls, 0);
+  } finally {
+    await client.close();
+  }
+}
+
+function assertSlotOptions(
+  select: ElementStub,
+  status: ElementStub,
+  code: ElementStub,
+  slots: ReadonlyArray<RegisteredSchemaSlotIdentity>,
+  expected: ReadonlyArray<boolean>,
+): void {
+  for (const [index, declaration] of slots.entries()) {
+    const selectedIndex = select.options.findIndex(
+      (option) => option.value === `slot:${declaration.path}:default`,
+    );
+    assert.ok(selectedIndex > 0);
+    select.selectedIndex = selectedIndex;
+    select.dispatch("change");
+    assert.match(
+      status.textContent,
+      expected[index] ? /registered fragment/ : /empty/,
+    );
+    assert.equal(code.textContent, "");
+  }
+}
+
 test("slot declarations use strict same-environment descendant identity, nearest slot wins", async () => {
   const original = globalThis.document;
   Object.defineProperty(globalThis, "document", {
@@ -428,49 +493,7 @@ test("slot declarations use strict same-environment descendant identity, nearest
         [false, true],
       ],
     ] as const) {
-      const base = createDemoTransport();
-      let detailCalls = 0;
-      const list = registeredSchemaIdentityListResponseSchema.parse({
-        anchors: [{ kind: "fragment", path: fragmentPath, environment }],
-        slots,
-      });
-      const client = await createWeaverClient({
-        transport: {
-          ...base,
-          async listRegisteredSchemaIdentities() {
-            return list;
-          },
-          async getRegisteredSchema(path, env) {
-            detailCalls++;
-            return base.getRegisteredSchema(path, env);
-          },
-        },
-      });
-      const container = new ElementStub("section");
-      renderSchemaBrowser(container as unknown as HTMLElement, client);
-      await tick();
-      const toggle = container.children[2]?.children[0];
-      const select = container.children[3];
-      const status = container.children[5];
-      const code = container.children[6]?.children[0];
-      assert.ok(toggle && select && status && code);
-      toggle.checked = true;
-      toggle.dispatch("change");
-      for (const [index, declaration] of slots.entries()) {
-        const selectedIndex = select.options.findIndex(
-          (option) => option.value === `slot:${declaration.path}:default`,
-        );
-        assert.ok(selectedIndex > 0);
-        select.selectedIndex = selectedIndex;
-        select.dispatch("change");
-        assert.match(
-          status.textContent,
-          expected[index] ? /registered fragment/ : /empty/,
-        );
-        assert.equal(code.textContent, "");
-      }
-      assert.equal(detailCalls, 0);
-      await client.close();
+      await assertSlotScenario(fragmentPath, environment, slots, expected);
     }
   } finally {
     Object.defineProperty(globalThis, "document", {
