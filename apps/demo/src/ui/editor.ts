@@ -2,7 +2,6 @@ import { evaluateChangePolicy } from "@weaver-conf/config-policy";
 import type { OverrideSessionController } from "@weaver-conf/config-sessions";
 import type { WeaverConfig } from "@weaver-conf/config-types";
 import type { WeaverClient } from "@weaver-conf/weaver-client";
-import { COUNTRY_CODES_WITH_PROVIDERS, findLocation } from "../locations";
 import { getFullSchemaForKey, getSchemaForKey } from "../schemas";
 import {
   addLogEntry,
@@ -14,7 +13,7 @@ import {
   onSessionActiveChange,
 } from "../state";
 
-const BASE_WRITABLE_LAYERS = ["tenant", "user", "session"] as const;
+const BASE_WRITABLE_LAYERS = ["user"] as const;
 
 function requireQuery(container: HTMLElement, selector: string): Element {
   const element = container.querySelector(selector);
@@ -25,16 +24,7 @@ function requireQuery(container: HTMLElement, selector: string): Element {
 }
 
 function getWritableLayers(): string[] {
-  const locationCode = getSelectedLocation();
-  if (!locationCode) return [...BASE_WRITABLE_LAYERS];
-  const loc = findLocation(locationCode);
-  const layers = ["tenant"];
-  if (loc && COUNTRY_CODES_WITH_PROVIDERS.has(loc.countryCode)) {
-    layers.push(`country:${loc.countryCode}`);
-  }
-  layers.push(`location:${locationCode}`);
-  layers.push("user", "session");
-  return layers;
+  return getSelectedLocation() === null ? [...BASE_WRITABLE_LAYERS] : [];
 }
 
 export function renderEditor(
@@ -60,6 +50,8 @@ export function renderEditor(
     for (const layer of getWritableLayers()) {
       html += buildLayerSection(layer, key, currentValue, schema, weaverConfig);
     }
+    if (getSelectedLocation() !== null)
+      html += `<p class="placeholder">Scoped values are read-only in this demo</p>`;
 
     html += `<div class="policy-feedback" id="policy-feedback"></div>`;
     body.innerHTML = html;

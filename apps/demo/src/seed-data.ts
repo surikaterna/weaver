@@ -60,6 +60,22 @@ function nestedEntries(
 
 const BASE_DEFAULTS = { ...CORE_DEFAULTS, ...APP_DEFAULTS };
 
+function immutableEntries(
+  values: Record<string, unknown>,
+): Record<string, unknown> {
+  const entries = nestedEntries(values);
+  function freeze(node: object): void {
+    for (const child of Object.values(node))
+      if (child !== null && typeof child === "object") freeze(child);
+    Object.freeze(node);
+  }
+  freeze(entries);
+  return entries;
+}
+
+export const CORE_SEED = immutableEntries(CORE_DEFAULTS);
+export const APP_SEED = immutableEntries(APP_DEFAULTS);
+
 /** Snapshot for createLocalTransport — base entries + scoped overrides. */
 export const SEED_SNAPSHOT: ConfigSnapshot = {
   entries: nestedEntries(BASE_DEFAULTS),
