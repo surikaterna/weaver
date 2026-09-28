@@ -129,6 +129,69 @@ test("browse failures have explicit states", () => {
     assert.match(schemaBrowseError(new Error(message)), expected);
 });
 
+test("empty list and rejected list remain schema-free", async () => {
+  const original = globalThis.document;
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { createElement: (tag: string) => new ElementStub(tag) },
+  });
+  try {
+    const local = createDemoTransport();
+    for (const [list, expected] of [
+      [async () => ({ anchors: [], slots: [] }), /empty/],
+      [
+        async () => {
+          throw new Error("UNSUPPORTED_OPERATION");
+        },
+        /unsupported/,
+      ],
+      [
+        async () => {
+          throw new Error("HTTP 401");
+        },
+        /401/,
+      ],
+      [
+        async () => {
+          throw new Error("network offline");
+        },
+        /network/,
+      ],
+      [
+        async () => ({ anchors: [{ schema: { type: "object" } }], slots: [] }),
+        /Malformed/,
+      ],
+    ] as const) {
+      let detailCalls = 0;
+      const client = await createWeaverClient({
+        transport: {
+          ...local,
+          listRegisteredSchemaIdentities: list,
+          async getRegisteredSchema(path, env) {
+            detailCalls++;
+            return local.getRegisteredSchema(path, env);
+          },
+        },
+      });
+      const container = new ElementStub("section");
+      renderSchemaBrowser(container as unknown as HTMLElement, client);
+      await tick();
+      const status = container.children[5];
+      const code = container.children[6]?.children[0];
+      assert.ok(status && code);
+      assert.match(status.textContent, expected);
+      assert.equal(code.textContent, "");
+      assert.equal(detailCalls, 0);
+      await client.close();
+    }
+  } finally {
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: original,
+    });
+  }
+});
+
 class ElementStub {
   children: ElementStub[] = [];
   textContent = "";
