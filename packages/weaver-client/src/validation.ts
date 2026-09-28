@@ -23,7 +23,7 @@ export function validateOnRead<T>(
   if (result.valid) return value;
 
   if (options.warnOnMismatch) {
-    const errors = result.errors?.map((e) => e.message).join(", ") ?? "unknown";
+    const errors = result.errors.map((error) => error.message).join(", ");
     (options.logger ?? console).warn(
       `[weaver] Schema mismatch for "${key}": ${errors}. Value returned anyway.`,
     );
@@ -39,6 +39,6 @@ export function validateOnWrite(
   value: unknown,
   registry: ClientSchemaRegistry | undefined,
 ): ValidationResult {
-  if (!registry) return { valid: true };
+  if (!registry) return { valid: true, errors: [] };
   return registry.validate(key, value);
 }

@@ -1,240 +1,270 @@
-import { getCachedRegex, isSafePattern } from "@weaver-conf/config-engine";
+import {
+  canonicalConfigPathFromStorageKey,
+  parseCanonicalConfigPath,
+  type SchemaValidationPathSegment,
+  type SchemaValidationResult,
+  validateConfigurationPatch,
+  validateEffectiveConfiguration,
+} from "@weaver-conf/config-engine";
 import type {
   ConfigReloadBehavior,
   ConfigurationPropertySchema,
 } from "@weaver-conf/config-types";
 
-/** Result of validating a value against its registered schema. */
-export interface ValidationResult {
-  valid: boolean;
-  errors?: ReadonlyArray<{ path: string; message: string }>;
-}
+export type ValidationResult = SchemaValidationResult;
 
-/** Client-side schema registry for runtime validation, sensitivity checks, and reload tracking. */
+/** Client-side view of server schemas for optional validation and metadata. */
 export interface ClientSchemaRegistry {
   load(schemas: Record<string, ConfigurationPropertySchema>): void;
   getSchema(key: string): ConfigurationPropertySchema | undefined;
   isSensitive(key: string): boolean;
   getReloadBehavior(key: string): ConfigReloadBehavior | undefined;
   getRestartRequiredKeys(): ReadonlyArray<string>;
-  validate(key: string, value: unknown): ValidationResult;
+  validate(key: string, value: unknown): SchemaValidationResult;
 }
 
-/** Creates a client-side schema registry for validating config values against server schemas. */
-export function createClientSchemaRegistry(): ClientSchemaRegistry {
-  const schemas = new Map<string, ConfigurationPropertySchema>();
+interface RegisteredAnchor {
+  readonly segments: readonly string[];
+  readonly schema: ConfigurationPropertySchema;
+}
 
-  function load(input: Record<string, ConfigurationPropertySchema>): void {
-    schemas.clear();
-    for (const [key, schema] of Object.entries(input)) {
-      schemas.set(key, schema);
-    }
-  }
+interface ResolvedTarget {
+  readonly anchor: RegisteredAnchor;
+  readonly relativeSegments: readonly SchemaValidationPathSegment[];
+}
 
-  function getSchema(key: string): ConfigurationPropertySchema | undefined {
-    return schemas.get(key);
-  }
+interface RegistryState {
+  readonly environment: string;
+  readonly anchors: Map<string, RegisteredAnchor>;
+}
 
-  function isSensitive(key: string): boolean {
-    const schema = schemas.get(key);
-    return schema?.["x-weaver"]?.sensitive === true;
-  }
+const reloadPriority: Readonly<Record<ConfigReloadBehavior, number>> = {
+  hot: 1,
+  "rolling-restart": 2,
+  "restart-required": 3,
+};
 
-  function getReloadBehavior(key: string): ConfigReloadBehavior | undefined {
-    return schemas.get(key)?.["x-weaver"]?.reloadBehavior;
-  }
-
-  function getRestartRequiredKeys(): ReadonlyArray<string> {
-    const keys: string[] = [];
-    for (const [key, schema] of schemas) {
-      if (schema["x-weaver"]?.reloadBehavior === "restart-required") {
-        keys.push(key);
-      }
-    }
-    return keys;
-  }
-
-  function validate(key: string, value: unknown): ValidationResult {
-    const schema = schemas.get(key);
-    if (!schema) return { valid: true };
-    const errors: Array<{ path: string; message: string }> = [];
-    validateValue(schema, value, "", errors);
-    return errors.length === 0 ? { valid: true } : { valid: false, errors };
-  }
-
+export function createClientSchemaRegistry(
+  environment = "default",
+): ClientSchemaRegistry {
+  const state: RegistryState = { environment, anchors: new Map() };
   return {
-    load,
-    getSchema,
-    isSensitive,
-    getReloadBehavior,
-    getRestartRequiredKeys,
-    validate,
+    load(input) {
+      loadSchemas(state, input);
+    },
+    getSchema(key) {
+      const schemas = getMemberSchemas(state, key);
+      return schemas.length === 1 ? schemas[0] : undefined;
+    },
+    isSensitive(key) {
+      return getMemberSchemas(state, key).some(
+        (schema) => ownExtension(schema)?.sensitive === true,
+      );
+    },
+    getReloadBehavior(key) {
+      return strongestReloadBehavior(getMemberSchemas(state, key));
+    },
+    getRestartRequiredKeys() {
+      return restartRequiredAnchors(state);
+    },
+    validate(key, value) {
+      return validateTarget(state, key, value);
+    },
   };
 }
 
-function validateValue(
-  schema: ConfigurationPropertySchema,
-  value: unknown,
-  path: string,
-  errors: Array<{ path: string; message: string }>,
-): void {
-  if (!checkType(schema, value, path, errors)) return;
-  checkEnum(schema, value, path, errors);
-  checkConst(schema, value, path, errors);
-  if (typeof value === "string") checkString(schema, value, path, errors);
-  if (typeof value === "number") checkNumber(schema, value, path, errors);
-  if (Array.isArray(value)) checkArray(schema, value, path, errors);
-}
-
-function checkType(
-  schema: ConfigurationPropertySchema,
-  value: unknown,
-  path: string,
-  errors: Array<{ path: string; message: string }>,
-): boolean {
-  // If schema has no type constraint (e.g. oneOf/anyOf composition), skip type check
-  if (schema.type === undefined) return true;
-  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
-  const actual = getJsonType(value);
-  if (actual === "integer" && types.includes("number")) return true;
-  if (!types.includes(actual as (typeof types)[number])) {
-    // SAFETY: checking membership validates the narrowing
-    errors.push({
-      path,
-      message: `Expected ${types.join("|")}, got ${actual}`,
-    });
-    return false;
-  }
-  return true;
-}
-
-function getJsonType(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  if (typeof value === "number") {
-    return Number.isInteger(value) ? "integer" : "number";
-  }
-  return typeof value;
-}
-
-function checkEnum(
-  schema: ConfigurationPropertySchema,
-  value: unknown,
-  path: string,
-  errors: Array<{ path: string; message: string }>,
-): void {
-  if (schema.enum !== undefined && !schema.enum.includes(value)) {
-    errors.push({
-      path,
-      message: `Value not in enum: [${schema.enum.join(", ")}]`,
-    });
-  }
-}
-
-function checkConst(
-  schema: ConfigurationPropertySchema,
-  value: unknown,
-  path: string,
-  errors: Array<{ path: string; message: string }>,
-): void {
-  if ("const" in schema && value !== schema.const) {
-    errors.push({ path, message: `Expected const ${String(schema.const)}` });
-  }
-}
-
-function checkString(
-  schema: ConfigurationPropertySchema,
-  value: string,
-  path: string,
-  errors: Array<{ path: string; message: string }>,
-): void {
-  if (schema.minLength !== undefined && value.length < schema.minLength) {
-    errors.push({
-      path,
-      message: `String length ${value.length} < minLength ${schema.minLength}`,
-    });
-  }
-  if (schema.maxLength !== undefined && value.length > schema.maxLength) {
-    errors.push({
-      path,
-      message: `String length ${value.length} > maxLength ${schema.maxLength}`,
-    });
-  }
-  if (schema.pattern !== undefined) {
-    if (!isSafePattern(schema.pattern)) {
-      errors.push({
-        path,
-        message: `Pattern rejected as potentially unsafe: ${schema.pattern}`,
-      });
-    } else if (!getCachedRegex(schema.pattern).test(value)) {
-      errors.push({
-        path,
-        message: `String does not match pattern ${schema.pattern}`,
-      });
+function restartRequiredAnchors(state: RegistryState): string[] {
+  const keys: string[] = [];
+  for (const [path, anchor] of state.anchors) {
+    if (ownExtension(anchor.schema)?.reloadBehavior === "restart-required") {
+      keys.push(parseCanonicalConfigPath(path).storageKey);
     }
   }
+  return keys;
 }
 
-function checkNumber(
-  schema: ConfigurationPropertySchema,
-  value: number,
-  path: string,
-  errors: Array<{ path: string; message: string }>,
+function loadSchemas(
+  state: RegistryState,
+  input: Record<string, ConfigurationPropertySchema>,
 ): void {
-  if (schema.minimum !== undefined && value < schema.minimum) {
-    errors.push({ path, message: `${value} < minimum ${schema.minimum}` });
+  const loaded = new Map<string, RegisteredAnchor>();
+  const suffix = `:${state.environment}`;
+  for (const [registryKey, schema] of Object.entries(input)) {
+    if (!registryKey.endsWith(suffix)) continue;
+    const path = registryKey.slice(0, -suffix.length);
+    const canonical = parseCanonicalConfigPath(path);
+    if (canonical.path !== path) {
+      throw new Error(`Schema registry key is not canonical: ${registryKey}`);
+    }
+    loaded.set(canonical.path, { segments: canonical.segments, schema });
   }
-  if (schema.maximum !== undefined && value > schema.maximum) {
-    errors.push({ path, message: `${value} > maximum ${schema.maximum}` });
+  state.anchors.clear();
+  for (const [path, anchor] of loaded) state.anchors.set(path, anchor);
+}
+
+function resolveTarget(
+  state: RegistryState,
+  key: string,
+): ResolvedTarget | undefined {
+  let target: ReturnType<typeof canonicalConfigPathFromStorageKey>;
+  try {
+    target = canonicalConfigPathFromStorageKey(key);
+  } catch {
+    return undefined;
   }
-  if (
-    schema.exclusiveMinimum !== undefined &&
-    value <= schema.exclusiveMinimum
-  ) {
-    errors.push({
-      path,
-      message: `${value} <= exclusiveMinimum ${schema.exclusiveMinimum}`,
-    });
+  if (target.storageKey !== key) return undefined;
+  for (let length = target.segments.length; length >= 0; length--) {
+    const anchor = state.anchors.get(
+      canonicalPath(target.segments.slice(0, length)),
+    );
+    if (anchor) {
+      return { anchor, relativeSegments: target.segments.slice(length) };
+    }
   }
-  if (
-    schema.exclusiveMaximum !== undefined &&
-    value >= schema.exclusiveMaximum
-  ) {
-    errors.push({
-      path,
-      message: `${value} >= exclusiveMaximum ${schema.exclusiveMaximum}`,
-    });
+  return undefined;
+}
+
+function getMemberSchemas(
+  state: RegistryState,
+  key: string,
+): ConfigurationPropertySchema[] {
+  const target = resolveTarget(state, key);
+  if (!target) return [];
+  let candidates = [target.anchor.schema];
+  for (const segment of target.relativeSegments) {
+    candidates = candidates.flatMap((schema) =>
+      resolveMemberSchemas(schema, segment),
+    );
+    if (candidates.length === 0) break;
   }
-  if (schema.multipleOf !== undefined && value % schema.multipleOf !== 0) {
-    errors.push({
-      path,
-      message: `${value} is not a multiple of ${schema.multipleOf}`,
-    });
+  return candidates;
+}
+
+function validateTarget(
+  state: RegistryState,
+  key: string,
+  value: unknown,
+): SchemaValidationResult {
+  const target = resolveTarget(state, key);
+  if (!target) return { valid: true, errors: [] };
+  if (target.relativeSegments.length === 0) {
+    return validateEffectiveConfiguration(target.anchor.schema, value);
+  }
+  return validateConfigurationPatch(
+    target.anchor.schema,
+    target.relativeSegments,
+    value,
+  );
+}
+
+function canonicalPath(segments: readonly string[]): string {
+  return segments.length === 0 ? "/" : `/${segments.join("/")}`;
+}
+
+function resolveMemberSchemas(
+  schema: ConfigurationPropertySchema,
+  segment: SchemaValidationPathSegment,
+): ConfigurationPropertySchema[] {
+  if (allowsType(schema, "object")) {
+    return resolveObjectSchemas(schema, String(segment));
+  }
+  if (allowsType(schema, "array")) return resolveArraySchemas(schema, segment);
+  return [];
+}
+
+function resolveObjectSchemas(
+  schema: ConfigurationPropertySchema,
+  key: string,
+): ConfigurationPropertySchema[] {
+  const matches: ConfigurationPropertySchema[] = [];
+  const properties = ownValue(schema, "properties");
+  if (properties && Object.hasOwn(properties, key)) {
+    const property = properties[key];
+    if (property) matches.push(property);
+  }
+  const patterns = ownValue(schema, "patternProperties");
+  for (const [pattern, patternSchema] of Object.entries(patterns ?? {})) {
+    if (matchesPattern(pattern, key)) matches.push(patternSchema);
+  }
+  if (matches.length > 0) return matches;
+  const additional = ownValue(schema, "additionalProperties");
+  return typeof additional === "object" ? [additional] : [];
+}
+
+function resolveArraySchemas(
+  schema: ConfigurationPropertySchema,
+  segment: SchemaValidationPathSegment,
+): ConfigurationPropertySchema[] {
+  const index = arrayIndex(segment);
+  if (index === undefined) return [];
+  const items = ownValue(schema, "items");
+  if (!items) return [];
+  if (!isSchemaArray(items)) return [items];
+  const item = items[index];
+  return item ? [item] : [];
+}
+
+function isSchemaArray(
+  items: ConfigurationPropertySchema | readonly ConfigurationPropertySchema[],
+): items is readonly ConfigurationPropertySchema[] {
+  return Array.isArray(items);
+}
+
+function ownValue<
+  Key extends
+    | "properties"
+    | "patternProperties"
+    | "additionalProperties"
+    | "items",
+>(
+  schema: ConfigurationPropertySchema,
+  key: Key,
+): ConfigurationPropertySchema[Key] {
+  return Object.hasOwn(schema, key) ? schema[key] : undefined;
+}
+
+function ownExtension(schema: ConfigurationPropertySchema) {
+  return Object.hasOwn(schema, "x-weaver") ? schema["x-weaver"] : undefined;
+}
+
+function allowsType(
+  schema: ConfigurationPropertySchema,
+  type: "object" | "array",
+): boolean {
+  return Array.isArray(schema.type)
+    ? schema.type.includes(type)
+    : schema.type === type;
+}
+
+function matchesPattern(pattern: string, key: string): boolean {
+  try {
+    return new RegExp(pattern, "u").test(key);
+  } catch {
+    return false;
   }
 }
 
-function checkArray(
-  schema: ConfigurationPropertySchema,
-  value: unknown[],
-  path: string,
-  errors: Array<{ path: string; message: string }>,
-): void {
-  if (schema.minItems !== undefined && value.length < schema.minItems) {
-    errors.push({
-      path,
-      message: `Array length ${value.length} < minItems ${schema.minItems}`,
-    });
+function arrayIndex(segment: SchemaValidationPathSegment): number | undefined {
+  const text = String(segment);
+  if (!/^(0|[1-9]\d*)$/.test(text)) return undefined;
+  const index = Number(text);
+  return Number.isSafeInteger(index) && index <= 4_294_967_294
+    ? index
+    : undefined;
+}
+
+function strongestReloadBehavior(
+  schemas: readonly ConfigurationPropertySchema[],
+): ConfigReloadBehavior | undefined {
+  let strongest: ConfigReloadBehavior | undefined;
+  for (const schema of schemas) {
+    const behavior = ownExtension(schema)?.reloadBehavior;
+    if (
+      behavior &&
+      (!strongest || reloadPriority[behavior] > reloadPriority[strongest])
+    ) {
+      strongest = behavior;
+    }
   }
-  if (schema.maxItems !== undefined && value.length > schema.maxItems) {
-    errors.push({
-      path,
-      message: `Array length ${value.length} > maxItems ${schema.maxItems}`,
-    });
-  }
-  if (
-    schema.uniqueItems &&
-    new Set(value.map((v) => JSON.stringify(v))).size !== value.length
-  ) {
-    errors.push({ path, message: "Array items are not unique" });
-  }
+  return strongest;
 }

@@ -1,6 +1,4 @@
-import { z } from "zod";
 import { createWeaverClient } from "../src/client.js";
-import { defineNamespace } from "../src/namespace.js";
 import type { WeaverTransport } from "../src/transport.js";
 import type { ConfigDelta, Unsubscribe } from "../src/types.js";
 
@@ -65,12 +63,11 @@ describe("Integration: WeaverClient full flow", () => {
     });
     const client = await createWeaverClient({ transport });
 
-    const editorNs = defineNamespace("editor", {
-      fontSize: z.number(),
-      theme: z.string(),
-    });
-
-    const editor = client.namespace(editorNs);
+    interface EditorConfig {
+      fontSize: number;
+      theme: string;
+    }
+    const editor = client.namespace<EditorConfig>("editor");
     expect(editor.get("fontSize")).toBe(14);
     expect(editor.get("theme")).toBe("dark");
 
@@ -80,7 +77,7 @@ describe("Integration: WeaverClient full flow", () => {
     await client.close();
   });
 
-  it("untyped namespace works with string prefix", async () => {
+  it("default generic namespace works with a string path", async () => {
     const transport = createMockTransport({ editor: { fontSize: 14 } });
     const client = await createWeaverClient({ transport });
 
@@ -95,7 +92,7 @@ describe("Integration: WeaverClient full flow", () => {
     const transport = createMockTransport({ app: { port: 3000 } });
     (transport as unknown as Record<string, unknown>).fetchSchemas =
       async () => ({
-        "app.port": {
+        "/app/port:default": {
           type: "number",
           "x-weaver": { reloadBehavior: "restart-required" },
         },
@@ -104,9 +101,9 @@ describe("Integration: WeaverClient full flow", () => {
     const client = await createWeaverClient({ transport, schemas: true });
     expect(client.pendingRestart).toBe(false);
 
-    let restartFired = false;
+    let restartCount = 0;
     client.onRestartRequired(() => {
-      restartFired = true;
+      restartCount++;
     });
 
     transport.fireDeltas([
@@ -117,10 +114,17 @@ describe("Integration: WeaverClient full flow", () => {
         layer: "user",
         timestamp: new Date().toISOString(),
       },
+      {
+        key: "app.port",
+        action: "set",
+        value: 5000,
+        layer: "user",
+        timestamp: new Date().toISOString(),
+      },
     ]);
 
     expect(client.pendingRestart).toBe(true);
-    expect(restartFired).toBe(true);
+    expect(restartCount).toBe(1);
 
     await client.close();
   });
