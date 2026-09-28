@@ -69,6 +69,40 @@ describe("AuditService", () => {
     expect(recorded.length).toBe(1);
   });
 
+  it.each(["sync", "async"])("settles a %s sink failure without leaking diagnostics", async (kind) => {
+    const recorded = [];
+    const logs = [];
+    let attempts = 0;
+    const secret = "private-entry-marker";
+    const failure = new Error("private-error-marker");
+    const service = createAuditService({
+      sensitiveKeys: new Set(["secret.key"]),
+      sinks: [
+        { record: () => {
+          attempts++;
+          if (kind === "sync") throw failure;
+          return Promise.reject(failure);
+        } },
+        { record: async (entry) => { recorded.push(entry); } },
+      ],
+      logger: { debug() {}, info() {}, warn() {}, error: (...args) => logs.push(args) },
+    });
+
+    await expect(service.record(makeEntry({ key: "secret.key", newValue: secret }))).resolves.toBeUndefined();
+    expect(attempts).toBe(1);
+    expect(recorded).toEqual([expect.objectContaining({ newValue: "***" })]);
+    expect(logs).toEqual([["[audit] sink failed"]]);
+    expect(JSON.stringify(logs)).not.toMatch(/private-entry-marker|private-error-marker|stack/u);
+  });
+
+  it("does not let a throwing logger replace a settled sink failure", async () => {
+    const service = createAuditService({
+      sinks: [{ record: () => { throw new Error("sink secret"); } }],
+      logger: { debug() {}, info() {}, warn() {}, error() { throw new Error("logger secret"); } },
+    });
+    await expect(service.record(makeEntry())).resolves.toBeUndefined();
+  });
+
   it("accepts all action types", async () => {
     const recorded = [];
     const sink = { record: async (e) => recorded.push(e) };
