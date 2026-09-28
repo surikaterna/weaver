@@ -190,6 +190,11 @@ Path invariants for persisted registration metadata and responses:
 - Request `slotPath` may be a service-relative slot path such as `/plugins` or the canonical slot path `/lynx/plugins`; both resolve against service `lynx` to canonical metadata path `/lynx/plugins`.
 - The derived fragment path is `${canonicalSlotPath}/${providerId}`, so provider `ghost.settings.panel` records `/lynx/plugins/ghost.settings.panel`.
 
+Registry metadata location invariant:
+
+- Public configuration paths under `/_weaver` are reserved for Weaver metadata and are hidden from normal reads and protected from normal writes.
+- The persistent schema registry stores its internal document at `_weaver.registry.schemas` through private read/write access so restart hydration does not expose that document through public configuration APIs.
+
 ## Layer Validation Recommendation
 
 Recommended approach: allow partial override objects per layer, validate each partial override against a derived partial schema, and validate completeness on the baseline or effective object for the target environment and scope before fetch, deploy, or runtime use.
@@ -232,7 +237,7 @@ This is an explicit amendment to a simpler “complete object per layer” desig
 |------------|-------------|-------------------|
 | Registry storage | Store registrations by environment and canonical path. | `getSchema('/lynx/plugins/analytics')` resolves the fragment object schema for that path. |
 | Fragment slots | Store service-declared fragment slots and validate fragment registrations against them. | Unknown slot and duplicate derived fragment path registrations are rejected. |
-| Metadata | Retain derived service path, canonical slot path, derived fragment path, `owner`, `providerId`, authenticated subject, and audit metadata for future policy. | Registry can report declaring service, provider, slot path, fragment path, environment, owner/contact, and registration actor. |
+| Metadata | Retain derived service path, canonical slot path, derived fragment path, `owner`, and `providerId`; keep authenticated `subject` in operation audit events rather than schema documents. | Registry can report declaring service, provider, slot path, fragment path, environment, and owner/contact while audit records capture the acting subject. |
 
 ### Phase 3: Object Write and Validation Pipeline
 

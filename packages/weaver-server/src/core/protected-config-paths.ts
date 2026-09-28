@@ -4,7 +4,7 @@ import type { WriteResult } from "@weaver-conf/config-types";
 const protectedRoot = "_weaver";
 
 export function protectedConfigMutationError(key: string): WriteResult | null {
-  if (!isProtectedConfigMutationKey(key)) return null;
+  if (!isProtectedConfigPath(key)) return null;
   return {
     success: false,
     error: {
@@ -14,9 +14,29 @@ export function protectedConfigMutationError(key: string): WriteResult | null {
   };
 }
 
-function isProtectedConfigMutationKey(key: string): boolean {
+export function isProtectedConfigPath(key: string): boolean {
+  if (getLexicalFirstRoot(key) === protectedRoot) return true;
   const firstSegment = getFirstLogicalPathSegment(key);
   return firstSegment === protectedRoot;
+}
+
+export function filterProtectedConfigEntries(
+  entries: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(entries).filter(([key]) => !isProtectedConfigPath(key)),
+  );
+}
+
+export function filterProtectedConfigScopes(
+  scopes: Record<string, Record<string, unknown>>,
+): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(
+    Object.entries(scopes).map(([scope, entries]) => [
+      scope,
+      filterProtectedConfigEntries(entries),
+    ]),
+  );
 }
 
 function getFirstLogicalPathSegment(key: string): string | null {
@@ -28,4 +48,17 @@ function getFirstLogicalPathSegment(key: string): string | null {
   } catch {
     return null;
   }
+}
+
+function getLexicalFirstRoot(key: string): string {
+  const normalized = key.startsWith("/") ? key.slice(1) : key;
+  if (normalized.startsWith("[")) {
+    const closingBracket = normalized.indexOf("]");
+    return closingBracket < 0
+      ? normalized.slice(1)
+      : normalized.slice(1, closingBracket);
+  }
+
+  const delimiter = normalized.search(/[./[\]]/u);
+  return delimiter < 0 ? normalized : normalized.slice(0, delimiter);
 }

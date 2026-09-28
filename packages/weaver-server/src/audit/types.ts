@@ -22,7 +22,7 @@ export interface ConfigAuditLog {
  * Uses SinkDomainAuditEntry which includes environment context.
  */
 export interface ConfigAuditSink {
-  record(entry: SinkDomainAuditEntry): Promise<void>;
+  record(entry: ConfigAuditEntry): Promise<void>;
 }
 
 // Re-export for backward compatibility

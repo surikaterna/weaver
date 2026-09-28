@@ -14,7 +14,6 @@ export interface FragmentSlotDeclaration {
 }
 
 export interface SchemaRegistrationAuditMetadata {
-  readonly subject?: string | undefined;
   readonly actor?: string | undefined;
 }
 

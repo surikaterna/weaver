@@ -18,8 +18,7 @@ export const fragmentSlotDeclarationSchema = z.strictObject({
   accepts: z.literal("object"),
 });
 
-export const schemaRegistrationAuditMetadataSchema = z.strictObject({
-  subject: z.string().min(1).optional(),
+export const schemaRegistrationAuditMetadataSchema = z.object({
   actor: z.string().min(1).optional(),
 });
 

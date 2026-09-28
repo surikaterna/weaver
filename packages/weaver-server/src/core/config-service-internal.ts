@@ -2,6 +2,7 @@ import type { WriteResult } from "@weaver-conf/config-types";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
 
 interface InternalConfigAccess {
+  readonly read: (key: string) => Promise<unknown>;
   readonly write: (
     layer: string,
     key: string,
@@ -13,6 +14,15 @@ interface InternalConfigAccess {
     key: string,
     options?: WriteContext,
   ) => Promise<WriteResult>;
+}
+
+export async function readInternalConfig(
+  configService: WeaverConfigService,
+  key: string,
+): Promise<unknown> {
+  const access = internalConfigAccess.get(configService);
+  if (!access) return undefined;
+  return access.read(key);
 }
 
 const internalConfigAccess = new WeakMap<

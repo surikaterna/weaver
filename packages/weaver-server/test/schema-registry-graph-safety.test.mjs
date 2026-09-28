@@ -336,7 +336,8 @@ describe("public graph registration pipelines", () => {
     expect(tracked.writes()).toBe(0);
     expect((await first.registry.register(registration({ type: "object" }))).success).toBe(true);
     expect(tracked.writes()).toBe(1);
-    const persisted = await first.service.get("_weaver.registry.schemas");
+    expect(await first.service.get("_weaver.registry.schemas")).toBe(undefined);
+    const persisted = (await tracked.provider.load()).entries._weaver.registry.schemas;
     expect(persisted.environments.test.schemas["/svc"].schema).toEqual({
       encoding,
       version: 1,

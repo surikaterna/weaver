@@ -72,6 +72,35 @@ export interface SinkDomainAuditEntry extends AuditEntryBase {
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
+export type SchemaAuditAction =
+  | "schema.register.service"
+  | "schema.register.fragment"
+  | "schema.write.object"
+  | "schema.patch.path"
+  | "schema.validate.effective";
+
+export interface SchemaOperationAuditMetadata {
+  readonly operation: SchemaAuditAction;
+  readonly subject?: string | undefined;
+  readonly serviceId?: string | undefined;
+  readonly providerId?: string | undefined;
+  readonly servicePath?: string | undefined;
+  readonly canonicalSlotPath?: string | undefined;
+  readonly fragmentPath?: string | undefined;
+  readonly writePath?: string | undefined;
+  readonly environment?: string | undefined;
+}
+
+export interface SchemaDomainAuditEntry extends AuditEntryBase {
+  readonly domain: "schema";
+  readonly action: SchemaAuditAction;
+  readonly key: string;
+  readonly environment: string;
+  readonly success: boolean;
+  readonly error?: string | undefined;
+  readonly metadata: SchemaOperationAuditMetadata;
+}
+
 /** Session-domain audit entry (override session lifecycle) */
 export interface SessionDomainAuditEntry extends AuditEntryBase {
   readonly domain: "session";
@@ -97,6 +126,7 @@ export interface SecretDomainAuditEntry extends AuditEntryBase {
 export type ConfigAuditEntry =
   | ConfigDomainAuditEntry
   | SinkDomainAuditEntry
+  | SchemaDomainAuditEntry
   | SessionDomainAuditEntry
   | SecretDomainAuditEntry;
 

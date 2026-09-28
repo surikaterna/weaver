@@ -9,7 +9,6 @@ import type {
   ConfigurationPropertySchema,
   FragmentSlotRegistrationMetadata,
   ObjectConfigurationPropertySchema,
-  SchemaRegistrationAuditMetadata,
   SchemaRegistrationMetadata,
   SchemaRegistrationRequest,
 } from "@weaver-conf/config-types";
@@ -96,9 +95,9 @@ export function applyEvaluation(
 export function evaluateRegistration(
   state: RegistryState,
   request: SchemaRegistrationRequest,
-  context?: SchemaRegistrationContext,
+  _context?: SchemaRegistrationContext,
 ): RegistrationEvaluation {
-  const parsed = parseRegistrationRequest(request, context);
+  const parsed = parseRegistrationRequest(request);
   if (!parsed.success) return { result: parsed.result };
 
   const key = schemaKey(parsed.targetPath, parsed.environment);
@@ -160,12 +159,10 @@ function hasRegisteredFragment(
 
 function parseRegistrationRequest(
   request: SchemaRegistrationRequest,
-  context?: SchemaRegistrationContext,
 ): ParsedRegistration {
   try {
-    if ("providerId" in request)
-      return parseFragmentRegistration(request, context);
-    return parseServiceRegistration(request, context);
+    if ("providerId" in request) return parseFragmentRegistration(request);
+    return parseServiceRegistration(request);
   } catch (error: unknown) {
     return parsedValidationFailure(errorMessage(error));
   }
@@ -173,21 +170,18 @@ function parseRegistrationRequest(
 
 function parseServiceRegistration(
   request: SchemaRegistrationRequest,
-  context?: SchemaRegistrationContext,
 ): ParsedRegistration {
   const parsed = serviceSchemaRegistrationRequestSchema.safeParse(request);
   if (!parsed.success)
     return parsedValidationFailure(firstIssueMessage(parsed.error));
   const data = parsed.data;
   const service = deriveServicePath(data.serviceId);
-  const audit = buildAudit(context);
   const metadata: SchemaRegistrationMetadata = {
     ...service,
     environment: data.environment,
     providerId: data.serviceId,
     owner: data.owner,
     ...(data.schemaVersion ? { schemaVersion: data.schemaVersion } : {}),
-    ...(audit ? { audit } : {}),
   };
   return {
     success: true,
@@ -196,14 +190,13 @@ function parseServiceRegistration(
     environment: data.environment,
     metadata,
     targetPath: service.servicePath,
-    slots: deriveSlotMetadata(data, service.servicePath, audit),
+    slots: deriveSlotMetadata(data, service.servicePath),
   };
 }
 
 function deriveSlotMetadata(
   request: Extract<SchemaRegistrationRequest, { fragmentSlots: unknown }>,
   servicePath: string,
-  audit: SchemaRegistrationAuditMetadata | undefined,
 ): ReadonlyArray<FragmentSlotRegistrationMetadata> {
   const seen = new Set<string>();
   return request.fragmentSlots.map((slot) => {
@@ -230,14 +223,12 @@ function deriveSlotMetadata(
       ...(request.schemaVersion
         ? { schemaVersion: request.schemaVersion }
         : {}),
-      ...(audit ? { audit } : {}),
     };
   });
 }
 
 function parseFragmentRegistration(
   request: SchemaRegistrationRequest,
-  context?: SchemaRegistrationContext,
 ): ParsedRegistration {
   const parsed = fragmentSchemaRegistrationRequestSchema.safeParse(request);
   if (!parsed.success)
@@ -248,7 +239,6 @@ function parseFragmentRegistration(
     data.slotPath,
     data.providerId,
   );
-  const audit = buildAudit(context);
   return {
     success: true,
     kind: "fragment",
@@ -259,7 +249,6 @@ function parseFragmentRegistration(
       environment: data.environment,
       owner: data.owner,
       ...(data.schemaVersion ? { schemaVersion: data.schemaVersion } : {}),
-      ...(audit ? { audit } : {}),
     },
     targetPath: derived.fragmentPath,
     slots: [],
@@ -297,16 +286,6 @@ function schemaEntry(
     schema: parsed.schema,
     environment: parsed.environment,
     metadata: parsed.metadata,
-  };
-}
-
-function buildAudit(
-  context: SchemaRegistrationContext | undefined,
-): SchemaRegistrationAuditMetadata | undefined {
-  if (!context?.subject && !context?.actor) return undefined;
-  return {
-    ...(context.subject ? { subject: context.subject } : {}),
-    ...(context.actor ? { actor: context.actor } : {}),
   };
 }
 
