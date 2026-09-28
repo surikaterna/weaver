@@ -1,3 +1,4 @@
+import { ZodError } from "zod";
 import { createWeaverClient } from "./client";
 import { createLocalTransport } from "./local-transport";
 import type { WeaverTransport } from "./transport";
@@ -71,6 +72,32 @@ describe("registered schema browsing", () => {
       },
     });
     await expect(client.fetchSchemas()).rejects.toBe(failure);
+    await client.close();
+  });
+
+  it.each([
+    undefined,
+    null,
+    [],
+    {
+      "/app:default": {
+        type: "object",
+        properties: { broken: { type: "bogus" } },
+      },
+    },
+  ])("rejects malformed fulfilled schema maps without using boot state: %s", async (payload) => {
+    let calls = 0;
+    const source = transport();
+    Object.defineProperty(source, "fetchSchemas", {
+      value: async () => {
+        calls++;
+        return payload;
+      },
+    });
+    const client = await createWeaverClient({ transport: source });
+    await expect(client.fetchSchemas()).rejects.toBeInstanceOf(ZodError);
+    await expect(client.fetchSchemas()).rejects.toBeInstanceOf(ZodError);
+    expect(calls).toBe(2);
     await client.close();
   });
 });

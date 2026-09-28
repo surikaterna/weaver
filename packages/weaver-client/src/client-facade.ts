@@ -1,5 +1,8 @@
 import { deepGet } from "@weaver-conf/config-engine";
-import type { ScopeInstance } from "@weaver-conf/config-types";
+import {
+  registeredSchemasResponseSchema,
+  type ScopeInstance,
+} from "@weaver-conf/config-types";
 import { applyNamespace } from "./client-helpers";
 import type { ClientRuntime } from "./client-runtime";
 import type { WeaverClient } from "./client-types";
@@ -205,7 +208,9 @@ function registeredMethods(
     },
     async fetchSchemas() {
       if (!runtime.transport.fetchSchemas) return null;
-      return { schemas: await runtime.transport.fetchSchemas() };
+      return registeredSchemasResponseSchema.parse({
+        schemas: await runtime.transport.fetchSchemas(),
+      });
     },
   };
 }
