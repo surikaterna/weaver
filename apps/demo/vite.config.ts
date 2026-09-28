@@ -11,8 +11,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "node:fs/promises": resolve(__dirname, "src/stubs/node-fs.ts"),
-      "node:fs": resolve(__dirname, "src/stubs/node-fs.ts"),
+      "fs/promises": resolve(__dirname, "src/stubs/node-fs.ts"),
+      "node:fs": resolve(__dirname, "src/stubs/node-fs-sync.ts"),
+      "fs": resolve(__dirname, "src/stubs/node-fs-sync.ts"),
       "node:path": resolve(__dirname, "src/stubs/node-path.ts"),
+      "path": resolve(__dirname, "src/stubs/node-path.ts"),
     },
   },
 });

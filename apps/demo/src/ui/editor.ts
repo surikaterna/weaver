@@ -211,7 +211,11 @@ async function handleSet(
   }
 
   clearFeedback(body);
-  await client.set(key, value, { layer });
+  const result = await client.set(key, value, { layer });
+  if (!result.success) {
+    showFeedback(body, result.error?.message ?? "Set failed", "error");
+    return;
+  }
   addLogEntry(`Set ${key} = ${JSON.stringify(value)} at [${layer}]`);
 }
 
@@ -231,11 +235,15 @@ function bindEvents(
   }
 
   for (const btn of body.querySelectorAll<HTMLButtonElement>(".btn-remove")) {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const layer = btn.dataset.layer;
       if (layer === undefined) return;
       clearFeedback(body);
-      void client.remove(key, { layer });
+      const result = await client.remove(key, { layer });
+      if (!result.success) {
+        showFeedback(body, result.error?.message ?? "Remove failed", "error");
+        return;
+      }
       addLogEntry(`Removed ${key} from [${layer}]`);
     });
   }

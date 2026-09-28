@@ -3,11 +3,8 @@ import { createOverrideSessionProvider } from "@weaver-conf/config-sessions";
 import type { WeaverConfig } from "@weaver-conf/config-types";
 import { defineWeaver, Layers } from "@weaver-conf/config-types";
 import type { WeaverClient } from "@weaver-conf/weaver-client";
-import {
-  createLocalTransport,
-  createWeaverClient,
-} from "@weaver-conf/weaver-client";
-import { SEED_SNAPSHOT } from "./seed-data";
+import { createWeaverClient } from "@weaver-conf/weaver-client";
+import { createDemoTransport } from "./demo-transport";
 
 /** All registered provider layer names, in rank order (lowest to highest). */
 export const ALL_PROVIDER_LAYERS: readonly string[] = [
@@ -41,9 +38,9 @@ export async function initService(): Promise<{
     defaultDurationMs: 5 * 60 * 1000,
   });
 
-  const transport = createLocalTransport({ snapshot: SEED_SNAPSHOT });
+  const transport = createDemoTransport();
 
-  const client = await createWeaverClient({ transport });
+  const client = await createWeaverClient({ transport, scopeLoading: "eager" });
 
   return { client, session, weaverConfig };
 }
