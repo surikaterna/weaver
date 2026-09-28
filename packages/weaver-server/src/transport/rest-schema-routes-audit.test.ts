@@ -4,6 +4,7 @@ import type {
   WriteResult,
 } from "@weaver-conf/config-types";
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
+import { vi } from "vitest";
 import type { AuditService } from "../audit/audit-service";
 import { createAuditService } from "../audit/audit-service";
 import type { AuthContext } from "../auth/auth-middleware";
@@ -272,6 +273,60 @@ describe("REST schema operation audit", () => {
     expect(audit.entries).toEqual([]);
   });
 
+  it("denies and rejects malformed real-provider writes before audit or effects", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {},
+    });
+    const configService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "prod",
+    });
+    const schemaRegistry = createSchemaRegistry({ configService });
+    let writes = 0;
+    let deltas = 0;
+    let attempts = 0;
+    const write = provider.write.bind(provider);
+    provider.write = async (...args) => {
+      writes++;
+      return write(...args);
+    };
+    const unsubscribe = configService.onDelta(() => {
+      deltas++;
+    });
+    const auditService: AuditService = {
+      record: async () => {
+        attempts++;
+      },
+    };
+    const deps = {
+      configService,
+      schemaRegistry,
+      auditService,
+      defaultEnvironment: "prod",
+    };
+    try {
+      const denied = await send(
+        createRestAdapter({ ...deps, authGate: denyingGate() }),
+        "PUT",
+        "/v1/registered/objects/checkout",
+        { body: { value: {} } },
+      );
+      const malformed = await send(
+        createRestAdapter({ ...deps, authGate: allowingGate() }),
+        "PUT",
+        "/v1/registered/objects/checkout",
+        { body: { unexpected: true } },
+      );
+      expect(denied.status).toBe(403);
+      expect(malformed.status).toBe(400);
+      expect([writes, deltas, attempts]).toEqual([0, 0, 0]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it("preserves success when an audit sink fails", async () => {
     const errors: unknown[] = [];
     const auditService = createAuditService({
@@ -299,6 +354,113 @@ describe("REST schema operation audit", () => {
 
     expect(response.status).toBe(200);
     expect(errors).toHaveLength(1);
+  });
+
+  it.each([
+    "sync sink",
+    "async sink",
+    "sync service",
+    "async service",
+  ])("returns the committed write despite a %s failure", async (kind) => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {},
+    });
+    const configService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "prod",
+    });
+    const schemaRegistry = createSchemaRegistry({ configService });
+    const registered = await schemaRegistry.register(
+      {
+        ...serviceRegistration(),
+        schema: {
+          type: "object",
+          properties: { enabled: { type: "boolean" } },
+        },
+      },
+      { actor: "admin", subject: "admin" },
+    );
+    expect(registered.success).toBe(true);
+    const before = configService.revision;
+    let writes = 0;
+    let deltas = 0;
+    let attempts = 0;
+    const write = provider.write.bind(provider);
+    provider.write = async (...args) => {
+      writes++;
+      return write(...args);
+    };
+    const unsubscribe = configService.onDelta(() => {
+      deltas++;
+    });
+    const logs: unknown[][] = [];
+    const log = vi.spyOn(console, "error").mockImplementation((...args) => {
+      logs.push(args);
+    });
+    const failure = new Error("private-error-marker");
+    const healthy: ConfigAuditEntry[] = [];
+    const rejecting = () => {
+      attempts++;
+      if (kind.startsWith("sync")) throw failure;
+      return Promise.reject(failure);
+    };
+    const auditService: AuditService = kind.endsWith("sink")
+      ? createAuditService({
+          sinks: [
+            { record: rejecting },
+            {
+              record: async (entry) => {
+                healthy.push(entry);
+              },
+            },
+          ],
+          logger: {
+            debug() {},
+            info() {},
+            warn() {},
+            error: (...args) => {
+              logs.push(args);
+            },
+          },
+        })
+      : { record: rejecting };
+    try {
+      const adapter = createRestAdapter({
+        configService,
+        schemaRegistry,
+        auditService,
+        defaultEnvironment: "prod",
+      });
+      const response = await send(
+        adapter,
+        "PUT",
+        "/v1/registered/objects/checkout",
+        { body: { value: { enabled: true } } },
+      );
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({ success: true }),
+        }),
+      );
+      expect(writes).toBe(1);
+      expect(deltas).toBe(1);
+      expect(attempts).toBe(1);
+      expect(configService.revision).not.toBe(before);
+      expect(await configService.get("checkout")).toEqual({
+        enabled: true,
+      });
+      expect(healthy).toHaveLength(kind.endsWith("sink") ? 1 : 0);
+      expect(logs).toHaveLength(1);
+      expect(JSON.stringify(logs)).not.toMatch(
+        /private-error-marker|enabled|stack/u,
+      );
+    } finally {
+      unsubscribe();
+      log.mockRestore();
+    }
   });
 
   it("audits thrown and malformed outcomes once for every schema action", async () => {

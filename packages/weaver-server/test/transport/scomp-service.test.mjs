@@ -4,6 +4,7 @@ import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { createSchemaRegistry } from "../../src/core/schema-registry.ts";
 import { createScopeManager } from "../../src/core/scope-manager.ts";
 import { deepSet, deepRemove } from "@weaver-conf/config-engine";
+import { vi } from "vitest";
 import { createScompTransport } from "@weaver-conf/transport-scomp";
 
 const PREFIX = "weaver-config-v1";
@@ -348,6 +349,114 @@ describe("createWeaverScompService", () => {
 });
 
 describe("SCOMP schema operation audit", () => {
+  test.each(["sync sink", "async sink", "sync service", "async service", "throwing logger service"])(
+    "commits one registered write when %s fails", async (kind) => {
+      const provider = createTestProvider("p1", "platform", {});
+      const configService = await createWeaverConfigService({ providers: [provider], environment: "prod" });
+      const deps = buildScompDeps(configService, "prod");
+      expect((await deps.schemaRegistry.register({ ...serviceRegistration(),
+        schema: { type: "object", properties: { enabled: { type: "boolean" } } },
+      }, {
+        actor: "admin", subject: "admin",
+      })).success).toBe(true);
+      let deltas = 0;
+      const unsubscribe = configService.onDelta(() => { deltas++; });
+      const before = configService.revision;
+      const writesBefore = provider.writeCalls;
+      let attempts = 0;
+      const healthy = [];
+      const logs = [];
+      const spy = vi.spyOn(console, "error").mockImplementation((...args) => {
+        logs.push(args);
+        if (kind === "throwing logger service") throw new Error("logger failure");
+      });
+      const reject = () => {
+        attempts++;
+        if (kind.startsWith("sync")) throw new Error("private-error-marker");
+        return Promise.reject(new Error("private-error-marker"));
+      };
+      const auditService = kind.endsWith("sink")
+        ? createAuditService({
+            sinks: [{ record: reject }, { record: async (entry) => { healthy.push(entry); } }],
+            logger: { debug() {}, info() {}, warn() {}, error: (...args) => logs.push(args) },
+          })
+        : { record: reject };
+      try {
+        const service = createWeaverScompService({ ...deps, auditService });
+        const result = await service.router[route("setRegisteredObject")].handler({
+          anchorPath: "/checkout", value: { enabled: true }, layer: "platform",
+        });
+        expect(result.success).toBe(true);
+        expect(provider.writeCalls - writesBefore).toBe(1);
+        expect(deltas).toBe(1);
+        expect(configService.revision).not.toBe(before);
+        expect(await configService.get("checkout")).toEqual({ enabled: true });
+        expect(attempts).toBe(1);
+        expect(healthy).toHaveLength(kind.endsWith("sink") ? 1 : 0);
+        expect(logs).toHaveLength(1);
+        expect(JSON.stringify(logs)).not.toMatch(/private-error-marker|enabled|stack/u);
+      } finally {
+        unsubscribe();
+        spy.mockRestore();
+      }
+    },
+  );
+
+  test.each(["sync", "async"])("keeps typed failure with a %s failing configured sink", async (kind) => {
+    const deps = mockScompDeps();
+    const entries = [];
+    const logs = [];
+    let attempts = 0;
+    const auditService = createAuditService({
+      sinks: [
+        { record: () => {
+          attempts++;
+          if (kind === "sync") throw new Error("secret failure");
+          return Promise.reject(new Error("secret failure"));
+        } },
+        { record: async (entry) => { entries.push(entry); } },
+      ],
+      logger: { debug() {}, info() {}, warn() {}, error: (...args) => logs.push(args) },
+    });
+    deps.configService.setRegisteredObject = async () => writeFailure("typed failure");
+    const service = createWeaverScompService({ ...deps, auditService });
+    expect(await service.router[route("setRegisteredObject")].handler({
+      anchorPath: "/checkout", value: {},
+    })).toEqual(writeFailure("typed failure"));
+    expect(attempts).toBe(1);
+    expect(entries).toEqual([expect.objectContaining({ success: false, error: "typed failure" })]);
+    expect(logs).toEqual([["[audit] sink failed"]]);
+  });
+
+  test.each(["typed", "thrown", "malformed", "invalid input"])(
+    "preserves %s outcome against a rejecting custom audit service and logger", async (kind) => {
+      const deps = mockScompDeps();
+      const primary = new Error("primary-operation-error");
+      let executions = 0;
+      let attempts = 0;
+      deps.configService.setRegisteredObject = async () => {
+        executions++;
+        if (kind === "thrown") throw primary;
+        if (kind === "malformed") return { malformed: true };
+        return writeFailure("typed failure");
+      };
+      const spy = vi.spyOn(console, "error").mockImplementation(() => { throw new Error("logger failed"); });
+      try {
+        const service = createWeaverScompService({ ...deps, auditService: {
+          record() { attempts++; return Promise.reject(new Error("private-error-marker")); },
+        } });
+        const input = { anchorPath: kind === "invalid input" ? "checkout" : "/checkout", value: {} };
+        const operation = service.router[route("setRegisteredObject")].handler(input);
+        if (kind === "thrown") await expect(operation).rejects.toBe(primary);
+        else if (kind === "malformed" || kind === "invalid input") await expect(operation).rejects.toThrow();
+        else expect(await operation).toEqual(writeFailure("typed failure"));
+        expect(executions).toBe(kind === "invalid input" ? 0 : 1);
+        expect(attempts).toBe(kind === "invalid input" ? 0 : 1);
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
   test("uses trusted identity and canonical operation context", async () => {
     const audit = auditCapture();
     const deps = mockScompDeps();

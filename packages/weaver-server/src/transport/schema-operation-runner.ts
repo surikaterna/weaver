@@ -1,3 +1,4 @@
+import { consoleLogger } from "@weaver-conf/config-engine";
 import type { z } from "zod";
 import type { AuditService } from "../audit/audit-service";
 import { restResponseParser } from "./rest-route-boundary";
@@ -42,11 +43,8 @@ export async function runSchemaOperation<Result>(
     return recordFailureAndRethrow(options, malformedResponse, error);
   }
 
-  await recordSchemaAuditOutcome(
-    options.auditService,
-    options.context,
-    options.outcome(result),
-  );
+  const outcome = options.outcome(result);
+  await recordBestEffortAudit(options.auditService, options.context, outcome);
   return result;
 }
 
@@ -75,10 +73,22 @@ async function recordFailureAndRethrow(
   outcome: SchemaAuditOutcome,
   error: unknown,
 ): Promise<never> {
-  await recordSchemaAuditOutcome(
-    options.auditService,
-    options.context,
-    outcome,
-  ).catch(() => undefined);
+  await recordBestEffortAudit(options.auditService, options.context, outcome);
   throw error;
+}
+
+async function recordBestEffortAudit(
+  service: AuditService | undefined,
+  context: SchemaAuditContext,
+  outcome: SchemaAuditOutcome,
+): Promise<void> {
+  try {
+    await recordSchemaAuditOutcome(service, context, outcome);
+  } catch {
+    try {
+      consoleLogger.error("[audit] schema audit service failed");
+    } catch {
+      // Neither audit nor diagnostic failure can replace the operation result.
+    }
+  }
 }

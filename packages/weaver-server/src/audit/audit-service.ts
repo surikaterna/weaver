@@ -10,6 +10,7 @@ export interface AuditServiceOptions {
 }
 
 export interface AuditService {
+  /** Schema operations treat recording as best-effort; custom implementations may reject. */
   record(entry: ConfigAuditEntry): Promise<void>;
 }
 
@@ -32,11 +33,15 @@ export function createAuditService(options: AuditServiceOptions): AuditService {
     async record(entry: ConfigAuditEntry): Promise<void> {
       const masked = maskEntry(entry);
       const results = await Promise.allSettled(
-        sinks.map((sink) => sink.record(masked)),
+        sinks.map(async (sink) => sink.record(masked)),
       );
       for (const result of results) {
         if (result.status === "rejected") {
-          logger.error("[audit] sink failed:", result.reason);
+          try {
+            logger.error("[audit] sink failed");
+          } catch {
+            // Diagnostics must not change the outcome of an already completed operation.
+          }
         }
       }
     },
