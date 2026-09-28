@@ -1,5 +1,8 @@
 ---
 "@weaver-conf/weaver-client": minor
+"@weaver-conf/config-types": minor
+"@weaver-conf/weaver-server": minor
+"@weaver-conf/transport-scomp": minor
 ---
 
-Expose fresh registered-schema browsing through the client facade so supported transports share the same listing semantics without relying on boot validation state.
+Add exact registered-schema identity listing and on-demand detail contracts for authenticated HTTP and trusted SCOMP peers. Keep bulk fetching available as deprecated compatibility for opted-in boot validation.

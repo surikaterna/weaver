@@ -8,6 +8,9 @@ import {
   registeredObjectWriteResponseSchema,
   registeredPathPatchRequestSchema,
   registeredPathPatchResponseSchema,
+  registeredSchemaDetailRequestSchema,
+  registeredSchemaDetailResponseSchema,
+  registeredSchemaIdentityListResponseSchema,
   registeredSchemasResponseSchema,
   schemaRegistrationResponseSchema,
 } from "@weaver-conf/config-types";
@@ -158,13 +161,34 @@ function scopeHandlers(
 
 function schemaHandlers(
   deps: ScompServiceDeps,
-): Pick<WeaverConfigContract, "fetchSchemas" | "registerSchema"> {
+): Pick<
+  WeaverConfigContract,
+  | "fetchSchemas"
+  | "registerSchema"
+  | "listRegisteredSchemaIdentities"
+  | "getRegisteredSchema"
+> {
   const { schemaRegistry } = deps;
   return {
     async fetchSchemas(_input) {
       return registeredSchemasResponseSchema.parse({
         schemas: schemaRegistry.listAll(),
       });
+    },
+    async listRegisteredSchemaIdentities(_input) {
+      return registeredSchemaIdentityListResponseSchema.parse(
+        schemaRegistry.listRegisteredSchemaIdentities(),
+      );
+    },
+    async getRegisteredSchema(input) {
+      const request = registeredSchemaDetailRequestSchema.parse(input);
+      const detail = schemaRegistry.getRegisteredSchema(
+        request.anchorPath,
+        request.environment,
+      );
+      if (!detail)
+        throw createWeaverError("NOT_FOUND", "Registered schema not found");
+      return registeredSchemaDetailResponseSchema.parse(detail);
     },
 
     async registerSchema(input) {

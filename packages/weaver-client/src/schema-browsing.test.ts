@@ -15,6 +15,87 @@ function transport(): WeaverTransport {
 }
 
 describe("registered schema browsing", () => {
+  it("requires explicit capability and does not confuse empty listing with unsupported", async () => {
+    const unsupported = await createWeaverClient({ transport: transport() });
+    await expect(
+      unsupported.listRegisteredSchemaIdentities(),
+    ).rejects.toMatchObject({ code: "UNSUPPORTED_OPERATION" });
+    await expect(
+      unsupported.getRegisteredSchema("/app", "default"),
+    ).rejects.toMatchObject({ code: "UNSUPPORTED_OPERATION" });
+    await unsupported.close();
+    let lists = 0;
+    let details = 0;
+    const client = await createWeaverClient({
+      transport: {
+        ...transport(),
+        async listRegisteredSchemaIdentities() {
+          lists++;
+          return { anchors: [], slots: [] };
+        },
+        async getRegisteredSchema() {
+          details++;
+          throw new Error("NOT_FOUND");
+        },
+        async fetchSchemas() {
+          throw new Error("bulk fetch must not run");
+        },
+      },
+    });
+    expect(await client.listRegisteredSchemaIdentities()).toEqual({
+      anchors: [],
+      slots: [],
+    });
+    expect(await client.listRegisteredSchemaIdentities()).toEqual({
+      anchors: [],
+      slots: [],
+    });
+    await expect(client.getRegisteredSchema("/app", "default")).rejects.toThrow(
+      "NOT_FOUND",
+    );
+    expect({ lists, details }).toEqual({ lists: 2, details: 1 });
+    await client.close();
+  });
+
+  it("rejects malformed fulfilled identity and detail payloads on every request", async () => {
+    const source = transport();
+    Object.defineProperty(source, "listRegisteredSchemaIdentities", {
+      value: async () => ({
+        anchors: [
+          {
+            kind: "service",
+            path: "/app",
+            environment: "default",
+            schema: { type: "object" },
+          },
+        ],
+        slots: [],
+      }),
+    });
+    Object.defineProperty(source, "getRegisteredSchema", {
+      value: async () => ({
+        kind: "service",
+        path: "/app",
+        environment: "default",
+        schema: { type: "bogus" },
+        metadata: {},
+      }),
+    });
+    const client = await createWeaverClient({ transport: source });
+    await expect(
+      client.listRegisteredSchemaIdentities(),
+    ).rejects.toBeInstanceOf(ZodError);
+    await expect(
+      client.listRegisteredSchemaIdentities(),
+    ).rejects.toBeInstanceOf(ZodError);
+    await expect(
+      client.getRegisteredSchema("/app", "default"),
+    ).rejects.toBeInstanceOf(ZodError);
+    await expect(
+      client.getRegisteredSchema("/app", "default"),
+    ).rejects.toBeInstanceOf(ZodError);
+    await client.close();
+  });
   it("distinguishes unsupported from supported empty", async () => {
     const unsupported = await createWeaverClient({ transport: transport() });
     expect(await unsupported.fetchSchemas()).toBeNull();

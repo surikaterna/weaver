@@ -3,6 +3,7 @@ import { z } from "zod";
 /** All known Weaver error codes for typed error handling across packages. */
 export const weaverErrorCodes = [
   "NOT_FOUND",
+  "UNSUPPORTED_OPERATION",
   "UNAUTHORIZED",
   "FORBIDDEN",
   "SCOPE_NOT_FOUND",

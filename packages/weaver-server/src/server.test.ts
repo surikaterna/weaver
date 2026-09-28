@@ -307,7 +307,131 @@ describe("Weaver server auth gate", () => {
   });
 });
 
+async function assertBrowsePrecedence(
+  port: number,
+  base: string,
+  reader: Record<string, string>,
+  admin: Record<string, string>,
+): Promise<void> {
+  for (const target of [
+    `${base}/anchors/app?env=dev&env=dev`,
+    `${base}/anchors/app?%65nv=dev&env=dev`,
+    `${base}/anchors/__proto__?env=dev`,
+    `${base}/anchors/a%252Fb?env=dev`,
+    `${base}/anchors/a#frag?env=dev`,
+  ]) {
+    expect((await rawRequest(port, target)).status).toBe(400);
+    expect((await rawRequest(port, target, bearer("broken"))).status).toBe(400);
+  }
+  for (const target of [
+    `${base}/identities?extra=1`,
+    `${base}/anchors/app?env=`,
+    `${base}/anchors/app`,
+    `${base}/anchors/app?env=production`,
+  ]) {
+    expect((await rawRequest(port, target)).status).toBe(401);
+    expect((await rawRequest(port, target, bearer("broken"))).status).toBe(401);
+    expect((await rawRequest(port, target, reader)).status).toBe(403);
+  }
+  for (const target of [
+    `${base}/identities?extra=1`,
+    `${base}/anchors/app?env=`,
+    `${base}/anchors/app`,
+    `${base}/anchors/app?env=__proto__`,
+    `${base}/anchors/app/?env=dev`,
+  ]) {
+    expect((await rawRequest(port, target, admin)).status).toBe(400);
+  }
+}
+
+async function assertRegisteredBrowse(
+  port: number,
+  base: string,
+  admin: Record<string, string>,
+): Promise<void> {
+  const registered = await fetch(`http://localhost:${port}${base}/services`, {
+    method: "POST",
+    headers: { ...admin, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      serviceId: "app",
+      environment: "dev",
+      owner: { name: "App", contact: "app@example.com" },
+      schema: {
+        type: "object",
+        properties: {
+          enabled: { type: "boolean", "x-weaver": { visibility: "admin" } },
+        },
+      },
+      fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }],
+    }),
+  });
+  expect(registered.status).toBe(201);
+  const identities = await rawRequest(port, `${base}/identities`, admin);
+  expect(JSON.parse(identities.body).data).toEqual({
+    anchors: [{ kind: "service", path: "/app", environment: "dev" }],
+    slots: [
+      {
+        kind: "slot",
+        path: "/app/plugins",
+        environment: "dev",
+        accepts: "object",
+      },
+    ],
+  });
+  const detail = await rawRequest(port, `${base}/anchors/app?env=dev`, admin);
+  expect(detail.status).toBe(200);
+  expect(JSON.parse(detail.body).data).toMatchObject({
+    kind: "service",
+    path: "/app",
+    environment: "dev",
+    metadata: { owner: { name: "App" } },
+    schema: { type: "object", properties: { enabled: { type: "boolean" } } },
+  });
+  for (const target of [
+    `${base}/anchors/app/plugins?env=dev`,
+    `${base}/anchors/app/child?env=dev`,
+    `${base}/anchors/app?env=production`,
+  ]) {
+    expect((await rawRequest(port, target, admin)).status).toBe(404);
+  }
+}
+
 describe("Weaver server error handling", () => {
+  it("enforces schema browse target parsing, JWT and admin precedence on the wire", async () => {
+    const secret = "browse-secret";
+    const server = await startWeaverServer({
+      port: 0,
+      jwtSecret: secret,
+      providers: [
+        createInMemoryStorageProvider({ id: "test", layer: "platform" }),
+      ],
+    });
+    const admin = bearer(
+      signTestJwt(secret, { sub: "admin", roles: ["admin"] }),
+    );
+    const reader = bearer(
+      signTestJwt(secret, { sub: "reader", roles: ["reader"] }),
+    );
+    const base = "/v1/admin/schemas";
+    try {
+      await assertBrowsePrecedence(server.port, base, reader, admin);
+      expect(
+        (
+          await rawRequest(
+            server.port,
+            `${base}/anchors/app?env=production`,
+            admin,
+          )
+        ).status,
+      ).toBe(404);
+      const list = await rawRequest(server.port, `${base}/identities`, admin);
+      expect(list.status).toBe(200);
+      expect(JSON.parse(list.body).data).toEqual({ anchors: [], slots: [] });
+      await assertRegisteredBrowse(server.port, base, admin);
+    } finally {
+      await server.close();
+    }
+  });
   it("returns a 400 JSON response for malformed request JSON", async () => {
     const server = await startWeaverServer({ port: 0 });
 

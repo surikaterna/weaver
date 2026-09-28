@@ -1,9 +1,42 @@
-import type { ConfigurationPropertySchema } from "./property-schema";
+import type {
+  ConfigurationPropertySchema,
+  ObjectConfigurationPropertySchema,
+} from "./property-schema";
 import type { WriteResult } from "./providers";
+import type { SchemaRegistrationMetadata } from "./schema-registration";
 import type { SchemaValidationResult } from "./schema-validation";
 
 export interface RegisteredSchemasResponse {
   readonly schemas: Record<string, ConfigurationPropertySchema>;
+}
+
+export interface RegisteredSchemaIdentity {
+  readonly kind: "service" | "fragment";
+  readonly path: string;
+  readonly environment: string;
+}
+
+export interface RegisteredSchemaSlotIdentity {
+  readonly kind: "slot";
+  readonly path: string;
+  readonly environment: string;
+  readonly accepts: "object";
+}
+
+export interface RegisteredSchemaIdentityListResponse {
+  readonly anchors: ReadonlyArray<RegisteredSchemaIdentity>;
+  readonly slots: ReadonlyArray<RegisteredSchemaSlotIdentity>;
+}
+
+export interface RegisteredSchemaDetailRequest {
+  readonly anchorPath: string;
+  readonly environment: string;
+}
+
+export interface RegisteredSchemaDetailResponse
+  extends RegisteredSchemaIdentity {
+  readonly schema: ObjectConfigurationPropertySchema;
+  readonly metadata: SchemaRegistrationMetadata;
 }
 
 export interface RegisteredWriteOptions {

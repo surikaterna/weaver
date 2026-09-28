@@ -6,6 +6,8 @@ import type {
   ConfigurationPropertySchema,
   ObjectConfigurationPropertySchema,
   SchemaRegistrationRequest as PathSchemaRegistrationRequest,
+  RegisteredSchemaDetailResponse,
+  RegisteredSchemaIdentityListResponse,
   SchemaRegistrationAuditMetadata,
   SchemaRegistrationMetadata,
 } from "@weaver-conf/config-types";
@@ -30,6 +32,7 @@ import {
   cloneState,
   createEmptyState,
   evaluateRegistration,
+  listSchemaIdentities,
   listSchemas,
   type SchemaEntry,
   schemaKey,
@@ -92,6 +95,11 @@ export interface SchemaRegistry {
     environment?: string,
   ): Promise<RegisteredSchemaAnchor | null>;
   listAll(): Record<string, ConfigurationPropertySchema>;
+  listRegisteredSchemaIdentities(): RegisteredSchemaIdentityListResponse;
+  getRegisteredSchema(
+    path: string,
+    environment: string,
+  ): RegisteredSchemaDetailResponse | null;
 }
 
 export type { SchemaRegistrationAuditMetadata };
@@ -175,6 +183,15 @@ export function createSchemaRegistry(
     listAll() {
       return listSchemas(state);
     },
+    listRegisteredSchemaIdentities() {
+      return listSchemaIdentities(state);
+    },
+    getRegisteredSchema(path, environment) {
+      const entry = state.schemas.get(schemaKey(path, environment));
+      return entry?.path === path && entry.environment === environment
+        ? registeredAnchorFromEntry(entry)
+        : null;
+    },
   };
 }
 
@@ -235,6 +252,15 @@ export async function createPersistentSchemaRegistry(
 
     listAll() {
       return listSchemas(state);
+    },
+    listRegisteredSchemaIdentities() {
+      return listSchemaIdentities(state);
+    },
+    getRegisteredSchema(path, environment) {
+      const entry = state.schemas.get(schemaKey(path, environment));
+      return entry?.path === path && entry.environment === environment
+        ? registeredAnchorFromEntry(entry)
+        : null;
     },
   };
 }

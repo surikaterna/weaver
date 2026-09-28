@@ -1,5 +1,7 @@
 import type {
   RegisteredEffectiveValidationResponse,
+  RegisteredSchemaDetailResponse,
+  RegisteredSchemaIdentityListResponse,
   RegisteredSchemasResponse,
   SchemaRegistrationRequest,
   SchemaRegistrationResponse,
@@ -129,7 +131,12 @@ export interface WeaverClient {
   registerSchema(
     request: SchemaRegistrationRequest,
   ): Promise<SchemaRegistrationResponse>;
-  /** Fresh transport listing; null means unsupported. Boot validation is not browsing authorization. */
+  listRegisteredSchemaIdentities(): Promise<RegisteredSchemaIdentityListResponse>;
+  getRegisteredSchema(
+    anchorPath: string,
+    environment: string,
+  ): Promise<RegisteredSchemaDetailResponse>;
+  /** @deprecated Bulk legacy fetch, not for browsing. Boot validation is not browsing authorization. */
   fetchSchemas(): Promise<RegisteredSchemasResponse | null>;
 
   // ── Instances ──

@@ -2,6 +2,8 @@ import {
   type ConfigurationPropertySchema,
   publicConfigPathSchema,
   type RegisteredEffectiveValidationResponse,
+  type RegisteredSchemaDetailResponse,
+  type RegisteredSchemaIdentityListResponse,
   type SchemaRegistrationRequest,
   type SchemaRegistrationResponse,
   type ScopeDefinition,
@@ -138,6 +140,11 @@ export interface WeaverTransport {
 
   // Schemas
   fetchSchemas?(): Promise<Record<string, ConfigurationPropertySchema>>;
+  listRegisteredSchemaIdentities?(): Promise<RegisteredSchemaIdentityListResponse>;
+  getRegisteredSchema?(
+    anchorPath: string,
+    environment: string,
+  ): Promise<RegisteredSchemaDetailResponse>;
   registerSchema?(
     request: SchemaRegistrationRequest,
   ): Promise<SchemaRegistrationResponse>;

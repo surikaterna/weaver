@@ -5,12 +5,17 @@ import {
   type ConfigurationPropertySchema,
   formatScopePath,
   type RegisteredEffectiveValidationResponse,
+  type RegisteredSchemaDetailResponse,
+  type RegisteredSchemaIdentityListResponse,
   registeredEffectiveValidationRequestSchema,
   registeredEffectiveValidationResponseSchema,
   registeredObjectWriteRequestSchema,
   registeredObjectWriteResponseSchema,
   registeredPathPatchRequestSchema,
   registeredPathPatchResponseSchema,
+  registeredSchemaDetailRequestSchema,
+  registeredSchemaDetailResponseSchema,
+  registeredSchemaIdentityListResponseSchema,
   registeredSchemasResponseSchema,
   type SchemaRegistrationRequest,
   type SchemaRegistrationResponse,
@@ -63,6 +68,11 @@ export interface WeaverTransport {
     parentScope?: ScopeInstance[],
   ): Promise<string[]>;
   fetchSchemas?(): Promise<Record<string, ConfigurationPropertySchema>>;
+  listRegisteredSchemaIdentities?(): Promise<RegisteredSchemaIdentityListResponse>;
+  getRegisteredSchema?(
+    anchorPath: string,
+    environment: string,
+  ): Promise<RegisteredSchemaDetailResponse>;
   registerSchema?(
     request: SchemaRegistrationRequest,
   ): Promise<SchemaRegistrationResponse>;
@@ -248,8 +258,28 @@ function scopeMethods(
 
 function schemaMethods(
   client: WeaverConfigContract,
-): Pick<WeaverTransport, "fetchSchemas" | "registerSchema"> {
+): Pick<
+  WeaverTransport,
+  | "fetchSchemas"
+  | "registerSchema"
+  | "listRegisteredSchemaIdentities"
+  | "getRegisteredSchema"
+> {
   return {
+    async listRegisteredSchemaIdentities() {
+      return registeredSchemaIdentityListResponseSchema.parse(
+        await client.listRegisteredSchemaIdentities({}),
+      );
+    },
+    async getRegisteredSchema(anchorPath, environment) {
+      const request = registeredSchemaDetailRequestSchema.parse({
+        anchorPath,
+        environment,
+      });
+      return registeredSchemaDetailResponseSchema.parse(
+        await client.getRegisteredSchema(request),
+      );
+    },
     async fetchSchemas() {
       const result = registeredSchemasResponseSchema.parse(
         await client.fetchSchemas({}),

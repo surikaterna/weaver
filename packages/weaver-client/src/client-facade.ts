@@ -1,5 +1,9 @@
 import { deepGet } from "@weaver-conf/config-engine";
 import {
+  createWeaverError,
+  registeredSchemaDetailRequestSchema,
+  registeredSchemaDetailResponseSchema,
+  registeredSchemaIdentityListResponseSchema,
   registeredSchemasResponseSchema,
   type ScopeInstance,
 } from "@weaver-conf/config-types";
@@ -180,6 +184,8 @@ function registeredMethods(
   | "validateRegisteredEffective"
   | "registerSchema"
   | "fetchSchemas"
+  | "listRegisteredSchemaIdentities"
+  | "getRegisteredSchema"
 > {
   return {
     async setRegisteredObject(path, value, options) {
@@ -211,6 +217,35 @@ function registeredMethods(
       return registeredSchemasResponseSchema.parse({
         schemas: await runtime.transport.fetchSchemas(),
       });
+    },
+    async listRegisteredSchemaIdentities() {
+      if (!runtime.transport.listRegisteredSchemaIdentities) {
+        throw createWeaverError(
+          "UNSUPPORTED_OPERATION",
+          "Schema identity listing is unsupported by this transport",
+        );
+      }
+      return registeredSchemaIdentityListResponseSchema.parse(
+        await runtime.transport.listRegisteredSchemaIdentities(),
+      );
+    },
+    async getRegisteredSchema(anchorPath, environment) {
+      const request = registeredSchemaDetailRequestSchema.parse({
+        anchorPath,
+        environment,
+      });
+      if (!runtime.transport.getRegisteredSchema) {
+        throw createWeaverError(
+          "UNSUPPORTED_OPERATION",
+          "Schema detail lookup is unsupported by this transport",
+        );
+      }
+      return registeredSchemaDetailResponseSchema.parse(
+        await runtime.transport.getRegisteredSchema(
+          request.anchorPath,
+          request.environment,
+        ),
+      );
     },
   };
 }

@@ -606,6 +606,8 @@ function createMockSchemaRegistry(): SchemaRegistry {
     getSchema: async () => null,
     resolveAnchor: async () => null,
     listAll: () => ({}),
+    listRegisteredSchemaIdentities: () => ({ anchors: [], slots: [] }),
+    getRegisteredSchema: () => null,
   };
 }
 

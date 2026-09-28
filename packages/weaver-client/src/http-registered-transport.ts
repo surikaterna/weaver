@@ -4,12 +4,17 @@ import {
   fragmentSchemaRegistrationRequestSchema,
   publicConfigPathSchema,
   type RegisteredEffectiveValidationResponse,
+  type RegisteredSchemaDetailResponse,
+  type RegisteredSchemaIdentityListResponse,
   registeredEffectiveValidationRequestSchema,
   registeredEffectiveValidationResponseSchema,
   registeredObjectWriteRequestSchema,
   registeredObjectWriteResponseSchema,
   registeredPathPatchRequestSchema,
   registeredPathPatchResponseSchema,
+  registeredSchemaDetailRequestSchema,
+  registeredSchemaDetailResponseSchema,
+  registeredSchemaIdentityListResponseSchema,
   registeredSchemasResponseSchema,
   type SchemaRegistrationRequest,
   type SchemaRegistrationResponse,
@@ -75,6 +80,37 @@ export async function fetchRegisteredSchemas(
     { dataStatuses: okStatus },
   );
   return result.schemas;
+}
+
+export function listRegisteredSchemaIdentities(
+  context: HttpRegisteredContext,
+): Promise<RegisteredSchemaIdentityListResponse> {
+  return context.requestValidated(
+    "GET",
+    "/v1/admin/schemas/identities",
+    registeredSchemaIdentityListResponseSchema,
+    undefined,
+    { dataStatuses: okStatus },
+  );
+}
+
+export function getRegisteredSchema(
+  context: HttpRegisteredContext,
+  anchorPath: string,
+  environment: string,
+): Promise<RegisteredSchemaDetailResponse> {
+  const request = registeredSchemaDetailRequestSchema.parse({
+    anchorPath,
+    environment,
+  });
+  const query = context.queryString({ env: request.environment });
+  return context.requestValidated(
+    "GET",
+    `/v1/admin/schemas/anchors${wirePath(request.anchorPath)}${query}`,
+    registeredSchemaDetailResponseSchema,
+    undefined,
+    { dataStatuses: okStatus },
+  );
 }
 
 export function postSchemaRegistration(
