@@ -1,16 +1,21 @@
-import type { ScopeDefinition, ScopeInstance } from "@weaver-conf/config-types";
-import type { ZodRawShape } from "zod";
 import type {
-  InstanceClient,
-  NamespaceDefinition,
-  TypedNamespaceClient,
-  UntypedNamespaceClient,
-} from "./namespace";
+  RegisteredEffectiveValidationResponse,
+  SchemaRegistrationRequest,
+  SchemaRegistrationResponse,
+  ScopeDefinition,
+  ScopeInstance,
+} from "@weaver-conf/config-types";
+import type { InstanceClient, NamespaceClient } from "./namespace";
 import type { WeaverClientPersistence } from "./persistence";
 import type { ValidationResult } from "./schema-registry";
 import type { ScopeLoadingMode } from "./scope-manager";
 import type { StalenessConfig } from "./staleness";
-import type { WeaverTransport, WriteOptions, WriteResult } from "./transport";
+import type {
+  EffectiveValidationOptions,
+  WeaverTransport,
+  WriteOptions,
+  WriteResult,
+} from "./transport";
 import type {
   ClientMode,
   ConfigDelta,
@@ -73,6 +78,16 @@ export interface WeaverClient {
     options?: WriteOptions,
   ): Promise<WriteResult>;
   remove(key: string, options?: WriteOptions): Promise<WriteResult>;
+  setRegisteredObject(
+    anchorPath: string,
+    value: unknown,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
+  patchRegisteredPath(
+    path: string,
+    value: unknown,
+    options?: WriteOptions,
+  ): Promise<WriteResult>;
 
   // ── Scopes ──
   listScopes(): Promise<ScopeDefinition[]>;
@@ -99,16 +114,26 @@ export interface WeaverClient {
 
   // ── Validation ──
   validate(key: string, value: unknown): ValidationResult;
+  validateRegisteredEffective(
+    options: EffectiveValidationOptions,
+  ): Promise<RegisteredEffectiveValidationResponse>;
   isSensitive(key: string): boolean;
 
   // ── Namespaces ──
-  namespace<TShape extends ZodRawShape>(
-    definition: NamespaceDefinition<string, TShape>,
-  ): TypedNamespaceClient<TShape>;
-  namespace(prefix: string): UntypedNamespaceClient;
+  namespace<TConfig extends object = Record<string, unknown>>(
+    path: string,
+  ): NamespaceClient<TConfig>;
+
+  // ── Registration ──
+  registerSchema(
+    request: SchemaRegistrationRequest,
+  ): Promise<SchemaRegistrationResponse>;
 
   // ── Instances ──
-  instance(basePath: string, instanceId: string): InstanceClient;
+  instance<TConfig extends object = Record<string, unknown>>(
+    basePath: string,
+    instanceId: string,
+  ): InstanceClient<TConfig>;
 
   // ── Lifecycle ──
   close(): Promise<void>;

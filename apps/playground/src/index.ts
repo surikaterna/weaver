@@ -1,18 +1,15 @@
 // Full-stack integration smoke test for Weaver
 // Boots weaver-server, connects weaver-client via HTTP transport, and exercises major surfaces.
 
-import { createStaticJsonStorageProvider } from "@weaver-conf/storage-provider-static-json";
-import type { ConfigDelta } from "@weaver-conf/weaver-client";
+import type { ConfigDelta, WeaverClient } from "@weaver-conf/weaver-client";
 import {
   createHttpTransport,
   createWeaverClient,
-  defineNamespace,
 } from "@weaver-conf/weaver-client";
 import {
   createInMemoryStorageProvider,
   startWeaverServer,
 } from "@weaver-conf/weaver-server";
-import { z } from "zod";
 
 // ─── Test Harness ────────────────────────────────────────────
 
@@ -56,19 +53,17 @@ const SEED_CONFIG: Record<string, unknown> = {
 
 // ─── Main ────────────────────────────────────────────────────
 
-async function main() {
-  console.log("Weaver Playground — Integration Smoke Test\n");
+type ServerInstance = Awaited<ReturnType<typeof startWeaverServer>>;
 
-  // ─── 1. Server Boot & Health Check ─────────────────────────
+async function bootPrimaryServer(): Promise<ServerInstance> {
   section("1. Server Boot & Health Check");
-
   const server = await startWeaverServer({
     port: 0,
     providers: [
-      createStaticJsonStorageProvider({
+      createInMemoryStorageProvider({
         id: "base",
         layer: "platform",
-        data: SEED_CONFIG,
+        initialEntries: SEED_CONFIG,
       }),
       createInMemoryStorageProvider({
         id: "default",
@@ -82,10 +77,11 @@ async function main() {
 
   const healthRes = await fetch(`http://localhost:${server.port}/healthz`);
   assert(healthRes.status === 200, "GET /healthz returns 200");
+  return server;
+}
 
-  // ─── 2. Client Connection & Read ──────────────────────────
+async function connectClient(server: ServerInstance): Promise<WeaverClient> {
   section("2. Client Connection & Read");
-
   const transport = createHttpTransport({
     baseUrl: `http://localhost:${server.port}`,
   });
@@ -101,10 +97,11 @@ async function main() {
 
   const darkMode = client.get<boolean>("feature.darkMode");
   assert(darkMode === true, `client.get("feature.darkMode") = ${darkMode}`);
+  return client;
+}
 
-  // ─── 3. Write & Read-Back ──────────────────────────────────
+async function exerciseWriteReadBack(client: WeaverClient): Promise<void> {
   section("3. Write & Read-Back");
-
   const writeResult = await client.set("app.version", "1.0.0", {
     layer: "default",
   });
@@ -115,10 +112,10 @@ async function main() {
 
   const version = client.get<string>("app.version");
   assert(version === "1.0.0", `client.get("app.version") = "${version}"`);
+}
 
-  // ─── 4. Namespace Operations ───────────────────────────────
+function exerciseNamespaces(client: WeaverClient): void {
   section("4. Namespace Operations");
-
   const appNs = client.getNamespace("app");
   assert(
     typeof appNs === "object" && appNs !== null,
@@ -126,22 +123,21 @@ async function main() {
   );
   assert("name" in appNs, 'Namespace has "name" key');
   assert("description" in appNs, 'Namespace has "description" key');
+}
 
-  // ─── 5. Typed Namespace ────────────────────────────────────
+function exerciseTypedNamespace(client: WeaverClient): void {
   section("5. Typed Namespace");
-
-  const appDef = defineNamespace("app", {
-    name: z.string(),
-    description: z.string(),
-  });
-
-  const typedNs = client.namespace(appDef);
+  interface AppConfig {
+    name: string;
+    description: string;
+  }
+  const typedNs = client.namespace<AppConfig>("app");
   const nsName = typedNs.get("name");
   assert(nsName === "Weaver Playground", `typedNs.get("name") = "${nsName}"`);
+}
 
-  // ─── 6. Subscriptions (onChange) ───────────────────────────
+async function exerciseSubscriptions(client: WeaverClient): Promise<void> {
   section("6. Subscriptions (onChange)");
-
   const received: ConfigDelta[] = [];
   const unsub = client.onChange("app.*", (deltas) => {
     received.push(...deltas);
@@ -163,10 +159,36 @@ async function main() {
     assert(delta.value === "en-US", `Delta value = "${delta.value}"`);
   }
   unsub();
+}
 
-  // ─── 7. Server Auth (optional gate) ───────────────────────
-  section("7. Server Auth (optional gate)");
+async function exerciseSchemaRegistration(client: WeaverClient): Promise<void> {
+  section("7. Schema Registration");
+  const regResult = await client.registerSchema({
+    serviceId: "metrics",
+    environment: "default",
+    owner: { name: "metrics", contact: "metrics@example.com" },
+    schema: {
+      type: "object",
+      properties: { enabled: { type: "boolean" } },
+    },
+    fragmentSlots: [],
+  });
+  assert(regResult.success, "path-first service schema registered");
+  const protectedWrite = await client.set(
+    "_weaver.registry.schemas",
+    {},
+    {
+      layer: "platform",
+    },
+  );
+  assert(
+    protectedWrite.success === false,
+    "public writes cannot bypass protected schema persistence",
+  );
+}
 
+async function exerciseAuth(): Promise<void> {
+  section("8. Server Auth (optional gate)");
   const authServer = await startWeaverServer({
     port: 0,
     jwtSecret: "test-secret",
@@ -192,23 +214,38 @@ async function main() {
     unauthRes.status === 401 || unauthRes.status === 403,
     `Unauthenticated write rejected with status ${unauthRes.status}`,
   );
-
   await authServer.close();
+}
 
-  // ─── 8. Cleanup ────────────────────────────────────────────
-  section("8. Cleanup");
-
+async function closePrimary(
+  client: WeaverClient,
+  server: ServerInstance,
+): Promise<void> {
+  section("9. Cleanup");
   await client.close();
   await server.close();
-
   assert(true, "Client and server closed cleanly");
+}
 
-  // ─── Summary ───────────────────────────────────────────────
+function printSummary(): void {
   console.log(`\n${"═".repeat(40)}`);
   console.log(`  ${passed} passed, ${failed} failed`);
   console.log(`${"═".repeat(40)}\n`);
-
   process.exit(failed > 0 ? 1 : 0);
+}
+
+async function main(): Promise<void> {
+  console.log("Weaver Playground — Integration Smoke Test\n");
+  const server = await bootPrimaryServer();
+  const client = await connectClient(server);
+  await exerciseWriteReadBack(client);
+  exerciseNamespaces(client);
+  exerciseTypedNamespace(client);
+  await exerciseSubscriptions(client);
+  await exerciseSchemaRegistration(client);
+  await exerciseAuth();
+  await closePrimary(client, server);
+  printSummary();
 }
 
 main().catch((err) => {

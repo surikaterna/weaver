@@ -14,8 +14,7 @@
     "@weaver-conf/config-types": "workspace:*",
     "@weaver-conf/config-sessions": "workspace:*",
     "@weaver-conf/config-policy": "workspace:*",
-    "@weaver-conf/config-engine": "workspace:*",
-    "zod": "^4.0.0"
+    "@weaver-conf/config-engine": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.3",

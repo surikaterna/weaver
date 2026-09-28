@@ -1,7 +1,5 @@
 import { initService } from "./setup";
 import "./schemas";
-import { defineNamespace } from "@weaver-conf/weaver-client";
-import { z } from "zod";
 import { ALL_KEYS } from "./seed-data";
 import { addLogEntry } from "./state";
 import { renderActivityLog } from "./ui/activity-log";
@@ -44,11 +42,11 @@ async function main(): Promise<void> {
   renderActivityLog(requireElement("activity-log"));
 
   // Typed namespace showcase
-  const uiConfig = defineNamespace("app.ui", {
-    theme: z.enum(["light", "dark", "system"]),
-    language: z.string(),
-  });
-  const ui = client.namespace(uiConfig);
+  interface UiConfig {
+    theme: "light" | "dark" | "system";
+    language: string;
+  }
+  const ui = client.namespace<UiConfig>("app.ui");
   console.log("[weaver-demo] Typed namespace — theme:", ui.get("theme"));
   console.log("[weaver-demo] Typed namespace — language:", ui.get("language"));
 
