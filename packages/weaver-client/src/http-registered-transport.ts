@@ -6,6 +6,8 @@ import {
   type RegisteredEffectiveValidationResponse,
   type RegisteredSchemaDetailResponse,
   type RegisteredSchemaIdentityListResponse,
+  type RegisteredSchemaIdentityPageRequest,
+  type RegisteredSchemaIdentityPageResponse,
   registeredEffectiveValidationRequestSchema,
   registeredEffectiveValidationResponseSchema,
   registeredObjectWriteRequestSchema,
@@ -15,6 +17,8 @@ import {
   registeredSchemaDetailRequestSchema,
   registeredSchemaDetailResponseSchema,
   registeredSchemaIdentityListResponseSchema,
+  registeredSchemaIdentityPageRequestSchema,
+  registeredSchemaIdentityPageResponseSchema,
   registeredSchemasResponseSchema,
   type SchemaRegistrationRequest,
   type SchemaRegistrationResponse,
@@ -89,6 +93,24 @@ export function listRegisteredSchemaIdentities(
     "GET",
     "/v1/admin/schemas/identities",
     registeredSchemaIdentityListResponseSchema,
+    undefined,
+    { dataStatuses: okStatus },
+  );
+}
+
+export function listRegisteredSchemaIdentityPage(
+  context: HttpRegisteredContext,
+  input?: RegisteredSchemaIdentityPageRequest,
+): Promise<RegisteredSchemaIdentityPageResponse> {
+  const request = registeredSchemaIdentityPageRequestSchema.parse(input ?? {});
+  const query = context.queryString({
+    limit: request.limit?.toString(),
+    cursor: request.cursor,
+  });
+  return context.requestValidated(
+    "GET",
+    `/v1/admin/schemas/identities/pages${query}`,
+    registeredSchemaIdentityPageResponseSchema,
     undefined,
     { dataStatuses: okStatus },
   );

@@ -14,6 +14,12 @@ export const serverEnvSchema = z.object({
     .url("WEAVER_MONGO_URI must be a valid URL")
     .optional(),
   WEAVER_JWT_SECRET: z.string().optional(),
+  WEAVER_SCHEMA_IDENTITY_MAX_PAGE_SIZE: z
+    .string()
+    .regex(/^[1-9][0-9]*$/)
+    .optional()
+    .transform((value) => (value === undefined ? undefined : Number(value)))
+    .pipe(z.number().int().min(50).max(Number.MAX_SAFE_INTEGER).optional()),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

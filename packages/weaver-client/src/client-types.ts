@@ -2,6 +2,8 @@ import type {
   RegisteredEffectiveValidationResponse,
   RegisteredSchemaDetailResponse,
   RegisteredSchemaIdentityListResponse,
+  RegisteredSchemaIdentityPageRequest,
+  RegisteredSchemaIdentityPageResponse,
   RegisteredSchemasResponse,
   SchemaRegistrationRequest,
   SchemaRegistrationResponse,
@@ -132,6 +134,9 @@ export interface WeaverClient {
     request: SchemaRegistrationRequest,
   ): Promise<SchemaRegistrationResponse>;
   listRegisteredSchemaIdentities(): Promise<RegisteredSchemaIdentityListResponse>;
+  listRegisteredSchemaIdentityPage(
+    input?: RegisteredSchemaIdentityPageRequest,
+  ): Promise<RegisteredSchemaIdentityPageResponse>;
   getRegisteredSchema(
     anchorPath: string,
     environment: string,

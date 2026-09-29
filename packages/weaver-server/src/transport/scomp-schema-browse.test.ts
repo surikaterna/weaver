@@ -1,3 +1,4 @@
+import { registeredSchemaIdentityPageResponseSchema } from "@weaver-conf/config-types";
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import { createWeaverConfigService } from "../core/config-service";
 import { createSchemaRegistry } from "../core/schema-registry";
@@ -34,6 +35,18 @@ describe("trusted SCOMP schema browsing", () => {
     const list =
       service.router["weaver-config-v1.listRegisteredSchemaIdentities"];
     const detail = service.router["weaver-config-v1.getRegisteredSchema"];
+    const page =
+      service.router["weaver-config-v1.listRegisteredSchemaIdentityPage"];
+    const first = registeredSchemaIdentityPageResponseSchema.parse(
+      await page?.handler({ limit: 1 }),
+    );
+    expect(first.anchors).toHaveLength(1);
+    expect(first.hasMore).toBe(true);
+    const second = registeredSchemaIdentityPageResponseSchema.parse(
+      await page?.handler({ cursor: first.nextCursor ?? "" }),
+    );
+    expect(second.slots).toHaveLength(1);
+    await expect(page?.handler({ limit: 201 })).rejects.toThrow();
     expect(await list?.handler({})).toEqual({
       anchors: [{ kind: "service", path: "/app", environment: "dev" }],
       slots: [

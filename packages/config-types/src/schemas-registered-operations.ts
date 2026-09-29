@@ -4,6 +4,8 @@ import type {
   RegisteredSchemaDetailResponse,
   RegisteredSchemaIdentity,
   RegisteredSchemaIdentityListResponse,
+  RegisteredSchemaIdentityPageRequest,
+  RegisteredSchemaIdentityPageResponse,
   RegisteredSchemaSlotIdentity,
   RegisteredSchemasResponse,
 } from "./registered-operations";
@@ -58,6 +60,28 @@ export const registeredSchemaIdentityListResponseSchema: z.ZodType<RegisteredSch
     anchors: z.array(registeredSchemaIdentitySchema),
     slots: z.array(registeredSchemaSlotIdentitySchema),
   });
+
+export const registeredSchemaIdentityPageRequestSchema: z.ZodType<RegisteredSchemaIdentityPageRequest> =
+  z.strictObject({
+    limit: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+    cursor: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{55}$/)
+      .optional(),
+  });
+
+export const registeredSchemaIdentityPageResponseSchema: z.ZodType<RegisteredSchemaIdentityPageResponse> =
+  z
+    .strictObject({
+      anchors: z.array(registeredSchemaIdentitySchema),
+      slots: z.array(registeredSchemaSlotIdentitySchema),
+      nextCursor: z
+        .string()
+        .regex(/^[A-Za-z0-9_-]{55}$/)
+        .nullable(),
+      hasMore: z.boolean(),
+    })
+    .refine((page) => page.hasMore === (page.nextCursor !== null));
 
 export const registeredSchemaDetailRequestSchema: z.ZodType<RegisteredSchemaDetailRequest> =
   z.strictObject({

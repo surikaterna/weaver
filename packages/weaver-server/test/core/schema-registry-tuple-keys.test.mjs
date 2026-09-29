@@ -152,7 +152,9 @@ test("a failed v1 upgrade write leaves the hydrated identities and stored bytes 
   const registry = await createPersistentSchemaRegistry({ configService });
   provider.write = async () => ({ success: false, error: { code: "INTERNAL_ERROR", message: "injected" } });
   const before = registry.listRegisteredSchemaIdentities();
+  const cursor = registry.listRegisteredSchemaIdentityPage({ limit: 1 }).nextCursor;
   expect((await registry.register(service("dev", "/plugins:prod"))).success).toBe(false);
+  expect(registry.listRegisteredSchemaIdentityPage({ cursor }).anchors.length + registry.listRegisteredSchemaIdentityPage({ cursor }).slots.length).toBe(1);
   expect(registry.listRegisteredSchemaIdentities()).toEqual(before);
   expect((await provider.load()).entries).toEqual(legacy);
   expect((await createPersistentSchemaRegistry({ configService })).listRegisteredSchemaIdentities()).toEqual(before);

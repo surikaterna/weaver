@@ -1,20 +1,9 @@
 import { deepGet } from "@weaver-conf/config-engine";
-import {
-  createWeaverError,
-  registeredSchemaDetailRequestSchema,
-  registeredSchemaDetailResponseSchema,
-  registeredSchemaIdentityListResponseSchema,
-  registeredSchemasResponseSchema,
-  type ScopeInstance,
-} from "@weaver-conf/config-types";
+import type { ScopeInstance } from "@weaver-conf/config-types";
 import { applyNamespace } from "./client-helpers";
+import { registeredMethods } from "./client-registered-methods";
 import type { ClientRuntime } from "./client-runtime";
 import type { WeaverClient } from "./client-types";
-import {
-  unsupportedRegistration,
-  unsupportedValidation,
-  unsupportedWrite,
-} from "./client-unsupported";
 import { createInstanceClient } from "./instance-client";
 import { createNamespaceClient } from "./namespace-client";
 import type { ValidationResult } from "./schema-registry";
@@ -171,81 +160,6 @@ function validationFailure(errors: ValidationResult["errors"]): WriteResult {
       message:
         errors.map((error) => error.message).join(", ") || "Validation failed",
       details: { errors },
-    },
-  };
-}
-
-function registeredMethods(
-  runtime: ClientRuntime,
-): Pick<
-  WeaverClient,
-  | "setRegisteredObject"
-  | "patchRegisteredPath"
-  | "validateRegisteredEffective"
-  | "registerSchema"
-  | "fetchSchemas"
-  | "listRegisteredSchemaIdentities"
-  | "getRegisteredSchema"
-> {
-  return {
-    async setRegisteredObject(path, value, options) {
-      return (
-        runtime.transport.setRegisteredObject?.(path, value, options) ??
-        unsupportedWrite("setRegisteredObject")
-      );
-    },
-    async patchRegisteredPath(path, value, options) {
-      return (
-        runtime.transport.patchRegisteredPath?.(path, value, options) ??
-        unsupportedWrite("patchRegisteredPath")
-      );
-    },
-    async validateRegisteredEffective(options) {
-      return (
-        runtime.transport.validateRegisteredEffective?.(options) ??
-        unsupportedValidation("validateRegisteredEffective")
-      );
-    },
-    async registerSchema(request) {
-      return (
-        runtime.transport.registerSchema?.(request) ??
-        unsupportedRegistration("registerSchema")
-      );
-    },
-    async fetchSchemas() {
-      if (!runtime.transport.fetchSchemas) return null;
-      return registeredSchemasResponseSchema.parse({
-        schemas: await runtime.transport.fetchSchemas(),
-      });
-    },
-    async listRegisteredSchemaIdentities() {
-      if (!runtime.transport.listRegisteredSchemaIdentities) {
-        throw createWeaverError(
-          "UNSUPPORTED_OPERATION",
-          "Schema identity listing is unsupported by this transport",
-        );
-      }
-      return registeredSchemaIdentityListResponseSchema.parse(
-        await runtime.transport.listRegisteredSchemaIdentities(),
-      );
-    },
-    async getRegisteredSchema(anchorPath, environment) {
-      const request = registeredSchemaDetailRequestSchema.parse({
-        anchorPath,
-        environment,
-      });
-      if (!runtime.transport.getRegisteredSchema) {
-        throw createWeaverError(
-          "UNSUPPORTED_OPERATION",
-          "Schema detail lookup is unsupported by this transport",
-        );
-      }
-      return registeredSchemaDetailResponseSchema.parse(
-        await runtime.transport.getRegisteredSchema(
-          request.anchorPath,
-          request.environment,
-        ),
-      );
     },
   };
 }

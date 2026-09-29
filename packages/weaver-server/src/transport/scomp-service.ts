@@ -11,6 +11,8 @@ import {
   registeredSchemaDetailRequestSchema,
   registeredSchemaDetailResponseSchema,
   registeredSchemaIdentityListResponseSchema,
+  registeredSchemaIdentityPageRequestSchema,
+  registeredSchemaIdentityPageResponseSchema,
   registeredSchemasResponseSchema,
   schemaRegistrationResponseSchema,
 } from "@weaver-conf/config-types";
@@ -166,6 +168,7 @@ function schemaHandlers(
   | "fetchSchemas"
   | "registerSchema"
   | "listRegisteredSchemaIdentities"
+  | "listRegisteredSchemaIdentityPage"
   | "getRegisteredSchema"
 > {
   const { schemaRegistry } = deps;
@@ -178,6 +181,13 @@ function schemaHandlers(
     async listRegisteredSchemaIdentities(_input) {
       return registeredSchemaIdentityListResponseSchema.parse(
         schemaRegistry.listRegisteredSchemaIdentities(),
+      );
+    },
+    async listRegisteredSchemaIdentityPage(input) {
+      return registeredSchemaIdentityPageResponseSchema.parse(
+        schemaRegistry.listRegisteredSchemaIdentityPage(
+          registeredSchemaIdentityPageRequestSchema.parse(input),
+        ),
       );
     },
     async getRegisteredSchema(input) {

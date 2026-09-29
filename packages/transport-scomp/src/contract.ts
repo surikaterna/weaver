@@ -11,6 +11,8 @@ export {
   registeredSchemaDetailRequestSchema,
   registeredSchemaDetailResponseSchema,
   registeredSchemaIdentityListResponseSchema,
+  registeredSchemaIdentityPageRequestSchema,
+  registeredSchemaIdentityPageResponseSchema,
   registeredSchemaIdentitySchema,
   registeredSchemaSlotIdentitySchema,
   registeredSchemasResponseSchema,
@@ -32,6 +34,8 @@ import type {
   RegisteredSchemaDetailRequest,
   RegisteredSchemaDetailResponse,
   RegisteredSchemaIdentityListResponse,
+  RegisteredSchemaIdentityPageRequest,
+  RegisteredSchemaIdentityPageResponse,
   SchemaRegistrationRequest,
   SchemaRegistrationResponse,
   ScopeDefinition,
@@ -130,6 +134,9 @@ export interface WeaverConfigContract {
   listRegisteredSchemaIdentities(
     input: EmptyInput,
   ): Promise<RegisteredSchemaIdentityListResponse>;
+  listRegisteredSchemaIdentityPage(
+    input: RegisteredSchemaIdentityPageRequest,
+  ): Promise<RegisteredSchemaIdentityPageResponse>;
   getRegisteredSchema(
     input: RegisteredSchemaDetailRequest,
   ): Promise<RegisteredSchemaDetailResponse>;

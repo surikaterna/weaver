@@ -18,6 +18,9 @@ describe("registered schema browsing", () => {
   it("requires explicit capability and does not confuse empty listing with unsupported", async () => {
     const unsupported = await createWeaverClient({ transport: transport() });
     await expect(
+      unsupported.listRegisteredSchemaIdentityPage(),
+    ).rejects.toMatchObject({ code: "UNSUPPORTED_OPERATION" });
+    await expect(
       unsupported.listRegisteredSchemaIdentities(),
     ).rejects.toMatchObject({ code: "UNSUPPORTED_OPERATION" });
     await expect(
@@ -54,6 +57,29 @@ describe("registered schema browsing", () => {
       "NOT_FOUND",
     );
     expect({ lists, details }).toEqual({ lists: 2, details: 1 });
+    await client.close();
+  });
+
+  it("validates page requests and every transport fulfillment", async () => {
+    const client = await createWeaverClient({
+      transport: {
+        ...transport(),
+        async listRegisteredSchemaIdentityPage(input) {
+          if (input?.limit === 1)
+            return { anchors: [], slots: [], nextCursor: null, hasMore: false };
+          return { anchors: [], slots: [], nextCursor: null, hasMore: true };
+        },
+      },
+    });
+    expect(await client.listRegisteredSchemaIdentityPage({ limit: 1 })).toEqual(
+      { anchors: [], slots: [], nextCursor: null, hasMore: false },
+    );
+    await expect(
+      client.listRegisteredSchemaIdentityPage({ limit: 0 }),
+    ).rejects.toBeInstanceOf(ZodError);
+    await expect(
+      client.listRegisteredSchemaIdentityPage(),
+    ).rejects.toBeInstanceOf(ZodError);
     await client.close();
   });
 

@@ -1055,6 +1055,10 @@ function createCountingRegistry(calls: RouteCalls): SchemaRegistry {
       calls.browseLists += 1;
       return { anchors: [], slots: [] };
     },
+    listRegisteredSchemaIdentityPage: () => {
+      calls.browseLists += 1;
+      return { anchors: [], slots: [], nextCursor: null, hasMore: false };
+    },
     getRegisteredSchema: () => {
       calls.browseDetails += 1;
       return null;

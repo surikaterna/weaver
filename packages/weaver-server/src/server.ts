@@ -3,6 +3,7 @@ import type {
   ConfigurationStorageProvider,
   WeaverConfig,
 } from "@weaver-conf/config-types";
+import { z } from "zod";
 import type { AuditService } from "./audit/audit-service";
 import type { AuthMiddleware } from "./auth/auth-middleware";
 import { createAuthMiddleware } from "./auth/auth-middleware";
@@ -47,6 +48,7 @@ export interface WeaverServerOptions {
   corsOrigins?: string[];
   providers?: ConfigurationStorageProvider[];
   auditService?: AuditService;
+  schemaIdentityMaxPageSize?: number;
 }
 export interface WeaverServer {
   readonly port: number;
@@ -57,7 +59,18 @@ export interface WeaverServer {
 
 function resolveOptions(options?: WeaverServerOptions) {
   const env = parseServerEnv(process.env);
+  const schemaIdentityMaxPageSize = z
+    .number()
+    .int()
+    .min(50)
+    .max(Number.MAX_SAFE_INTEGER)
+    .parse(
+      options?.schemaIdentityMaxPageSize ??
+        env.WEAVER_SCHEMA_IDENTITY_MAX_PAGE_SIZE ??
+        200,
+    );
   return {
+    schemaIdentityMaxPageSize,
     port: options?.port ?? env.WEAVER_PORT ?? 3399,
     repoUrl: options?.repoUrl ?? env.WEAVER_CONFIG_REPO ?? "",
     environment:
@@ -171,6 +184,7 @@ async function createConfiguredRestAdapter(
     schemaRegistry: await createPersistentSchemaRegistry({
       configService,
       environment: config.environment,
+      schemaIdentityMaxPageSize: config.schemaIdentityMaxPageSize,
     }),
     ...(config.corsOrigins ? { corsOrigins: config.corsOrigins } : {}),
     ...(authGate ? { authGate } : {}),
