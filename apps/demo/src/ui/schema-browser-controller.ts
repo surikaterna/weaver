@@ -169,6 +169,20 @@ export class SchemaBrowserController {
     void this.loadDetail(selection);
   }
 
+  private staleDetail(): void {
+    this.generation++;
+    const state = this.state;
+    state.page = undefined;
+    state.selected = undefined;
+    state.detail = undefined;
+    state.cursor = undefined;
+    state.history = [];
+    state.historyTruncated = false;
+    state.error = "stale";
+    state.status = "Schema page is stale (409). Restart from the first page.";
+    this.emit();
+  }
+
   private async loadDetail(selection?: Selection): Promise<void> {
     const state = this.state;
     if (!state.open || (selection && !onPage(state, selection))) return;
@@ -203,6 +217,13 @@ export class SchemaBrowserController {
       this.emit();
     } catch (error) {
       if (request !== this.generation || !state.open) return;
+      if (
+        error instanceof WeaverErrorInstance &&
+        error.code === "REVISION_CONFLICT"
+      ) {
+        this.staleDetail();
+        return;
+      }
       state.error = "retry";
       state.status = schemaBrowseError(error);
       this.emit();

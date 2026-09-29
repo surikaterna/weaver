@@ -297,3 +297,105 @@ test("Back history remains bounded after more than ten pages", async () => {
   assert.equal(browser.state.page?.anchors[0]?.path, "/service/500");
   await client.close();
 });
+
+test("typed detail 409 from service or fragment invalidates identity and restarts first page", async () => {
+  for (const kind of ["service", "fragment"] as const) {
+    const base = createDemoTransport();
+    let pages = 0;
+    const client = await createWeaverClient({
+      transport: {
+        ...base,
+        async listRegisteredSchemaIdentityPage(input) {
+          pages++;
+          assert.deepEqual(input, { limit: 50 });
+          return base.listRegisteredSchemaIdentityPage(input);
+        },
+        async getRegisteredSchema() {
+          throw createWeaverError("REVISION_CONFLICT", "stale");
+        },
+      },
+    });
+    const browser = new SchemaBrowserController(client, () => {});
+    browser.open();
+    await tick();
+    browser.setFragments(true);
+    if (kind === "service") {
+      browser.state.cursor = "old-cursor";
+      browser.state.history.push(undefined);
+      browser.state.historyTruncated = true;
+    }
+    browser.select({
+      kind,
+      path: kind === "service" ? "/app" : "/app/plugins/demo.notifications",
+      environment: "default",
+    });
+    await tick();
+    assert.equal(browser.state.error, "stale");
+    assert.match(browser.state.status, /Restart/);
+    assert.equal(browser.state.page, undefined);
+    assert.equal(browser.state.selected, undefined);
+    assert.equal(browser.state.detail, undefined);
+    assert.equal(browser.state.cursor, undefined);
+    assert.deepEqual(browser.state.history, []);
+    assert.equal(browser.state.historyTruncated, false);
+    browser.retry();
+    assert.equal(pages, 1);
+    browser.restart();
+    await tick();
+    assert.equal(pages, 2);
+    assert.equal(browser.state.page?.anchors.length, 2);
+    assert.equal(browser.state.error, null);
+    await client.close();
+  }
+});
+
+test("detail 409 ignores earlier detail response; nonstale detail errors retain page for Retry", async () => {
+  const base = createDemoTransport();
+  const slow = deferred<Awaited<ReturnType<typeof base.getRegisteredSchema>>>();
+  let calls = 0;
+  const client = await createWeaverClient({
+    transport: {
+      ...base,
+      async getRegisteredSchema(path, environment) {
+        calls++;
+        if (calls === 1) return slow.promise;
+        if (calls === 2) throw createWeaverError("REVISION_CONFLICT", "stale");
+        if (calls === 3) throw createWeaverError("UNAUTHORIZED", "denied");
+        return base.getRegisteredSchema(path, environment);
+      },
+    },
+  });
+  const browser = new SchemaBrowserController(client, () => {});
+  browser.open();
+  await tick();
+  const service = {
+    kind: "service" as const,
+    path: "/app",
+    environment: "default",
+  };
+  browser.select(service);
+  browser.select({
+    kind: "fragment",
+    path: "/app/plugins/demo.notifications",
+    environment: "default",
+  });
+  await tick();
+  slow.resolve(await base.getRegisteredSchema("/app", "default"));
+  await tick();
+  assert.equal(browser.state.error, "stale");
+  assert.equal(browser.state.page, undefined);
+  assert.equal(browser.state.detail, undefined);
+  browser.restart();
+  await tick();
+  browser.select(service);
+  await tick();
+  assert.equal(browser.state.error, "retry");
+  assert.match(browser.state.status, /401/);
+  assert.equal(browser.state.page?.anchors.length, 2);
+  assert.deepEqual(browser.state.selected, service);
+  browser.retry();
+  await tick();
+  assert.equal(browser.state.detail?.path, "/app");
+  assert.equal(browser.state.error, null);
+  await client.close();
+});
