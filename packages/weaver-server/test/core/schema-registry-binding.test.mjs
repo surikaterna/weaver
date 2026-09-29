@@ -84,6 +84,47 @@ describe("config service registry authority", () => {
     await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(/already has/);
     expect(write).not.toHaveBeenCalled();
     expect(await original.getSchema("svc", "dev")).toEqual(registration().schema);
+    expect(await original.resolveAnchor("/svc")).not.toBeNull();
+    expect(await original.resolveAnchor("/svc")).toEqual(
+      await original.resolveAnchor("/svc", "dev"),
+    );
+    expect(await original.resolveAnchor("/svc", "other")).toBeNull();
+    const revision = configService.revision;
+    const identities = original.listRegisteredSchemaIdentities();
+    expect(() => createSchemaRegistry({ configService })).toThrow(/already has/);
+    expect(original.listRegisteredSchemaIdentities()).toEqual(identities);
+    expect(write).not.toHaveBeenCalled();
+    expect(configService.revision).toBe(revision);
+  });
+
+  test("keeps isolated schema-only fixture lookup semantics without promoting authority", async () => {
+    const registry = createSchemaRegistry({ configService: {} });
+    expect((await registry.register(registration())).success).toBe(true);
+    expect(await registry.resolveAnchor("/svc")).toBeNull();
+    expect(await registry.resolveAnchor("/svc", "dev")).not.toBeNull();
+  });
+
+  test("public protected writes remain denied after persistent binding and registration", async () => {
+    const { provider, write } = providerWithEntries();
+    const remove = vi.spyOn(provider, "remove");
+    const configService = await service(provider);
+    const registry = await createPersistentSchemaRegistry({ configService });
+    expect((await registry.register(registration())).success).toBe(true);
+    const persisted = await provider.load();
+    const revision = configService.revision;
+    for (const operation of [
+      () => configService.set("platform", "_weaver.registry.schemas", {}),
+      () => configService.remove("platform", "_weaver.registry.schemas"),
+      () => configService.setMany("platform", { "_weaver.registry.schemas": {} }),
+    ]) {
+      expect((await operation()).success).toBe(false);
+    }
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(remove).not.toHaveBeenCalled();
+    expect(await provider.load()).toEqual(persisted);
+    expect(configService.revision).toBe(revision);
+    expect(await configService.get("_weaver.registry.schemas")).toBeUndefined();
+    expect(await registry.getSchema("svc", "dev")).toEqual(registration().schema);
   });
 
   test("legacy caller-provided registered-write registry cannot replace the bound authority", async () => {

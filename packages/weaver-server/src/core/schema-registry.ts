@@ -24,6 +24,7 @@ import {
   beginRegistryBinding,
   bindInMemoryRegistry,
   finishRegistryBinding,
+  inMemoryRegistryEnvironment,
   readPersistentRegistry,
   serviceRegistryEnvironment,
   writeInternalConfig,
@@ -172,6 +173,9 @@ export function createSchemaRegistry(
     state,
     _options.schemaIdentityMaxPageSize ?? 200,
   );
+  const defaultEnvironment = inMemoryRegistryEnvironment(
+    _options.configService,
+  );
   const registry: SchemaRegistry = {
     async register(request, context) {
       const evaluation = evaluateRegistration(state, request, context);
@@ -200,7 +204,7 @@ export function createSchemaRegistry(
       return findRegisteredAnchor(
         state.schemas.values(),
         path,
-        environment ?? "",
+        environment ?? defaultEnvironment,
       );
     },
 

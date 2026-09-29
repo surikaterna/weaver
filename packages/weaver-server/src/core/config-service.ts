@@ -11,7 +11,11 @@ import type {
   WriteResult,
 } from "@weaver-conf/config-types";
 import type { ConfigDelta, ConfigSnapshot } from "../types/index";
-import { registerInternalConfigAccess } from "./config-service-internal";
+import {
+  createRegistryAccess,
+  hasScopedLayerIo,
+  registerInternalConfigAccess,
+} from "./config-service-internal";
 import { createRegisteredWriteOperations } from "./config-service-schema-writes";
 import type {
   EffectiveValidationContext,
@@ -48,24 +52,6 @@ const internalWriteToken: unique symbol = Symbol("weaver.internalWrite");
 type InternalWriteContext = WriteContext & {
   readonly [internalWriteToken]?: true;
 };
-interface ScopedLayerProvider {
-  loadLayer(layer: string): Promise<{ entries: Record<string, unknown> }>;
-  writeLayer(layer: string, key: string, value: unknown): Promise<WriteResult>;
-  removeLayer(layer: string, key: string): Promise<WriteResult>;
-}
-
-function hasScopedLayerIo(
-  provider: ConfigurationStorageProvider,
-): provider is ConfigurationStorageProvider & ScopedLayerProvider {
-  return (
-    typeof (provider as Partial<ScopedLayerProvider>).loadLayer ===
-      "function" &&
-    typeof (provider as Partial<ScopedLayerProvider>).writeLayer ===
-      "function" &&
-    typeof (provider as Partial<ScopedLayerProvider>).removeLayer === "function"
-  );
-}
-
 function computeRevision(state: Record<string, unknown>): string {
   const content = JSON.stringify(state);
   let hash = 0;
@@ -273,18 +259,6 @@ export async function createWeaverConfigService(
       base: getBaseEntries(),
       scopes: getAllScopes(),
     };
-  }
-
-  function registryRoot(entries: Record<string, unknown>): unknown {
-    const internal = entries._weaver;
-    if (
-      internal !== undefined &&
-      (internal === null ||
-        typeof internal !== "object" ||
-        Array.isArray(internal))
-    )
-      throw new Error("Persisted internal config root is invalid");
-    return deepGet(entries, "_weaver.registry");
   }
 
   function updateRevision(): void {
@@ -664,35 +638,14 @@ export async function createWeaverConfigService(
   };
 
   registerInternalConfigAccess(service, {
-    environment,
-    hasPersistedRegistry: () => {
-      if (
-        providers.length === 0 ||
-        inputProviders.some(
-          (provider) =>
-            provider.layer === "platform" &&
-            degradedProviders.includes(provider.id),
-        )
-      )
-        throw new Error("Schema registry provider is unavailable");
-      return providers.some(
-        (provider) =>
-          registryRoot(layerData.get(provider.id) ?? {}) !== undefined,
-      );
-    },
-    readRegistry: async (layer, key) => {
-      const provider = resolveProvider(layer);
-      if (!provider)
-        throw new Error(
-          `Schema registry provider for layer "${layer}" is unavailable`,
-        );
-      const entries = layerData.get(provider.id) ?? {};
-      const root = registryRoot(entries);
-      const value = deepGet(entries, key);
-      if (value === undefined && root !== undefined)
-        throw new Error("Persisted schema registry is incomplete");
-      return value;
-    },
+    ...createRegistryAccess({
+      environment,
+      configuredProviders: inputProviders,
+      providers,
+      degradedProviders,
+      layerData,
+      resolveProvider,
+    }),
     read: async (key) => deepGet(getMergedState(), key),
     write: (layer, key, value, opts) =>
       service.set(layer, key, value, withInternalWrite(opts)),

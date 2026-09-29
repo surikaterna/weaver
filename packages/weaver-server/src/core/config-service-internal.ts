@@ -1,4 +1,8 @@
-import type { WriteResult } from "@weaver-conf/config-types";
+import { deepGet } from "@weaver-conf/config-engine";
+import type {
+  ConfigurationStorageProvider,
+  WriteResult,
+} from "@weaver-conf/config-types";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
 
 interface InternalConfigAccess {
@@ -17,6 +21,94 @@ interface InternalConfigAccess {
     key: string,
     options?: WriteContext,
   ) => Promise<WriteResult>;
+}
+
+interface RegistryProviderAccess {
+  readonly environment: string;
+  readonly configuredProviders: readonly ConfigurationStorageProvider[];
+  readonly providers: readonly ConfigurationStorageProvider[];
+  readonly degradedProviders: readonly string[];
+  readonly layerData: ReadonlyMap<string, Record<string, unknown>>;
+  readonly resolveProvider: (
+    layer: string,
+  ) => ConfigurationStorageProvider | undefined;
+}
+
+interface ScopedLayerProvider {
+  loadLayer(layer: string): Promise<{ entries: Record<string, unknown> }>;
+  writeLayer(layer: string, key: string, value: unknown): Promise<WriteResult>;
+  removeLayer(layer: string, key: string): Promise<WriteResult>;
+}
+
+export function hasScopedLayerIo(
+  provider: ConfigurationStorageProvider,
+): provider is ConfigurationStorageProvider & ScopedLayerProvider {
+  return (
+    typeof (provider as Partial<ScopedLayerProvider>).loadLayer ===
+      "function" &&
+    typeof (provider as Partial<ScopedLayerProvider>).writeLayer ===
+      "function" &&
+    typeof (provider as Partial<ScopedLayerProvider>).removeLayer === "function"
+  );
+}
+
+function registryRoot(entries: Record<string, unknown>): unknown {
+  const internal = entries._weaver;
+  if (
+    internal !== undefined &&
+    (internal === null ||
+      typeof internal !== "object" ||
+      Array.isArray(internal))
+  )
+    throw new Error("Persisted internal config root is invalid");
+  return deepGet(entries, "_weaver.registry");
+}
+
+export function createRegistryAccess(
+  options: RegistryProviderAccess,
+): Pick<
+  InternalConfigAccess,
+  "environment" | "hasPersistedRegistry" | "readRegistry"
+> {
+  const {
+    configuredProviders,
+    providers,
+    degradedProviders,
+    layerData,
+    resolveProvider,
+  } = options;
+  const entriesFor = (provider: ConfigurationStorageProvider) =>
+    layerData.get(provider.id) ?? {};
+  return {
+    environment: options.environment,
+    hasPersistedRegistry: () => {
+      if (
+        providers.length === 0 ||
+        configuredProviders.some(
+          (provider) =>
+            provider.layer === "platform" &&
+            degradedProviders.includes(provider.id),
+        )
+      )
+        throw new Error("Schema registry provider is unavailable");
+      return providers.some(
+        (provider) => registryRoot(entriesFor(provider)) !== undefined,
+      );
+    },
+    readRegistry: async (layer, key) => {
+      const provider = resolveProvider(layer);
+      if (!provider)
+        throw new Error(
+          `Schema registry provider for layer "${layer}" is unavailable`,
+        );
+      const entries = entriesFor(provider);
+      const root = registryRoot(entries);
+      const value = deepGet(entries, key);
+      if (value === undefined && root !== undefined)
+        throw new Error("Persisted schema registry is incomplete");
+      return value;
+    },
+  };
 }
 
 export async function readInternalConfig(
@@ -42,6 +134,12 @@ export function serviceRegistryEnvironment(
   if (!access)
     throw new Error("Schema registry requires a real config service");
   return access.environment;
+}
+
+export function inMemoryRegistryEnvironment(
+  service: WeaverConfigService,
+): string {
+  return internalConfigAccess.get(service)?.environment ?? "";
 }
 
 export function beginRegistryBinding(service: WeaverConfigService): () => void {
