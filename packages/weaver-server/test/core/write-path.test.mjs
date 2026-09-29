@@ -23,13 +23,20 @@ function createTestProvider(id, layer, entries, writable = true) {
 }
 
 describe("WeaverConfigService write path", () => {
-  test("legacy unregistered write succeeds before the schema-required cutover", async () => {
+  test("legacy unregistered write is rejected without effects", async () => {
     const provider = createTestProvider("p1", "platform", {});
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+    await registerTestService(svc, "app", "dev", { key: { type: "string" } });
+    const revision = svc.revision;
+    let deltas = 0;
+    svc.onDelta(() => deltas++);
 
     const result = await svc.set("platform", "legacy", "permissive");
-    expect(result.success).toBe(true);
-    expect(await svc.get("legacy")).toBe("permissive");
+    expect(result.error?.code).toBe("SCHEMA_NOT_REGISTERED");
+    expect((await provider.load()).entries).toEqual({});
+    expect(svc.revision).toBe(revision);
+    expect(deltas).toBe(0);
+    expect(await svc.get("legacy")).toBeUndefined();
   });
 
   test("declared patterns and schema-valued dynamic members have explicit witnesses", async () => {

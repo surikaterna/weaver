@@ -183,7 +183,7 @@ describe("createWeaverScompService", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(result.error.code).toBe("SCHEMA_NOT_REGISTERED");
     expect(provider.writeCalls).toBe(0);
   });
 
@@ -240,15 +240,39 @@ describe("createWeaverScompService", () => {
     expect(get).toEqual({ value: "hello" });
   });
 
-  test("legacy unregistered SCOMP set stays successful before the policy flip", async () => {
+  test("legacy unregistered SCOMP set is denied without effects", async () => {
     const provider = createTestProvider("p1", "platform", {});
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
     const service = createWeaverScompService(buildScompDeps(svc));
+    const revision = svc.revision;
     const result = await service.router[route("set")].handler({
       key: "legacy.value", value: "old-policy", layer: "platform",
     });
-    expect(result.success).toBe(true);
-    expect(await svc.get("legacy.value")).toBe("old-policy");
+    expect(result.error?.code).toBe("SCHEMA_NOT_REGISTERED");
+    expect((await provider.load()).entries.legacy).toBeUndefined();
+    expect(svc.revision).toBe(revision);
+    expect(await svc.get("legacy.value")).toBeUndefined();
+  });
+
+  test("SCOMP remove and mixed batches retain typed structural denials without writes", async () => {
+    const provider = createTestProvider("p1", "platform", { app: { name: "old" } });
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+    const deps = buildScompDeps(svc);
+    await registerTestSchema(deps.schemaRegistry, "app", "dev", { name: { type: "string" } });
+    const service = createWeaverScompService(deps);
+    const revision = svc.revision;
+    for (const entries of [
+      { "app.name": "next", "app.missing": "bad" },
+      { "app.missing": "bad", "app.name": "next" },
+    ]) {
+      const batch = await service.router[route("setMany")].handler({ entries, layer: "platform" });
+      expect(batch.error?.code).toBe("SCHEMA_NOT_REGISTERED");
+    }
+    const removal = await service.router[route("remove")].handler({ key: "app.missing", layer: "platform" });
+    expect(removal.error?.code).toBe("SCHEMA_NOT_REGISTERED");
+    expect(provider.writeCalls).toBe(0);
+    expect(svc.revision).toBe(revision);
+    expect((await provider.load()).entries.app).toEqual({ name: "old" });
   });
 
   test("remove handler deletes key", async () => {
@@ -294,15 +318,17 @@ describe("createWeaverScompService", () => {
   test("subscribe handler yields deltas", async () => {
     const provider = createTestProvider("p1", "platform", {});
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-    const service = createWeaverScompService(buildScompDeps(svc));
+    const deps = buildScompDeps(svc);
+    await registerTestSchema(deps.schemaRegistry, "events", "dev", { key1: { type: "string" } });
+    const service = createWeaverScompService(deps);
     const feed = service.router[route("subscribe")].handler({});
 
-    setTimeout(() => svc.set("platform", "key1", "val1"), 10);
+    setTimeout(() => svc.set("platform", "events.key1", "val1"), 10);
 
     const iterator = feed[Symbol.asyncIterator]();
     const first = await iterator.next();
     expect(first.done).toBe(false);
-    expect(first.value.key).toBe("key1");
+    expect(first.value.key).toBe("events.key1");
     expect(first.value.value).toBe("val1");
     await iterator.return();
   });
@@ -321,6 +347,14 @@ describe("createWeaverScompService", () => {
       environment: "dev",
     });
     const registry = await createPersistentSchemaRegistry({ configService: svc });
+    const marker = {
+      type: "object", properties: { _weaver: { type: "string" }, source: { type: "string" } },
+      additionalProperties: false,
+    };
+    await registerTestSchema(registry, "live", "dev", {
+      direct: marker, nested: { type: "object", properties: { leak: marker }, additionalProperties: false },
+      chained: marker, alias: marker,
+    });
     const service = createWeaverScompService(buildScompDeps(svc, "dev", registry));
 
     const snapshot = await service.router[route("resolveAll")].handler({});
@@ -339,10 +373,10 @@ describe("createWeaverScompService", () => {
     const feed = service.router[route("subscribe")].handler({});
     const iterator = feed[Symbol.asyncIterator]();
     for (const [key, value] of [
-      ["liveDirect", mount("_weaver.registry.schemas")],
-      ["liveNested", { leak: mount("_weaver.registry.schemas") }],
-      ["liveChained", mount("liveDirect")],
-      ["liveAlias", mount("[_weaver].registry.schemas")],
+      ["live.direct", mount("_weaver.registry.schemas")],
+      ["live.nested", { leak: mount("_weaver.registry.schemas") }],
+      ["live.chained", mount("live.direct")],
+      ["live.alias", mount("[_weaver].registry.schemas")],
     ]) {
       const next = iterator.next();
       await Promise.resolve();

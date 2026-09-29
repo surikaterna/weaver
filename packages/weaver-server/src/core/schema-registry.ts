@@ -24,10 +24,12 @@ import {
   beginRegistryBinding,
   bindInMemoryRegistry,
   finishRegistryBinding,
+  INTERNAL_SCHEMA_REGISTRY_KEY,
   inMemoryRegistryEnvironment,
   readPersistentRegistry,
+  serializeConfigMutation,
   serviceRegistryEnvironment,
-  writeInternalConfig,
+  writeRegistryInternalConfig,
 } from "./config-service-internal";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
 import {
@@ -120,7 +122,7 @@ export interface SchemaRegistry {
 export type { SchemaRegistrationAuditMetadata };
 
 const defaultPersistenceLayer = "platform";
-const defaultPersistenceKey = "_weaver.registry.schemas";
+const defaultPersistenceKey = INTERNAL_SCHEMA_REGISTRY_KEY;
 
 function createSchemaPersistenceWriter(
   options: PersistentSchemaRegistryOptions,
@@ -145,7 +147,7 @@ function persistenceWriter(
       environment,
       ...(actor ? { actor } : {}),
     };
-    const writeResult = await writeInternalConfig(
+    const writeResult = await writeRegistryInternalConfig(
       options.configService,
       layer,
       key,
@@ -178,22 +180,25 @@ export function createSchemaRegistry(
   );
   const registry: SchemaRegistry = {
     async register(request, context) {
-      const evaluation = evaluateRegistration(state, request, context);
-      if (!evaluation.result.success) return evaluation.result;
-      const candidate = cloneState(state);
-      applyEvaluation(candidate, evaluation);
-      const index = buildIdentityIndex(candidate);
-      pages.assertCanPublish();
-      applyEvaluation(state, evaluation);
-      pages.publish(index);
-      return evaluation.result;
+      return serializeConfigMutation(_options.configService, async () => {
+        const evaluation = evaluateRegistration(state, request, context);
+        if (!evaluation.result.success) return evaluation.result;
+        const candidate = cloneState(state);
+        applyEvaluation(candidate, evaluation);
+        const index = buildIdentityIndex(candidate);
+        pages.assertCanPublish();
+        applyEvaluation(state, evaluation);
+        pages.publish(index);
+        return evaluation.result;
+      });
     },
 
     async getSchema(serviceId, environment) {
       try {
         const { servicePath } = deriveServicePath(serviceId);
-        return (
-          state.schemas.get(schemaKey(servicePath, environment))?.schema ?? null
+        return structuredClone(
+          state.schemas.get(schemaKey(servicePath, environment))?.schema ??
+            null,
         );
       } catch {
         return null;
@@ -209,7 +214,7 @@ export function createSchemaRegistry(
     },
 
     listAll() {
-      return listSchemas(state);
+      return structuredClone(listSchemas(state));
     },
     listRegisteredSchemaIdentities() {
       return listSchemaIdentities(state);
@@ -235,7 +240,9 @@ function getRegisteredServiceSchema(
 ): ObjectConfigurationPropertySchema | null {
   try {
     const { servicePath } = deriveServicePath(serviceId);
-    return schemas.get(schemaKey(servicePath, environment))?.schema ?? null;
+    return structuredClone(
+      schemas.get(schemaKey(servicePath, environment))?.schema ?? null,
+    );
   } catch {
     return null;
   }
@@ -244,9 +251,16 @@ function getRegisteredServiceSchema(
 export async function createPersistentSchemaRegistry(
   options: PersistentSchemaRegistryOptions,
 ): Promise<SchemaRegistry> {
+  const key = options.key === undefined ? defaultPersistenceKey : options.key;
+  if (key !== defaultPersistenceKey) {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Persistent schema registry key must be the canonical internal key",
+    );
+  }
   const cancelBinding = beginRegistryBinding(options.configService);
   try {
-    return await hydratePersistentRegistry(options);
+    return await hydratePersistentRegistry(options, key);
   } finally {
     cancelBinding();
   }
@@ -254,9 +268,9 @@ export async function createPersistentSchemaRegistry(
 
 async function hydratePersistentRegistry(
   options: PersistentSchemaRegistryOptions,
+  key: string,
 ): Promise<SchemaRegistry> {
   const layer = options.layer ?? defaultPersistenceLayer;
-  const key = options.key ?? defaultPersistenceKey;
   const defaultEnvironment = serviceRegistryEnvironment(options.configService);
   const state = parsePersistedRegistry(
     await readPersistentRegistry(options.configService, layer, key),
@@ -272,24 +286,26 @@ async function hydratePersistentRegistry(
     request: SchemaRegistrationRequest,
     context?: SchemaRegistrationContext,
   ): Promise<SchemaRegistrationResult> {
-    const work = pending.then(async () => {
-      const environment = request.environment || defaultEnvironment || "";
-      const evaluation = evaluateRegistration(
-        state,
-        { ...request, environment },
-        context,
-      );
-      if (!evaluation.result.success) return evaluation.result;
-      const candidate = cloneState(state);
-      applyEvaluation(candidate, evaluation);
-      const index = buildIdentityIndex(candidate);
-      pages.assertCanPublish();
-      const failure = await persist(candidate, environment, context);
-      if (failure) return failure;
-      applyEvaluation(state, evaluation);
-      pages.publish(index);
-      return evaluation.result;
-    });
+    const work = pending.then(() =>
+      serializeConfigMutation(options.configService, async () => {
+        const environment = request.environment || defaultEnvironment || "";
+        const evaluation = evaluateRegistration(
+          state,
+          { ...request, environment },
+          context,
+        );
+        if (!evaluation.result.success) return evaluation.result;
+        const candidate = cloneState(state);
+        applyEvaluation(candidate, evaluation);
+        const index = buildIdentityIndex(candidate);
+        pages.assertCanPublish();
+        const failure = await persist(candidate, environment, context);
+        if (failure) return failure;
+        applyEvaluation(state, evaluation);
+        pages.publish(index);
+        return evaluation.result;
+      }),
+    );
     pending = work.then(
       () => undefined,
       () => undefined,
@@ -313,7 +329,7 @@ async function hydratePersistentRegistry(
     },
 
     listAll() {
-      return listSchemas(state);
+      return structuredClone(listSchemas(state));
     },
     listRegisteredSchemaIdentities() {
       return listSchemaIdentities(state);
@@ -356,9 +372,9 @@ function registeredAnchorFromEntry(entry: SchemaEntry): RegisteredSchemaAnchor {
   return {
     kind: entry.kind,
     path: entry.path,
-    schema: entry.schema,
+    schema: structuredClone(entry.schema),
     environment: entry.environment,
-    metadata: entry.metadata,
+    metadata: structuredClone(entry.metadata),
   };
 }
 

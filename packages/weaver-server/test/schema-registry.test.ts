@@ -72,6 +72,7 @@ function compositionSchema(): ConfigurationPropertySchema {
       properties: {
         kind: { type: "string", const: "text" },
         value: { type: "string" },
+        nested: { type: "string" },
       },
       additionalProperties: true,
     },
@@ -80,6 +81,7 @@ function compositionSchema(): ConfigurationPropertySchema {
       properties: {
         kind: { type: "string", const: "count" },
         value: { type: "number" },
+        nested: { type: "string" },
       },
       additionalProperties: true,
     },

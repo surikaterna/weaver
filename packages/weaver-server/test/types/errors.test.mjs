@@ -5,6 +5,7 @@ import {
   weaverErrorCodes,
   HTTP_STATUS_MAP,
 } from "../../src/types/errors.ts";
+import { writeFailureResponse } from "../../src/transport/rest-route-boundary.ts";
 
 test("createWeaverError returns correct structure", () => {
   const err = createWeaverError("NOT_FOUND", "key missing", { key: "foo" });
@@ -47,4 +48,19 @@ test("httpStatusForError returns correct status for each code", () => {
     expect(status).toBe(HTTP_STATUS_MAP[code]);
     expect(typeof status).toBe("number");
   }
+});
+
+test("write errors preserve authorized schema denial and array codes without changing other unsupported statuses", () => {
+  const service = { revision: "rev-test" };
+  for (const [code, status] of [
+    ["SCHEMA_NOT_REGISTERED", 400], ["VALIDATION_ERROR", 400],
+    ["UNSUPPORTED_OPERATION", 400], ["REVISION_CONFLICT", 409],
+    ["INTERNAL_ERROR", 500],
+  ]) {
+    const response = writeFailureResponse(service, { success: false, error: { code, message: "denied" } }, "fallback");
+    expect(response.status).toBe(status);
+    expect(weaverErrorSchema.parse(response.body.error).code).toBe(code);
+  }
+  expect(httpStatusForError("UNSUPPORTED_OPERATION")).toBe(501);
+  expect(writeFailureResponse(service, { success: false, error: { code: "PROVIDER_UNRECOGNIZED", message: "unknown" } }, "fallback").body.error.code).toBe("VALIDATION_ERROR");
 });

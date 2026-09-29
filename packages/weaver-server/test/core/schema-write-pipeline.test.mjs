@@ -26,11 +26,11 @@ async function providerEntries(provider) {
   return (await provider.load()).entries;
 }
 
-function schemaFailure(path, anchorPath, error) {
+function schemaFailure(path, anchorPath, error, code = "VALIDATION_ERROR") {
   return {
     success: false,
     error: {
-      code: "VALIDATION_ERROR",
+      code,
       message: "Configuration does not match registered schema",
       details: { path, anchorPath, environment: "test", errors: [error] },
     },
@@ -188,6 +188,7 @@ const fragmentSchema = {
 const extensibleServiceSchema = {
   type: "object",
   additionalProperties: true,
+  properties: { other: { type: "boolean" } },
 };
 
 describe("schema-registered config writes", () => {
@@ -286,12 +287,7 @@ describe("schema-registered config writes", () => {
     let notifications = 0;
     const unsubscribe = service.onDelta(() => notifications++);
 
-    const result = await patchRegistered(
-      service,
-      registry,
-      "/billing/value",
-      1,
-    );
+    const result = await patchRegistered(service, registry, "/billing/value", 1);
 
     expect(result.error.details.errors[0]).toMatchObject({
       code: "invalid-value",
@@ -433,17 +429,15 @@ describe("schema-registered config writes", () => {
     let notifications = 0;
     const unsubscribe = service.onDelta(() => notifications++);
 
-    const result = await patchRegistered(
-      service,
-      registry,
-      "/billing/value",
-      1,
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/value", 1, { schemaRegistry: registry }, "test",
+      async () => (await provider.load()).entries.billing,
     );
     const fresh = validatePartialConfiguration(schema, { value: 1 }, {
       path: ["billing"],
     });
 
-    expect(result.error.details.errors).toEqual(fresh.errors);
+    expect(result.result.error.details.errors).toEqual(fresh.errors);
     expect(provider.writes).toEqual([]);
     expect(notifications).toBe(0);
     expect(service.revision).toBe(initialRevision);
@@ -714,24 +708,21 @@ describe("schema-registered config writes", () => {
       "/billing/groups/0/name",
       "first",
     );
-    expect(appended).toEqual({ success: true });
-    expect(provider.writes[0]).toEqual({
-      key: "billing",
-      value: { value: 1, groups: [{ name: "first" }] },
-    });
+    expect(appended.error?.code).toBe("VALIDATION_ERROR");
+    expect(provider.writes).toEqual([]);
   });
 
   test("object writes at registered service anchors validate partial compatibility", async () => {
     const { provider, registry, service } = await makeRegisteredService();
 
-    const partial = await setRegistered(service, registry, "/billing", { limit: 10 });
+    const partial = await setRegistered(service, registry, "/billing", { mode: "test", limit: 10 });
     const acceptedEntries = await providerEntries(provider);
     const acceptedRevision = service.revision;
     const invalid = await setRegistered(service, registry, "/billing", { mode: "qa" });
 
     expect(partial).toEqual({ success: true });
     expect(provider.writes).toEqual([
-      { key: "billing", value: { limit: 10 } },
+      { key: "billing", value: { mode: "test", limit: 10 } },
     ]);
     expect(invalid).toEqual(
       schemaFailure("/billing", "/billing", {
@@ -746,10 +737,16 @@ describe("schema-registered config writes", () => {
   });
 
   test("object writes at registered fragment anchors validate partial compatibility", async () => {
-    const provider = createTestProvider("p1", "platform", {});
+    const provider = createTestProvider("p1", "platform", { billing: { mode: "test" } });
     const service = await createWeaverConfigService({ providers: [provider], environment: "test" });
     const registry = createSchemaRegistry({ configService: service });
-    await registry.register(serviceRegistration(serviceSchema, [{ slotPath: "/plugins", accepts: "object" }]));
+    await registry.register(serviceRegistration({
+      ...serviceSchema,
+      properties: {
+        ...serviceSchema.properties,
+        plugins: { type: "object", properties: { tax: fragmentSchema }, additionalProperties: false },
+      },
+    }, [{ slotPath: "/plugins", accepts: "object" }]));
     await registry.register({
       serviceId: "billing",
       providerId: "tax",
@@ -805,7 +802,7 @@ describe("schema-registered config writes", () => {
     expect(await service.get("billing.limit")).toBe(5);
   });
 
-  test("prototype-colliding properties persist under open registered schemas", async () => {
+  test("prototype-colliding properties persist under schema-valued dynamic keys", async () => {
     const openProvider = createTestProvider("open", "platform", { service: {} });
     const openService = await createWeaverConfigService({
       providers: [openProvider],
@@ -814,7 +811,7 @@ describe("schema-registered config writes", () => {
     const openRegistry = createSchemaRegistry({ configService: openService });
     await openRegistry.register(
       serviceRegistration(
-        { type: "object", properties: {}, additionalProperties: true },
+        { type: "object", properties: {}, additionalProperties: { type: "string" } },
         [],
         "service",
       ),
@@ -870,7 +867,7 @@ describe("schema-registered config writes", () => {
         path: "$.closed.toString",
         segments: ["closed", "toString"],
         message: 'Unknown property "toString" is not allowed',
-      }),
+      }, "SCHEMA_NOT_REGISTERED"),
     );
     await expectNoEffects(
       closedProvider,
@@ -911,7 +908,7 @@ describe("schema-registered config writes", () => {
         path: "$.billing.unknown",
         segments: ["billing", "unknown"],
         message: 'Unknown property "unknown" is not allowed',
-      }),
+      }, "SCHEMA_NOT_REGISTERED"),
     );
     expect(invalidEnum.error?.code).toBe("VALIDATION_ERROR");
     expect(invalidNested.error?.code).toBe("VALIDATION_ERROR");
@@ -1015,7 +1012,7 @@ describe("schema-registered config writes", () => {
     );
     expect(unregistered).toEqual(
       writeFailure(
-        "VALIDATION_ERROR",
+        "SCHEMA_NOT_REGISTERED",
         'No registered schema anchor for path "/unknown" in environment "test"',
         { path: "/unknown", environment: "test" },
       ),
@@ -1079,7 +1076,7 @@ describe("schema-registered config writes", () => {
     await expectNoEffects(provider, service, initialEntries, initialRevision);
   });
 
-  test("separate writes prepare fresh sessions after schema mutation", async () => {
+  test("separate writes cannot use a mutated registry detail as write authority", async () => {
     const member = { type: "string" };
     const schema = {
       type: "object",
@@ -1093,35 +1090,25 @@ describe("schema-registered config writes", () => {
       providers: [provider],
       environment: "test",
     });
-    const anchor = {
-      kind: "service",
-      path: "/billing",
-      schema,
-      environment: "test",
-      metadata: {},
-    };
-    const registry = { resolveAnchor: async () => anchor };
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration(schema));
 
     expect(
       await patchRegistered(service, registry, "/billing/value", "first"),
     ).toEqual({ success: true });
-    member.type = "number";
-    const rejected = await patchRegistered(
+    registry.getRegisteredSchema("/billing", "test").schema.properties.value.type = "number";
+    const accepted = await patchRegistered(
       service,
       registry,
       "/billing/value",
       "second",
     );
 
-    expect(rejected.error.details.errors[0]).toMatchObject({
-      code: "invalid-type",
-      path: "$.billing.value",
-      expected: "number",
-    });
+    expect(accepted).toEqual({ success: true });
     expect(await providerEntries(provider)).toEqual({
-      billing: { value: "first" },
+      billing: { value: "second" },
     });
-    expect(provider.writes).toHaveLength(1);
+    expect(provider.writes).toHaveLength(2);
   });
 
   test("patches reject a resulting anchor object that violates schema bounds", async () => {
@@ -1516,14 +1503,8 @@ describe("schema-registered config writes", () => {
       providers: [provider],
       environment: "test",
     });
-    const anchor = {
-      kind: "service",
-      path: "/billing",
-      schema,
-      environment: "test",
-      metadata: {},
-    };
-    const registry = { resolveAnchor: async () => anchor };
+    const registry = createSchemaRegistry({ configService: service });
+    await registry.register(serviceRegistration(schema));
     const initialRevision = service.revision;
     let notifications = 0;
     const unsubscribe = service.onDelta(() => notifications++);

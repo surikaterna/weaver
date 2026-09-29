@@ -4,6 +4,37 @@ import type {
   WriteResult,
 } from "@weaver-conf/config-types";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
+import type { SchemaRegistry } from "./schema-registry";
+
+export const INTERNAL_SCHEMA_REGISTRY_KEY = "_weaver.registry.schemas";
+
+function requireRegistryKey(key: string): void {
+  if (key !== INTERNAL_SCHEMA_REGISTRY_KEY) {
+    throw new Error(
+      "Persistent schema registry key must be the canonical internal key",
+    );
+  }
+}
+
+function permittedInternalKey(key: string): boolean {
+  return (
+    key === INTERNAL_SCHEMA_REGISTRY_KEY ||
+    key === "_weaver.pinned" ||
+    (key.startsWith("_weaver.scope.") &&
+      key.length > "_weaver.scope.".length) ||
+    (key.startsWith("_weaver.pinned.") && key.length > "_weaver.pinned.".length)
+  );
+}
+
+function restrictedInternalKeyResult(): WriteResult {
+  return {
+    success: false,
+    error: {
+      code: "VALIDATION_ERROR",
+      message: "Internal writes require an approved protected config key",
+    },
+  };
+}
 
 interface InternalConfigAccess {
   readonly environment: string;
@@ -96,6 +127,7 @@ export function createRegistryAccess(
       );
     },
     readRegistry: async (layer, key) => {
+      requireRegistryKey(key);
       const provider = resolveProvider(layer);
       if (!provider)
         throw new Error(
@@ -124,8 +156,31 @@ const internalConfigAccess = new WeakMap<
   WeaverConfigService,
   InternalConfigAccess
 >();
-const registryBindings = new WeakMap<WeaverConfigService, object>();
+const registryBindings = new WeakMap<WeaverConfigService, SchemaRegistry>();
 const pendingBindings = new WeakSet<WeaverConfigService>();
+const mutations = new WeakMap<WeaverConfigService, Promise<unknown>>();
+
+export function boundSchemaRegistry(
+  service: WeaverConfigService,
+): SchemaRegistry | undefined {
+  return registryBindings.get(service);
+}
+
+export function serializeConfigMutation<T>(
+  service: WeaverConfigService,
+  task: () => Promise<T>,
+): Promise<T> {
+  const pending = mutations.get(service) ?? Promise.resolve();
+  const work = pending.then(task);
+  mutations.set(
+    service,
+    work.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return work;
+}
 
 export function serviceRegistryEnvironment(
   service: WeaverConfigService,
@@ -155,7 +210,7 @@ export function beginRegistryBinding(service: WeaverConfigService): () => void {
 
 export function finishRegistryBinding(
   service: WeaverConfigService,
-  registry: object,
+  registry: SchemaRegistry,
 ): void {
   if (!pendingBindings.has(service))
     throw new Error("Schema registry binding was not reserved");
@@ -165,7 +220,7 @@ export function finishRegistryBinding(
 
 export function bindInMemoryRegistry(
   service: WeaverConfigService,
-  registry: object,
+  registry: SchemaRegistry,
 ): void {
   // Isolated schema-only fixtures have no internal access and do not bind authority.
   const access = internalConfigAccess.get(service);
@@ -188,10 +243,22 @@ export async function readPersistentRegistry(
   layer: string,
   key: string,
 ): Promise<unknown> {
+  requireRegistryKey(key);
   const access = internalConfigAccess.get(service);
   if (!access)
     throw new Error("Schema registry requires a real config service");
   return access.readRegistry(layer, key);
+}
+
+export async function writeRegistryInternalConfig(
+  configService: WeaverConfigService,
+  layer: string,
+  key: string,
+  value: unknown,
+  options?: WriteContext,
+): Promise<WriteResult> {
+  requireRegistryKey(key);
+  return writeInternalConfig(configService, layer, key, value, options);
 }
 
 export function registerInternalConfigAccess(
@@ -208,6 +275,7 @@ export async function writeInternalConfig(
   value: unknown,
   options?: WriteContext,
 ): Promise<WriteResult> {
+  if (!permittedInternalKey(key)) return restrictedInternalKeyResult();
   const access = internalConfigAccess.get(configService);
   if (!access) return missingInternalAccessResult();
   return access.write(layer, key, value, options);
@@ -219,6 +287,7 @@ export async function removeInternalConfig(
   key: string,
   options?: WriteContext,
 ): Promise<WriteResult> {
+  if (!permittedInternalKey(key)) return restrictedInternalKeyResult();
   const access = internalConfigAccess.get(configService);
   if (!access) return missingInternalAccessResult();
   return access.remove(layer, key, options);

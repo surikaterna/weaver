@@ -30,7 +30,7 @@ async function setup(opts = {}) {
   });
   await registerTestSchema(registry, "new", "dev", { key: { type: "integer" } });
   const adapter = createRestAdapter({ configService: svc, schemaRegistry: registry, ...opts });
-  return { svc, adapter };
+  return { svc, adapter, provider, registry };
 }
 
 function req(overrides = {}) {
@@ -104,14 +104,52 @@ describe("RestAdapter v1", () => {
     expect(res.body.data.success).toBe(true);
   });
 
-  test("legacy unregistered PUT remains permissive until the strict cutover", async () => {
-    const { adapter, svc } = await setup();
+  test("legacy unregistered PUT returns a typed denial without effects", async () => {
+    const { adapter, svc, provider } = await setup();
+    const revision = svc.revision;
     const res = await adapter.handleRequest("PUT", "/v1/config/legacy/value", req({
       body: { value: "old-policy" },
     }));
-    expect(res.status).toBe(200);
-    expect(res.body.data.success).toBe(true);
-    expect(await svc.get("legacy.value")).toBe("old-policy");
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("SCHEMA_NOT_REGISTERED");
+    expect(svc.revision).toBe(revision);
+    expect((await provider.load()).entries.legacy).toBeUndefined();
+    expect(await svc.get("legacy.value")).toBeUndefined();
+  });
+
+  test("an unavailable server-bound registry is a 5xx write denial, not a missing declaration", async () => {
+    const provider = createTestProvider("p1", "platform", { legacy: { value: "readable" } });
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+    const adapter = createRestAdapter({ configService: svc });
+    const revision = svc.revision;
+    const res = await adapter.handleRequest("PUT", "/v1/config/legacy/value", req({
+      body: { value: "blocked" },
+    }));
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe("INTERNAL_ERROR");
+    expect((await provider.load()).entries.legacy).toEqual({ value: "readable" });
+    expect(svc.revision).toBe(revision);
+    expect(await svc.get("legacy.value")).toBe("readable");
+  });
+
+  test("authorized generic array-index PUT, DELETE and mixed PATCH remain typed 400 with no effects", async () => {
+    const { adapter, svc, provider, registry } = await setup();
+    await registerTestSchema(registry, "arrays", "dev", { items: { type: "array", items: { type: "string" } } });
+    expect((await svc.set("platform", "arrays", { items: ["old"] })).success).toBe(true);
+    const revision = svc.revision;
+    const persisted = (await provider.load()).entries;
+    const cases = [
+      ["PUT", "/v1/config/arrays/items/0", { body: { value: "bad" } }],
+      ["DELETE", "/v1/config/arrays/items/0", {}],
+      ["PATCH", "/v1/config", { body: { entries: { "app.name": "new", "arrays.items[0]": "bad" } } }],
+    ];
+    for (const [method, path, input] of cases) {
+      const res = await adapter.handleRequest(method, path, req(input));
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("UNSUPPORTED_OPERATION");
+      expect(svc.revision).toBe(revision);
+      expect((await provider.load()).entries).toEqual(persisted);
+    }
   });
 
   test("PUT /v1/config/new/key defaults layer to platform", async () => {

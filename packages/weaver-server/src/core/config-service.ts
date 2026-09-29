@@ -1,66 +1,54 @@
-import {
-  consoleLogger,
-  deepGet,
-  deepMerge,
-  deepRemove,
-  deepSet,
-} from "@weaver-conf/config-engine";
+import { consoleLogger, deepGet } from "@weaver-conf/config-engine";
 import type {
   ConfigurationStorageProvider,
   ScopeInstance,
   WriteResult,
 } from "@weaver-conf/config-types";
 import type { ConfigDelta, ConfigSnapshot } from "../types/index";
+import { createConfigAdmission } from "./config-service-admission-context";
+import { createConfigBatch } from "./config-service-batch";
+import { createPublicDeltaEmitter } from "./config-service-deltas";
 import {
+  boundSchemaRegistry,
   createRegistryAccess,
   hasScopedLayerIo,
   registerInternalConfigAccess,
+  serializeConfigMutation,
 } from "./config-service-internal";
+import { createConfigServiceMutations } from "./config-service-mutations";
 import { createRegisteredWriteOperations } from "./config-service-schema-writes";
+import {
+  computeRevision,
+  createConfigStateReader,
+} from "./config-service-state";
 import type {
-  EffectiveValidationContext,
-  SchemaWriteContext,
   WeaverConfigService,
   WeaverConfigServiceOptions,
   WriteContext,
 } from "./config-service-types";
-import {
-  isProtectedConfigPath,
-  protectedConfigMutationError,
-} from "./protected-config-paths";
+import { isProtectedConfigPath } from "./protected-config-paths";
 import { publicConfigView } from "./public-config-inspection";
 import { createResolutionPipeline } from "./resolution-pipeline";
 import {
   buildScopePathString,
   isSameScopeLayer,
-  isScopedLayer,
   normalizeScopeLayer,
   parseScopeLayer,
 } from "./scope-utils";
 
-export type { Unsubscribe } from "./config-service-types";
 export type {
   EffectiveValidationContext,
   SchemaWriteContext,
+  Unsubscribe,
   WeaverConfigService,
   WeaverConfigServiceOptions,
   WriteContext,
-};
+} from "./config-service-types";
 
-const SIZE_WARNING = 1_048_576; // 1MB
 const internalWriteToken: unique symbol = Symbol("weaver.internalWrite");
 type InternalWriteContext = WriteContext & {
   readonly [internalWriteToken]?: true;
 };
-function computeRevision(state: Record<string, unknown>): string {
-  const content = JSON.stringify(state);
-  let hash = 0;
-  for (let i = 0; i < content.length; i++) {
-    hash = ((hash << 5) - hash + content.charCodeAt(i)) | 0;
-  }
-  return `rev-${(hash >>> 0).toString(36)}-${Date.now().toString(36)}`;
-}
-
 export async function createWeaverConfigService(
   options: WeaverConfigServiceOptions,
 ): Promise<WeaverConfigService> {
@@ -153,84 +141,25 @@ export async function createWeaverConfigService(
     return providers.find((provider) => provider.layer === parsed.scopeId);
   }
 
-  async function warmScopeLayers(scopePath?: ScopeInstance[]): Promise<void> {
-    if (!scopePath?.length) return;
+  const {
+    getBaseEntries,
+    getScopeState,
+    getAllScopes,
+    getMergedState,
+    warmScopeLayers,
+    getRevisionState,
+  } = createConfigStateReader(providers, layerData, dynamicScopeEntries);
 
-    for (const scope of scopePath) {
-      const normalizedScopeLayer = `${scope.scopeId}:${scope.value}`;
-
-      for (const provider of providers) {
-        if (!hasScopedLayerIo(provider)) continue;
-        if (provider.layer !== scope.scopeId) continue;
-        if (dynamicScopeEntries.has(normalizedScopeLayer)) continue;
-
-        const data = await provider.loadLayer(normalizedScopeLayer);
-        dynamicScopeEntries.set(normalizedScopeLayer, data.entries);
-      }
-    }
-  }
-
-  function getBaseEntries(): Record<string, unknown> {
-    let merged: Record<string, unknown> = {};
-    for (const provider of providers) {
-      if (isScopedLayer(provider.layer)) continue;
-      const entries = layerData.get(provider.id) ?? {};
-      merged = deepMerge(merged, entries);
-    }
-    return merged;
-  }
-
-  function getScopeState(scopePath: ScopeInstance[]): Record<string, unknown> {
-    let merged: Record<string, unknown> = {};
-    for (const scope of scopePath) {
-      const scopedLayer = `${scope.scopeId}:${scope.value}`;
-      for (const provider of providers) {
-        if (
-          provider.layer === scopedLayer ||
-          isSameScopeLayer(provider.layer, scopedLayer)
-        ) {
-          const entries = layerData.get(provider.id) ?? {};
-          merged = deepMerge(merged, entries);
-        }
-      }
-
-      const dynamicEntries = dynamicScopeEntries.get(scopedLayer);
-      if (dynamicEntries) {
-        merged = deepMerge(merged, dynamicEntries);
-      }
-    }
-    return merged;
-  }
-
-  function getAllScopes(): Record<string, Record<string, unknown>> {
-    const scopes: Record<string, Record<string, unknown>> = {};
-    for (const provider of providers) {
-      if (!isScopedLayer(provider.layer)) continue;
-      const entries = layerData.get(provider.id) ?? {};
-      scopes[provider.layer] = {
-        ...(scopes[provider.layer] ?? {}),
-        ...entries,
-      };
-    }
-
-    for (const [layer, entries] of dynamicScopeEntries) {
-      if (!isScopedLayer(layer)) continue;
-      const normalizedLayer = normalizeScopeLayer(layer);
-      scopes[normalizedLayer] = {
-        ...(scopes[normalizedLayer] ?? {}),
-        ...entries,
-      };
-    }
-
-    return scopes;
-  }
-
-  function getMergedState(
-    scopePath?: ScopeInstance[],
-  ): Record<string, unknown> {
-    const base = getBaseEntries();
-    return scopePath?.length ? deepMerge(base, getScopeState(scopePath)) : base;
-  }
+  const preflight = createConfigAdmission({
+    service: () => service,
+    environment,
+    providers,
+    layerData,
+    dynamicScopeEntries,
+    resolveProvider,
+    getLayerValue,
+    warmScopeLayers,
+  });
 
   async function getLayerValue(layer: string, key: string): Promise<unknown> {
     const provider = resolveProvider(layer);
@@ -254,13 +183,6 @@ export async function createWeaverConfigService(
     return deepGet(entries ?? {}, key);
   }
 
-  function getRevisionState(): Record<string, unknown> {
-    return {
-      base: getBaseEntries(),
-      scopes: getAllScopes(),
-    };
-  }
-
   function updateRevision(): void {
     revision = computeRevision(getRevisionState());
   }
@@ -273,15 +195,28 @@ export async function createWeaverConfigService(
     secretBackend: options.secretBackend,
   });
 
-  function fireDelta(delta: ConfigDelta): void {
-    const scope = parseScopeLayer(delta.layer);
-    const state = scope ? getMergedState([scope]) : getBaseEntries();
-    const publicDelta = publicConfigView.delta(delta, state);
-    if (!publicDelta) return;
-    for (const handler of deltaHandlers) {
-      handler(publicDelta);
-    }
-  }
+  const fireDelta = createPublicDeltaEmitter(
+    getMergedState,
+    getBaseEntries,
+    deltaHandlers,
+  );
+
+  const mutations = createConfigServiceMutations({
+    service: () => service,
+    environment,
+    logger,
+    layerData,
+    dynamicScopeEntries,
+    resolveProvider,
+    isInternalWrite,
+    checkRevision,
+    preflight,
+    pipeline,
+    getBaseEntries,
+    updateRevision,
+    fireDelta,
+    autoFlush,
+  });
 
   const service: WeaverConfigService = {
     get providers() {
@@ -379,192 +314,8 @@ export async function createWeaverConfigService(
       updateRevision();
     },
 
-    async set(
-      layer: string,
-      key: string,
-      value: unknown,
-      opts?: WriteContext,
-    ): Promise<WriteResult> {
-      if (!isInternalWrite(opts)) {
-        const protectedError = protectedConfigMutationError(key);
-        if (protectedError) return protectedError;
-      }
-
-      const revConflict = checkRevision(opts?.expectedRevision);
-      if (revConflict) return revConflict;
-
-      const provider = resolveProvider(layer);
-      if (!provider) {
-        return {
-          success: false,
-          error: {
-            code: "LAYER_NOT_FOUND",
-            message: `No provider for layer "${layer}"`,
-          },
-        };
-      }
-      if (!provider.writable) {
-        return {
-          success: false,
-          error: {
-            code: "READONLY",
-            message: `Provider for layer "${layer}" is read-only`,
-          },
-        };
-      }
-
-      const parsedLayer = parseScopeLayer(layer);
-      const isDynamicScopedLayer =
-        parsedLayer !== null && provider.layer === parsedLayer.scopeId;
-      const canonicalLayer = normalizeScopeLayer(layer);
-
-      if (typeof value === "string" && value.length > SIZE_WARNING) {
-        logger.warn(
-          `[weaver] Value for key "${key}" exceeds 1MB (${value.length} bytes)`,
-        );
-      }
-
-      let result: WriteResult;
-      if (isDynamicScopedLayer) {
-        if (hasScopedLayerIo(provider)) {
-          result = await provider.writeLayer(canonicalLayer, key, value);
-        } else {
-          return {
-            success: false,
-            error: {
-              code: "LAYER_NOT_FOUND",
-              message: `Provider for base scope layer "${provider.layer}" does not support scoped writes for "${layer}"`,
-            },
-          };
-        }
-      } else {
-        result = await provider.write(key, value);
-      }
-
-      if (!result.success) return result;
-
-      if (isDynamicScopedLayer) {
-        const entries = {
-          ...(dynamicScopeEntries.get(canonicalLayer) ?? {}),
-        };
-        deepSet(entries, key, value);
-        dynamicScopeEntries.set(canonicalLayer, entries);
-      } else {
-        const entries = layerData.get(provider.id) ?? {};
-        deepSet(entries, key, value);
-        layerData.set(provider.id, entries);
-      }
-      updateRevision();
-      pipeline.rebuildMountMap();
-      if (pipeline.hasSecretResolver) {
-        pipeline
-          .refreshSecrets(publicConfigView.entries(getBaseEntries()))
-          .catch((err) => logger.error("[config] secret refresh failed:", err));
-      }
-
-      const delta: ConfigDelta = {
-        action: "set",
-        key,
-        value,
-        layer,
-        environment: opts?.environment ?? environment,
-        timestamp: new Date().toISOString(),
-      };
-      if (!isInternalWrite(opts)) fireDelta(delta);
-
-      autoFlush();
-      return result;
-    },
-
-    async remove(
-      layer: string,
-      key: string,
-      opts?: WriteContext,
-    ): Promise<WriteResult> {
-      if (!isInternalWrite(opts)) {
-        const protectedError = protectedConfigMutationError(key);
-        if (protectedError) return protectedError;
-      }
-
-      const revConflict = checkRevision(opts?.expectedRevision);
-      if (revConflict) return revConflict;
-
-      const provider = resolveProvider(layer);
-      if (!provider) {
-        return {
-          success: false,
-          error: {
-            code: "LAYER_NOT_FOUND",
-            message: `No provider for layer "${layer}"`,
-          },
-        };
-      }
-      if (!provider.writable) {
-        return {
-          success: false,
-          error: {
-            code: "READONLY",
-            message: `Provider for layer "${layer}" is read-only`,
-          },
-        };
-      }
-
-      const parsedLayer = parseScopeLayer(layer);
-      const isDynamicScopedLayer =
-        parsedLayer !== null && provider.layer === parsedLayer.scopeId;
-      const canonicalLayer = normalizeScopeLayer(layer);
-
-      let result: WriteResult;
-      if (isDynamicScopedLayer) {
-        if (hasScopedLayerIo(provider)) {
-          result = await provider.removeLayer(canonicalLayer, key);
-        } else {
-          return {
-            success: false,
-            error: {
-              code: "LAYER_NOT_FOUND",
-              message: `Provider for base scope layer "${provider.layer}" does not support scoped removes for "${layer}"`,
-            },
-          };
-        }
-      } else {
-        result = await provider.remove(key);
-      }
-
-      if (!result.success) return result;
-
-      if (isDynamicScopedLayer) {
-        const entries = {
-          ...(dynamicScopeEntries.get(canonicalLayer) ?? {}),
-        };
-        deepRemove(entries, key);
-        dynamicScopeEntries.set(canonicalLayer, entries);
-      } else {
-        const entries = layerData.get(provider.id) ?? {};
-        deepRemove(entries, key);
-        layerData.set(provider.id, entries);
-      }
-      updateRevision();
-      pipeline.rebuildMountMap();
-      if (pipeline.hasSecretResolver) {
-        pipeline
-          .refreshSecrets(publicConfigView.entries(getBaseEntries()))
-          .catch((err) => logger.error("[config] secret refresh failed:", err));
-      }
-
-      const delta: ConfigDelta = {
-        action: "remove",
-        key,
-        value: null,
-        layer,
-        environment: opts?.environment ?? environment,
-        timestamp: new Date().toISOString(),
-      };
-      if (!isInternalWrite(opts)) fireDelta(delta);
-
-      autoFlush();
-      return result;
-    },
+    set: mutations.set,
+    remove: mutations.remove,
 
     onDelta(handler: (delta: ConfigDelta) => void) {
       deltaHandlers.add(handler);
@@ -605,33 +356,24 @@ export async function createWeaverConfigService(
       updateRevision();
     },
 
-    async setMany(
-      layer: string,
-      entries: Record<string, unknown>,
-      opts?: WriteContext,
-    ): Promise<WriteResult> {
-      if (!isInternalWrite(opts)) {
-        for (const key of Object.keys(entries)) {
-          const protectedError = protectedConfigMutationError(key);
-          if (protectedError) return protectedError;
-        }
-      }
-
-      return service.batch(async () => {
-        for (const [key, value] of Object.entries(entries)) {
-          const result = await service.set(layer, key, value, opts);
-          if (!result.success) return result;
-        }
-        return { success: true, revision };
-      });
-    },
+    setMany: createConfigBatch({
+      service: () => service,
+      isInternalWrite,
+      checkRevision,
+      resolveProvider,
+      preflight,
+      serialize: (task) => serializeConfigMutation(service, task),
+      revision: () => revision,
+      setValidated: mutations.setValidated,
+    }),
 
     ...createRegisteredWriteOperations({
       defaultEnvironment: environment,
       getLayerValue,
       get: (key, getOptions) => service.get(key, getOptions),
-      set: (layer, key, value, writeOptions) =>
-        service.set(layer, key, value, writeOptions),
+      setPrepared: mutations.setPrepared,
+      getRegistry: () => boundSchemaRegistry(service),
+      serialize: (task) => serializeConfigMutation(service, task),
       isInternalWrite,
       checkRevision,
     }),
