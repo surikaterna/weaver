@@ -8,7 +8,6 @@ import { renderEditor } from "./ui/editor";
 import { renderInspector } from "./ui/inspector";
 import { renderLayerStack } from "./ui/layer-stack";
 import { renderLocationSelector } from "./ui/location-selector";
-import { renderSchemaBrowser } from "./ui/schema-browser";
 import { renderSessionPanel } from "./ui/session-panel";
 
 function requireElement(id: string): HTMLElement {
@@ -41,7 +40,6 @@ async function main(): Promise<void> {
   renderEditor(requireElement("editor"), client, session, weaverConfig);
   renderSessionPanel(requireElement("session-panel"), session, client);
   renderActivityLog(requireElement("activity-log"));
-  renderSchemaBrowser(requireElement("schema-browser"), client);
 
   // Typed namespace showcase
   interface UiConfig {

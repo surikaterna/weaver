@@ -1,231 +1,214 @@
-import type {
-  RegisteredSchemaDetailResponse,
-  RegisteredSchemaIdentityPageResponse,
-} from "@weaver-conf/config-types";
-import { WeaverErrorInstance } from "@weaver-conf/config-types";
 import type { WeaverClient } from "@weaver-conf/weaver-client";
+import {
+  type BrowseState,
+  SchemaBrowserController,
+  type Selection,
+} from "./schema-browser-controller";
 
-type Selection = {
-  kind: "service" | "fragment" | "slot";
-  path: string;
-  environment: string;
-};
-
-type Panel = ReturnType<typeof createPanel>;
-type BrowseState = {
-  selections: Selection[];
-  request: number;
-  pageRequest: number;
-  nextCursor: string | null;
-};
-
-class SchemaIdentityMismatchError extends Error {}
-
-export function schemaBrowseError(error: unknown): string {
-  if (error instanceof SchemaIdentityMismatchError)
-    return "Malformed schema response or request.";
-  const text = error instanceof Error ? error.message : String(error);
-  if (error instanceof WeaverErrorInstance) {
-    if (error.code === "REVISION_CONFLICT")
-      return "Schema page is stale (409). Restart from the first page.";
-    if (error.code === "UNSUPPORTED_OPERATION")
-      return "Schema browsing unsupported by this transport.";
-    if (error.code === "NOT_FOUND")
-      return "Schema registration not found (404).";
-    if (error.code === "UNAUTHORIZED")
-      return "Schema browsing requires authentication (401).";
-    if (error.code === "FORBIDDEN")
-      return "Schema browsing access denied (403).";
-  }
-  if (/UNSUPPORTED_OPERATION|unsupported/i.test(text))
-    return "Schema browsing unsupported by this transport.";
-  if (/NOT_FOUND|\b404\b/i.test(text))
-    return "Schema registration not found (404).";
-  if (/\b401\b|unauthorized/i.test(text))
-    return "Schema browsing requires authentication (401).";
-  if (/\b403\b|forbidden/i.test(text))
-    return "Schema browsing access denied (403).";
-  if (/REVISION_CONFLICT|\b409\b/i.test(text))
-    return "Schema page is stale (409). Restart from the first page.";
-  if (
-    /ZodError|invalid_type|invalid_format|validation/i.test(text) ||
-    (error instanceof Error && error.name === "ZodError")
-  )
-    return "Malformed schema response or request.";
-  return `Schema request failed (network or transport): ${text}`;
+function element(tag: string, text?: string): HTMLElement {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  return node;
 }
 
-function optionFor(selection: Selection): HTMLOptionElement {
-  const option = document.createElement("option");
-  option.value = `${selection.kind}:${selection.path}:${selection.environment}`;
-  option.textContent = `${selection.kind}: ${selection.path} · ${selection.environment}`;
-  return option;
-}
-
-function visibleSelections(
-  list: RegisteredSchemaIdentityPageResponse,
-  includeFragments: boolean,
-): Selection[] {
+function visible(state: BrowseState): Selection[] {
+  if (!state.page) return [];
   return [
-    ...list.anchors.filter(
-      (item) => includeFragments || item.kind === "service",
+    ...state.page.anchors.filter(
+      (item) => state.includeFragments || item.kind === "service",
     ),
-    ...(includeFragments ? list.slots : []),
+    ...(state.includeFragments ? state.page.slots : []),
   ];
 }
 
+function createDisclosure(container: HTMLElement) {
+  const button = document.createElement("button");
+  button.textContent = "View schema";
+  button.type = "button";
+  button.setAttribute("aria-controls", "inspector-schema-content");
+  button.setAttribute("aria-expanded", "false");
+  const content = element("div");
+  content.id = "inspector-schema-content";
+  content.hidden = true;
+  const explanation = element(
+    "p",
+    "Registered service roots and fragment anchors are independent of the selected dotted config key. Choose an exact path and environment; no prefix is inferred. Slots are declarations without detail; fragments may be on other pages.",
+  );
+  const provenance = element(
+    "p",
+    "Offline seeded example (not server registrations); separate from local property policy.",
+  );
+  container.append(button, content);
+  return { button, content, explanation, provenance };
+}
+
+function createButtons() {
+  const back = document.createElement("button");
+  back.textContent = "Back";
+  const next = document.createElement("button");
+  next.textContent = "Next page";
+  const restart = document.createElement("button");
+  restart.textContent = "Restart first page";
+  const retry = document.createElement("button");
+  retry.textContent = "Retry";
+  return { back, next, restart, retry };
+}
+
 function createPanel(container: HTMLElement) {
-  const heading = document.createElement("h2");
-  heading.textContent = "Registered object schemas";
-  const provenance = document.createElement("p");
-  provenance.textContent = "offline seeded example (not server registrations)";
-  const label = document.createElement("label");
+  const { button, content, explanation, provenance } =
+    createDisclosure(container);
+  const toggleLabel = element("label");
   const toggle = document.createElement("input");
   toggle.type = "checkbox";
   toggle.setAttribute("aria-label", "Include fragments and declared slots");
-  label.append(toggle, " Include fragments and declared slots");
+  toggleLabel.append(toggle, " Include fragments and declared slots");
+  const selectLabel = element(
+    "label",
+    "Registered schema identity (current page) ",
+  );
   const selector = document.createElement("select");
   selector.setAttribute("aria-label", "Registered schema identity");
-  const next = document.createElement("button");
-  next.textContent = "Next page";
-  next.disabled = true;
-  const restart = document.createElement("button");
-  restart.textContent = "Restart first page";
-  const identity = document.createElement("p");
-  const status = document.createElement("p");
+  selectLabel.append(selector);
+  const { back, next, restart, retry } = createButtons();
+  const identity = element("p");
+  const status = element("p");
   status.setAttribute("role", "status");
-  const code = document.createElement("code");
-  const pre = document.createElement("pre");
+  status.setAttribute("aria-live", "polite");
+  const code = element("code");
+  const pre = element("pre");
   pre.append(code);
-  container.append(
-    heading,
+  content.append(
+    explanation,
     provenance,
-    label,
-    selector,
+    toggleLabel,
+    selectLabel,
+    back,
     next,
     restart,
+    retry,
     identity,
     status,
     pre,
   );
-  return { toggle, selector, next, restart, identity, status, code };
+  return {
+    button,
+    content,
+    toggle,
+    selector,
+    back,
+    next,
+    restart,
+    retry,
+    identity,
+    status,
+    code,
+  };
 }
 
-function clear(panel: Panel, state: BrowseState, message: string): void {
-  state.request++;
-  panel.code.textContent = "";
-  panel.status.textContent = message;
-}
+type Panel = ReturnType<typeof createPanel>;
 
-function populate(
-  panel: Panel,
-  state: BrowseState,
-  list: RegisteredSchemaIdentityPageResponse,
-): void {
-  state.selections = visibleSelections(list, panel.toggle.checked);
-  panel.selector.replaceChildren(
-    optionFor({ kind: "service", path: "Select an identity", environment: "" }),
-    ...state.selections.map(optionFor),
-  );
-  panel.selector.selectedIndex = 0;
-  panel.identity.textContent = "";
-  clear(
-    panel,
-    state,
-    state.selections.length
-      ? "Select an identity to load its schema."
-      : list.anchors.length + list.slots.length === 0 && !list.hasMore
-        ? "Supported registry is empty."
-        : "No identities match on this page. Try the next page or include fragments.",
-  );
-}
-
-async function select(
-  panel: Panel,
-  state: BrowseState,
-  client: WeaverClient,
-): Promise<void> {
-  const selected = state.selections[panel.selector.selectedIndex - 1];
-  panel.identity.textContent = selected
-    ? `${selected.kind}: ${selected.path} · environment: ${selected.environment}`
+function paint(panel: Panel, state: BrowseState, choices: Selection[]): void {
+  const {
+    button,
+    content,
+    toggle,
+    selector,
+    back,
+    next,
+    restart,
+    retry,
+    identity,
+    status,
+    code,
+  } = panel;
+  content.hidden = !state.open;
+  button.setAttribute("aria-expanded", String(state.open));
+  toggle.checked = state.includeFragments;
+  toggle.disabled = !!state.error && !state.page;
+  if (!state.selected) selector.selectedIndex = 0;
+  identity.textContent = state.selected
+    ? `${state.selected.kind}: ${state.selected.path} · environment: ${state.selected.environment}`
     : "";
-  clear(
-    panel,
-    state,
-    selected?.kind === "slot"
-      ? "Declared slot; fragments may be on another page. Select a fragment anchor to load its schema."
-      : selected
-        ? "Loading selected schema…"
-        : "Select an identity to load its schema.",
-  );
-  if (!selected || selected.kind === "slot") return;
-  const current = state.request;
-  try {
-    const detail: RegisteredSchemaDetailResponse =
-      await client.getRegisteredSchema(selected.path, selected.environment);
-    if (state.request !== current) return;
-    if (
-      detail.path !== selected.path ||
-      detail.environment !== selected.environment ||
-      detail.kind !== selected.kind
-    )
-      throw new SchemaIdentityMismatchError("Schema detail identity mismatch");
-    panel.code.textContent = JSON.stringify(detail.schema, null, 2);
-    panel.status.textContent = `Full ${detail.kind} schema · owner: ${detail.metadata.owner.name}`;
-  } catch (error) {
-    if (state.request !== current) return;
-    panel.code.textContent = "";
-    panel.status.textContent = schemaBrowseError(error);
+  status.textContent =
+    state.page &&
+    !choices.length &&
+    state.page.anchors.length + state.page.slots.length > 0
+      ? "No identities match on this page. Include fragments or try the next page."
+      : state.status;
+  if (state.historyTruncated && !state.error)
+    status.textContent +=
+      " Earlier pages dropped from Back history; close and reopen to start over.";
+  code.textContent = state.detail
+    ? JSON.stringify(state.detail.schema, null, 2)
+    : "";
+  back.hidden = !state.open || !!state.error || !state.history.length;
+  next.hidden = !state.open || !!state.error || !state.page?.hasMore;
+  restart.hidden = state.error !== "stale";
+  retry.hidden = state.error !== "retry";
+}
+
+function populate(panel: Panel, choices: Selection[]): void {
+  const { selector } = panel;
+  selector.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.textContent = "Select an identity";
+  placeholder.value = "";
+  selector.append(placeholder);
+  for (const choice of choices) {
+    const option = document.createElement("option");
+    option.value = `${choice.kind}:${choice.path}:${choice.environment}`;
+    option.textContent = `${choice.kind}: ${choice.path} · ${choice.environment}`;
+    selector.append(option);
   }
 }
 
 export function renderSchemaBrowser(
   container: HTMLElement,
   client: WeaverClient,
-): void {
+) {
   const panel = createPanel(container);
-  const state: BrowseState = {
-    selections: [],
-    request: 0,
-    pageRequest: 0,
-    nextCursor: null,
-  };
-  let list: RegisteredSchemaIdentityPageResponse | undefined;
-  async function load(cursor?: string): Promise<void> {
-    const current = ++state.pageRequest;
-    state.selections = [];
-    list = undefined;
-    panel.selector.replaceChildren();
-    panel.identity.textContent = "";
-    panel.next.disabled = true;
-    clear(panel, state, "Loading schema identities…");
-    try {
-      const result = await client.listRegisteredSchemaIdentityPage({
-        limit: 50,
-        ...(cursor ? { cursor } : {}),
-      });
-      if (current !== state.pageRequest) return;
-      state.nextCursor = result.nextCursor;
-      list = result;
-      populate(panel, state, result);
-      panel.next.disabled = !result.hasMore;
-    } catch (error) {
-      if (current !== state.pageRequest) return;
-      state.nextCursor = null;
-      clear(panel, state, schemaBrowseError(error));
+  const { button, content, toggle, selector, back, next, restart, retry } =
+    panel;
+  let choices: Selection[] = [];
+  let previousPage: BrowseState["page"];
+  let previousFilter = false;
+  const controller = new SchemaBrowserController(client, (state) => {
+    if (
+      state.page !== previousPage ||
+      state.includeFragments !== previousFilter
+    ) {
+      choices = visible(state);
+      populate(panel, choices);
+      previousPage = state.page;
+      previousFilter = state.includeFragments;
     }
-  }
-  panel.selector.addEventListener("change", () => {
-    void select(panel, state, client);
+    paint(panel, state, choices);
+    if (
+      state.error === "stale" &&
+      content.contains(document.activeElement) &&
+      document.activeElement !== restart
+    )
+      restart.focus();
   });
-  panel.toggle.addEventListener("change", () => {
-    if (list) populate(panel, state, list);
+  button.addEventListener("click", () => {
+    if (controller.state.open) {
+      controller.close();
+      button.focus();
+    } else controller.open();
   });
-  panel.next.addEventListener("click", () => {
-    if (state.nextCursor) void load(state.nextCursor);
+  toggle.addEventListener("change", () =>
+    controller.setFragments(toggle.checked),
+  );
+  selector.addEventListener("change", () =>
+    controller.select(choices[selector.selectedIndex - 1]),
+  );
+  next.addEventListener("click", () => controller.next());
+  back.addEventListener("click", () => controller.back());
+  restart.addEventListener("click", () => {
+    controller.restart();
+    button.focus();
   });
-  panel.restart.addEventListener("click", () => {
-    void load();
-  });
-  void load();
+  retry.addEventListener("click", () => controller.retry());
+  controller.reset();
+  return controller;
 }
