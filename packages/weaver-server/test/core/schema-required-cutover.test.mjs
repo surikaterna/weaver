@@ -316,4 +316,97 @@ describe("server-bound structural admission", () => {
     list["/billing:dev"].additionalProperties = true;
     await denial(harness, () => harness.service.set("platform", "billing.rogue", 1), "SCHEMA_NOT_REGISTERED");
   });
+
+  test("many sibling keys and deep canonical paths preflight without changing provider state", async () => {
+    const siblings = Object.fromEntries(Array.from({ length: 120 }, (_, index) => [`billing.map.k${index}`, "value"]));
+    const harness = await setup({ type: "object", properties: {
+      map: { type: "object", patternProperties: { "^k[0-9]+$": { type: "string" } }, additionalProperties: false },
+    }, additionalProperties: false });
+    await denial(harness, () => harness.service.setMany("platform", { ...siblings, "billing.map[k0]": "alias" }), "VALIDATION_ERROR");
+    expect((await harness.service.setMany("platform", siblings)).success).toBe(true);
+    expect(Object.keys((await harness.provider.load()).entries.billing.map)).toHaveLength(120);
+
+    const segments = Array.from({ length: 60 }, (_, index) => `p${index}`);
+    const deepSchema = segments.reduceRight((child, segment) => ({ type: "object", properties: { [segment]: child }, additionalProperties: false }), { type: "string" });
+    const deep = await setup(deepSchema);
+    const path = `billing.${segments.join(".")}`;
+    await denial(deep, () => deep.service.setMany("platform", { [path]: "ok", [`billing[${segments[0]}].${segments.slice(1).join(".")}`]: "alias" }), "VALIDATION_ERROR");
+    expect((await deep.service.setMany("platform", { [path]: "ok" })).success).toBe(true);
+    expect(await deep.service.get(path)).toBe("ok");
+  });
+
+  test("combined anyOf and oneOf candidates must satisfy their winning branch", async () => {
+    const text = { type: "object", properties: { kind: { type: "string", const: "text" }, value: { type: "string" } }, required: ["kind", "value"], additionalProperties: false };
+    const count = { type: "object", properties: { kind: { type: "string", const: "count" }, value: { type: "number" } }, required: ["kind", "value"], additionalProperties: false };
+    const harness = await setup({ type: "object", properties: { kind: { type: "string" }, value: { type: ["string", "number"] } }, anyOf: [text, count], oneOf: [text, count] });
+    for (const entries of [
+      { "billing.kind": "text", "billing.value": 3 },
+      { "billing.value": 3, "billing.kind": "text" },
+    ]) await denial(harness, () => harness.service.setMany("platform", entries), "SCHEMA_NOT_REGISTERED");
+    expect((await harness.service.setMany("platform", { "billing.kind": "count", "billing.value": 3 })).success).toBe(true);
+  });
+
+  test("open objects do not authorize undeclared batch members; arrays remain unsupported", async () => {
+    const harness = await setup(billing(true), { billing: { mode: "before", items: ["old"] } });
+    for (const entries of [
+      { "billing.mode": "next", "billing.rogue": "x" },
+      { "billing.rogue": "x", "billing.mode": "next" },
+    ]) await denial(harness, () => harness.service.setMany("platform", entries), "SCHEMA_NOT_REGISTERED");
+    for (const entries of [
+      { "billing.mode": "next", "billing.items[0]": "x" },
+      { "billing.items.0": "x", "billing.mode": "next" },
+    ]) await denial(harness, () => harness.service.setMany("platform", entries), "UNSUPPORTED_OPERATION");
+    const ambiguous = await setup({ type: "object", properties: {
+      value: { type: ["object", "array"], anyOf: [
+        { type: "array", items: { type: "string" } },
+        { type: "object", properties: { "0": { type: "string" } } },
+      ] },
+    } });
+    await denial(ambiguous, () => ambiguous.service.setMany("platform", { "billing.value.0": "x" }), "VALIDATION_ERROR");
+  });
+
+  test("scoped batch cannot use another tenant's required property to pass preflight", async () => {
+    const platform = createInMemoryStorageProvider({ id: "platform", layer: "platform", initialEntries: { billing: {} } });
+    const tenant = createInMemoryStorageProvider({ id: "tenant", layer: "tenant:other", initialEntries: { billing: { mode: "ok" } } });
+    const service = await createWeaverConfigService({ providers: [platform, tenant], environment: "dev" });
+    const registry = createSchemaRegistry({ configService: service });
+    expect((await registry.register({ serviceId: "billing", environment: "dev", owner, schema: { ...billing(false), required: ["mode"] }, fragmentSlots: [] })).success).toBe(true);
+    const revision = service.revision;
+    const result = await service.setMany("platform", { "billing.items": [], "billing.map": { "0": "ok" } }, { scopePath: [{ scopeId: "tenant", value: "other" }] });
+    expect(result.error?.code).toBe("VALIDATION_ERROR");
+    expect((await platform.load()).entries.billing).toEqual({});
+    expect(service.revision).toBe(revision);
+  });
+
+  test("root payloads and overlapping fragments enforce both parent and child constraints", async () => {
+    const fragment = { type: "object", properties: { enabled: { type: "boolean" } }, additionalProperties: false };
+    const parent = { type: "object", properties: {
+      mode: { type: "string" }, plugins: { type: "object", properties: { tax: fragment }, additionalProperties: false },
+    }, additionalProperties: false };
+    const harness = await setup(parent, { billing: { mode: "before" } });
+    expect((await harness.registry.register({ serviceId: "billing", environment: "dev", owner, schema: parent,
+      fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }] })).success).toBe(true);
+    expect((await harness.registry.register({ serviceId: "billing", providerId: "tax", slotPath: "/plugins",
+      environment: "dev", owner, schema: fragment })).success).toBe(true);
+    for (const entries of [
+      { billing: { mode: "next", plugins: { tax: { enabled: true, rogue: 1 } } } },
+      { "billing.mode": "next", "billing.plugins.tax": { enabled: true, rogue: 1 } },
+    ]) await denial(harness, () => harness.service.setMany("platform", entries), "SCHEMA_NOT_REGISTERED");
+    expect((await harness.service.setMany("platform", { billing: { mode: "next", plugins: { tax: { enabled: true } } } })).success).toBe(true);
+  });
+
+  test("in-process registration, single writes and batches observe serialized admission", async () => {
+    const harness = await setup(billing(false), { billing: { mode: "before" } });
+    const submitted = [
+      harness.service.setMany("platform", { "billing.mode": "batch" }),
+      harness.service.set("platform", "billing.mode", "single"),
+      harness.registry.register({ serviceId: "other", environment: "dev", owner, schema: { type: "object", properties: { mode: { type: "string" } }, additionalProperties: false }, fragmentSlots: [] }),
+    ];
+    const results = await Promise.all(submitted);
+    expect(results[0].success).toBe(true);
+    expect(results[1].success).toBe(true);
+    expect(results[2].success).toBe(true);
+    expect((await harness.provider.load()).entries.billing.mode).toBe("single");
+    expect((await harness.service.setMany("platform", { "other.mode": "registered" })).success).toBe(true);
+  });
 });
