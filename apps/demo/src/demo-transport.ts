@@ -12,6 +12,7 @@ import {
   seededSchemaIdentities,
 } from "./registered-schema-fixtures";
 import { ALL_KEYS, APP_SEED, CORE_SEED, SEED_SNAPSHOT } from "./seed-data";
+import { createSeededSchemaPages } from "./seeded-schema-pages";
 
 type Layer = "core" | "app" | "user";
 type Entries = Record<string, unknown>;
@@ -117,7 +118,10 @@ export function createDemoTransport(): LocalTransport &
   Required<
     Pick<
       WeaverTransport,
-      "fetchSchemas" | "listRegisteredSchemaIdentities" | "getRegisteredSchema"
+      | "fetchSchemas"
+      | "listRegisteredSchemaIdentities"
+      | "listRegisteredSchemaIdentityPage"
+      | "getRegisteredSchema"
     >
   > {
   const layers: Layers = {
@@ -127,6 +131,7 @@ export function createDemoTransport(): LocalTransport &
   };
   const snapshot = structuredClone(SEED_SNAPSHOT);
   const local = createLocalTransport({ snapshot });
+  const pages = createSeededSchemaPages(seededSchemaIdentities());
   return {
     ...local,
     ...writeMethods(layers, snapshot, local),
@@ -135,6 +140,9 @@ export function createDemoTransport(): LocalTransport &
     },
     async listRegisteredSchemaIdentities() {
       return seededSchemaIdentities();
+    },
+    async listRegisteredSchemaIdentityPage(input) {
+      return pages.page(input);
     },
     async getRegisteredSchema(anchorPath, environment) {
       return seededSchemaDetail(anchorPath, environment);
