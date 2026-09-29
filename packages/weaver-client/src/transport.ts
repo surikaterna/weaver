@@ -141,6 +141,11 @@ export interface WeaverTransport {
   // Schemas
   fetchSchemas?(): Promise<Record<string, ConfigurationPropertySchema>>;
   listRegisteredSchemaIdentities?(): Promise<RegisteredSchemaIdentityListResponse>;
+  listRegisteredSchemaIdentityPage?(
+    input?: import("@weaver-conf/config-types").RegisteredSchemaIdentityPageRequest,
+  ): Promise<
+    import("@weaver-conf/config-types").RegisteredSchemaIdentityPageResponse
+  >;
   getRegisteredSchema?(
     anchorPath: string,
     environment: string,

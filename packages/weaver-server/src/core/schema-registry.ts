@@ -8,6 +8,8 @@ import type {
   SchemaRegistrationRequest as PathSchemaRegistrationRequest,
   RegisteredSchemaDetailResponse,
   RegisteredSchemaIdentityListResponse,
+  RegisteredSchemaIdentityPageRequest,
+  RegisteredSchemaIdentityPageResponse,
   SchemaRegistrationAuditMetadata,
   SchemaRegistrationMetadata,
 } from "@weaver-conf/config-types";
@@ -23,6 +25,10 @@ import {
   writeInternalConfig,
 } from "./config-service-internal";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
+import {
+  buildIdentityIndex,
+  SchemaIdentityPages,
+} from "./schema-identity-pages";
 import {
   parsePersistedRegistry,
   serializeRegistry,
@@ -73,6 +79,7 @@ export const registeredSchemaAnchorSchema: z.ZodType<RegisteredSchemaAnchor> =
 
 export interface SchemaRegistryOptions {
   configService: WeaverConfigService;
+  schemaIdentityMaxPageSize?: number;
 }
 
 export interface PersistentSchemaRegistryOptions extends SchemaRegistryOptions {
@@ -96,6 +103,9 @@ export interface SchemaRegistry {
   ): Promise<RegisteredSchemaAnchor | null>;
   listAll(): Record<string, ConfigurationPropertySchema>;
   listRegisteredSchemaIdentities(): RegisteredSchemaIdentityListResponse;
+  listRegisteredSchemaIdentityPage(
+    input?: RegisteredSchemaIdentityPageRequest,
+  ): RegisteredSchemaIdentityPageResponse;
   getRegisteredSchema(
     path: string,
     environment: string,
@@ -154,10 +164,20 @@ export function createSchemaRegistry(
   _options: SchemaRegistryOptions,
 ): SchemaRegistry {
   const state = createEmptyState();
+  const pages = new SchemaIdentityPages(
+    state,
+    _options.schemaIdentityMaxPageSize ?? 200,
+  );
   return {
     async register(request, context) {
       const evaluation = evaluateRegistration(state, request, context);
+      if (!evaluation.result.success) return evaluation.result;
+      const candidate = cloneState(state);
+      applyEvaluation(candidate, evaluation);
+      const index = buildIdentityIndex(candidate);
+      pages.assertCanPublish();
       applyEvaluation(state, evaluation);
+      pages.publish(index);
       return evaluation.result;
     },
 
@@ -185,6 +205,9 @@ export function createSchemaRegistry(
     },
     listRegisteredSchemaIdentities() {
       return listSchemaIdentities(state);
+    },
+    listRegisteredSchemaIdentityPage(input) {
+      return pages.page(input);
     },
     getRegisteredSchema(path, environment) {
       const entry = state.schemas.get(schemaKey(path, environment));
@@ -218,25 +241,43 @@ export async function createPersistentSchemaRegistry(
     await readInternalConfig(options.configService, key),
   );
   const persist = createSchemaPersistenceWriter(options, layer, key);
+  const pages = new SchemaIdentityPages(
+    state,
+    options.schemaIdentityMaxPageSize ?? 200,
+  );
+  let pending: Promise<unknown> = Promise.resolve();
 
-  return {
-    async register(request, context) {
+  function registerSerialized(
+    request: SchemaRegistrationRequest,
+    context?: SchemaRegistrationContext,
+  ): Promise<SchemaRegistrationResult> {
+    const work = pending.then(async () => {
       const environment = request.environment || defaultEnvironment || "";
-      const normalizedRequest = { ...request, environment };
       const evaluation = evaluateRegistration(
         state,
-        normalizedRequest,
+        { ...request, environment },
         context,
       );
       if (!evaluation.result.success) return evaluation.result;
-
-      const updatedState = cloneState(state);
-      applyEvaluation(updatedState, evaluation);
-      const failure = await persist(updatedState, environment, context);
+      const candidate = cloneState(state);
+      applyEvaluation(candidate, evaluation);
+      const index = buildIdentityIndex(candidate);
+      pages.assertCanPublish();
+      const failure = await persist(candidate, environment, context);
       if (failure) return failure;
       applyEvaluation(state, evaluation);
+      pages.publish(index);
       return evaluation.result;
-    },
+    });
+    pending = work.then(
+      () => undefined,
+      () => undefined,
+    );
+    return work;
+  }
+
+  return {
+    register: registerSerialized,
 
     async getSchema(serviceId, environment) {
       return getRegisteredServiceSchema(state.schemas, serviceId, environment);
@@ -255,6 +296,9 @@ export async function createPersistentSchemaRegistry(
     },
     listRegisteredSchemaIdentities() {
       return listSchemaIdentities(state);
+    },
+    listRegisteredSchemaIdentityPage(input) {
+      return pages.page(input);
     },
     getRegisteredSchema(path, environment) {
       const entry = state.schemas.get(schemaKey(path, environment));

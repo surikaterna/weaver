@@ -80,6 +80,8 @@ export {
   registeredSchemaDetailRequestSchema,
   registeredSchemaDetailResponseSchema,
   registeredSchemaIdentityListResponseSchema,
+  registeredSchemaIdentityPageRequestSchema,
+  registeredSchemaIdentityPageResponseSchema,
   registeredSchemaIdentitySchema,
   registeredSchemaSlotIdentitySchema,
   registeredSchemasResponseSchema,

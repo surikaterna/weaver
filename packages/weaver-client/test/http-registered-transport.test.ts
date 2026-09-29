@@ -46,6 +46,17 @@ const registrationResponse = {
 
 const operations: readonly OperationCase[] = [
   {
+    name: "schema identity page",
+    kind: "read",
+    data: { anchors: [], slots: [], nextCursor: null, hasMore: false },
+    status: 200,
+    wrongStatus: 201,
+    run: (transport) =>
+      requireResult(
+        transport.listRegisteredSchemaIdentityPage?.({ limit: 50 }),
+      ),
+  },
+  {
     name: "schema identities",
     kind: "read",
     data: {

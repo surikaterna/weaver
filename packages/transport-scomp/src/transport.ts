@@ -7,6 +7,8 @@ import {
   type RegisteredEffectiveValidationResponse,
   type RegisteredSchemaDetailResponse,
   type RegisteredSchemaIdentityListResponse,
+  type RegisteredSchemaIdentityPageRequest,
+  type RegisteredSchemaIdentityPageResponse,
   registeredEffectiveValidationRequestSchema,
   registeredEffectiveValidationResponseSchema,
   registeredObjectWriteRequestSchema,
@@ -16,6 +18,8 @@ import {
   registeredSchemaDetailRequestSchema,
   registeredSchemaDetailResponseSchema,
   registeredSchemaIdentityListResponseSchema,
+  registeredSchemaIdentityPageRequestSchema,
+  registeredSchemaIdentityPageResponseSchema,
   registeredSchemasResponseSchema,
   type SchemaRegistrationRequest,
   type SchemaRegistrationResponse,
@@ -69,6 +73,9 @@ export interface WeaverTransport {
   ): Promise<string[]>;
   fetchSchemas?(): Promise<Record<string, ConfigurationPropertySchema>>;
   listRegisteredSchemaIdentities?(): Promise<RegisteredSchemaIdentityListResponse>;
+  listRegisteredSchemaIdentityPage?(
+    input?: RegisteredSchemaIdentityPageRequest,
+  ): Promise<RegisteredSchemaIdentityPageResponse>;
   getRegisteredSchema?(
     anchorPath: string,
     environment: string,
@@ -263,12 +270,21 @@ function schemaMethods(
   | "fetchSchemas"
   | "registerSchema"
   | "listRegisteredSchemaIdentities"
+  | "listRegisteredSchemaIdentityPage"
   | "getRegisteredSchema"
 > {
   return {
     async listRegisteredSchemaIdentities() {
       return registeredSchemaIdentityListResponseSchema.parse(
         await client.listRegisteredSchemaIdentities({}),
+      );
+    },
+    async listRegisteredSchemaIdentityPage(input) {
+      const request = registeredSchemaIdentityPageRequestSchema.parse(
+        input ?? {},
+      );
+      return registeredSchemaIdentityPageResponseSchema.parse(
+        await client.listRegisteredSchemaIdentityPage(request),
       );
     },
     async getRegisteredSchema(anchorPath, environment) {

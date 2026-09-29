@@ -2,6 +2,7 @@ import {
   fetchRegisteredSchemas,
   getRegisteredSchema,
   listRegisteredSchemaIdentities,
+  listRegisteredSchemaIdentityPage,
   patchRegisteredPath as patchRegisteredPathRequest,
   postSchemaRegistration,
   putRegisteredObject,
@@ -50,6 +51,7 @@ function registeredMethods(
   | "fetchSchemas"
   | "getRegisteredSchema"
   | "listRegisteredSchemaIdentities"
+  | "listRegisteredSchemaIdentityPage"
   | "registerSchema"
   | "setRegisteredObject"
   | "patchRegisteredPath"
@@ -61,6 +63,9 @@ function registeredMethods(
     },
     async listRegisteredSchemaIdentities() {
       return listRegisteredSchemaIdentities(context);
+    },
+    async listRegisteredSchemaIdentityPage(input) {
+      return listRegisteredSchemaIdentityPage(context, input);
     },
     async getRegisteredSchema(anchorPath, environment) {
       return getRegisteredSchema(context, anchorPath, environment);

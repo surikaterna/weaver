@@ -431,6 +431,56 @@ async function registerServiceForBrowse(
 }
 
 describe("Weaver server error handling", () => {
+  it("rejects invalid page maximum option before listener startup", async () => {
+    await expect(
+      startWeaverServer({ port: 0, schemaIdentityMaxPageSize: 49 }),
+    ).rejects.toThrow();
+    await expect(
+      startWeaverServer({
+        port: 0,
+        schemaIdentityMaxPageSize: Number.MAX_SAFE_INTEGER + 1,
+      }),
+    ).rejects.toThrow();
+  });
+  it("rejects an invalid supplied env even with a valid maximum option", async () => {
+    const previous = process.env.WEAVER_SCHEMA_IDENTITY_MAX_PAGE_SIZE;
+    process.env.WEAVER_SCHEMA_IDENTITY_MAX_PAGE_SIZE = "49";
+    try {
+      await expect(
+        startWeaverServer({ port: 0, schemaIdentityMaxPageSize: 250 }),
+      ).rejects.toThrow("Invalid server environment");
+    } finally {
+      if (previous === undefined)
+        delete process.env.WEAVER_SCHEMA_IDENTITY_MAX_PAGE_SIZE;
+      else process.env.WEAVER_SCHEMA_IDENTITY_MAX_PAGE_SIZE = previous;
+    }
+  });
+  it("shares the raised option maximum with the HTTP registry", async () => {
+    const server = await startWeaverServer({
+      port: 0,
+      schemaIdentityMaxPageSize: 250,
+    });
+    try {
+      expect(
+        (
+          await rawRequest(
+            server.port,
+            "/v1/admin/schemas/identities/pages?limit=250",
+          )
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await rawRequest(
+            server.port,
+            "/v1/admin/schemas/identities/pages?limit=251",
+          )
+        ).status,
+      ).toBe(400);
+    } finally {
+      await server.close();
+    }
+  });
   it("enforces schema browse target parsing, JWT and admin precedence on the wire", async () => {
     const secret = "browse-secret";
     const server = await startWeaverServer({
@@ -461,7 +511,51 @@ describe("Weaver server error handling", () => {
       const list = await rawRequest(server.port, `${base}/identities`, admin);
       expect(list.status).toBe(200);
       expect(JSON.parse(list.body).data).toEqual({ anchors: [], slots: [] });
+      const pages = `${base}/identities/pages`;
+      expect(
+        (await rawRequest(server.port, `${pages}?limit=0`, undefined)).status,
+      ).toBe(401);
+      expect(
+        (await rawRequest(server.port, `${pages}?limit=0`, reader)).status,
+      ).toBe(403);
+      for (const query of [
+        "limit=0",
+        "limit=201",
+        "limit=01",
+        "limit=1.5",
+        "extra=1",
+        "cursor=bad",
+        "limit=1&limit=2",
+      ]) {
+        expect(
+          (await rawRequest(server.port, `${pages}?${query}`, admin)).status,
+        ).toBe(400);
+      }
+      expect((await rawRequest(server.port, pages, admin)).status).toBe(200);
+      expect(
+        JSON.parse((await rawRequest(server.port, pages, admin)).body).data,
+      ).toEqual({ anchors: [], slots: [], nextCursor: null, hasMore: false });
       await assertRegisteredBrowse(server.port, base, admin);
+      const firstPage = await rawRequest(
+        server.port,
+        `${pages}?limit=1`,
+        admin,
+      );
+      expect(firstPage.status).toBe(200);
+      const cursor = JSON.parse(firstPage.body).data.nextCursor;
+      expect(cursor).toHaveLength(55);
+      expect(
+        (await rawRequest(server.port, `${pages}?cursor=${cursor}`, admin))
+          .status,
+      ).toBe(200);
+      await registerServiceForBrowse(server.port, base, admin);
+      const stale = await rawRequest(
+        server.port,
+        `${pages}?cursor=${cursor}`,
+        admin,
+      );
+      expect(stale.status).toBe(409);
+      expect(JSON.parse(stale.body).error.code).toBe("REVISION_CONFLICT");
     } finally {
       await server.close();
     }

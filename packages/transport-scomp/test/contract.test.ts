@@ -118,6 +118,12 @@ describe("transport-scomp", () => {
           ],
           slots: [],
         }),
+        listRegisteredSchemaIdentityPage: async () => ({
+          anchors: [],
+          slots: [],
+          nextCursor: null,
+          hasMore: true,
+        }),
         getRegisteredSchema: async () => null,
         patchRegisteredPath: async () => ({ success: "yes" }),
       }),
@@ -126,6 +132,12 @@ describe("transport-scomp", () => {
 
     await expect(
       transport.listRegisteredSchemaIdentities?.(),
+    ).rejects.toThrow();
+    await expect(
+      transport.listRegisteredSchemaIdentityPage?.({ limit: 0 }),
+    ).rejects.toThrow();
+    await expect(
+      transport.listRegisteredSchemaIdentityPage?.(),
     ).rejects.toThrow();
     await expect(
       transport.getRegisteredSchema?.("/checkout", "dev"),

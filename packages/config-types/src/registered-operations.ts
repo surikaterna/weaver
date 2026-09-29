@@ -28,6 +28,17 @@ export interface RegisteredSchemaIdentityListResponse {
   readonly slots: ReadonlyArray<RegisteredSchemaSlotIdentity>;
 }
 
+export interface RegisteredSchemaIdentityPageRequest {
+  readonly limit?: number | undefined;
+  readonly cursor?: string | undefined;
+}
+
+export interface RegisteredSchemaIdentityPageResponse
+  extends RegisteredSchemaIdentityListResponse {
+  readonly nextCursor: string | null;
+  readonly hasMore: boolean;
+}
+
 export interface RegisteredSchemaDetailRequest {
   readonly anchorPath: string;
   readonly environment: string;
