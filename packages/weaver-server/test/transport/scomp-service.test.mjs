@@ -98,6 +98,42 @@ const schemaFidelityRequest = {
 };
 
 describe("createWeaverScompService", () => {
+  test("generic SCOMP handlers enforce the bound registry, not a client cache or router mock", async () => {
+    const provider = createTestProvider("platform", "platform", {});
+    const configService = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+    const deps = buildScompDeps(configService);
+    await registerTestSchema(deps.schemaRegistry, "svc", "dev", {
+      mode: { type: "string" }, items: { type: "array", items: { type: "string" } },
+      labels: { type: "object", patternProperties: { "^x-": { type: "string" } } },
+      extras: { type: "object", additionalProperties: { type: "integer" } },
+    }, { additionalProperties: true });
+    const audit = auditCapture();
+    const router = createWeaverScompService({ ...deps, auditService: audit.service }).router;
+    const revision = configService.revision;
+    const deltas = [];
+    configService.onDelta((delta) => deltas.push(delta));
+    for (const [name, input, code] of [
+      ["set", { layer: "platform", key: "unknown.mode", value: "x" }, "SCHEMA_NOT_REGISTERED"],
+      ["set", { layer: "platform", key: "svc.rogue", value: "x" }, "SCHEMA_NOT_REGISTERED"],
+      ["set", { layer: "platform", key: "svc", value: { mode: "ok", rogue: { nested: 1 } } }, "SCHEMA_NOT_REGISTERED"],
+      ["set", { layer: "platform", key: "svc.mode", value: 12 }, "VALIDATION_ERROR"],
+      ["setMany", { layer: "platform", entries: { "svc.mode": "ok", "svc.rogue": 1 } }, "SCHEMA_NOT_REGISTERED"],
+      ["remove", { layer: "platform", key: "svc.rogue" }, "SCHEMA_NOT_REGISTERED"],
+    ]) {
+      const result = await router[route(name)].handler(input);
+      expect(result.error?.code).toBe(code);
+      expect([provider.writeCalls, deltas.length, audit.entries.length]).toEqual([0, 0, 0]);
+      expect(configService.revision).toBe(revision);
+    }
+    expect((await provider.load()).entries.svc).toBeUndefined();
+    expect((await router[route("set")].handler({ layer: "platform", key: "svc.labels.x-color", value: "blue" })).success).toBe(true);
+    expect((await router[route("set")].handler({ layer: "platform", key: "svc.extras.count", value: 2 })).success).toBe(true);
+    expect((await router[route("set")].handler({ layer: "platform", key: "svc.items", value: ["a"] })).success).toBe(true);
+    expect((await router[route("set")].handler({ layer: "platform", key: "svc.items[0]", value: "b" })).error?.code).toBe("UNSUPPORTED_OPERATION");
+    expect((await router[route("remove")].handler({ layer: "platform", key: "svc.items[0]" })).error?.code).toBe("UNSUPPORTED_OPERATION");
+    expect(provider.writeCalls).toBe(3);
+    expect((await provider.load()).entries.svc).toEqual({ labels: { "x-color": "blue" }, extras: { count: 2 }, items: ["a"] });
+  });
   test("generic denied batches emit no schema-operation audit success through the real SCOMP route", async () => {
     const provider = createTestProvider("platform", "platform", { svc: { mode: "old" } });
     const configService = await createWeaverConfigService({ providers: [provider], environment: "dev" });
