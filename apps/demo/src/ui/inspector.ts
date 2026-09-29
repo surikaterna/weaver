@@ -1,11 +1,6 @@
 import type { WeaverConfig } from "@weaver-conf/config-types";
 import type { WeaverClient } from "@weaver-conf/weaver-client";
-import {
-  buildScopePath,
-  COUNTRY_CODES_WITH_PROVIDERS,
-  findLocation,
-  type LocationDef,
-} from "../locations";
+import { buildScopePath, findLocation, type LocationDef } from "../locations";
 import {
   getSelectedKey,
   getSelectedLocation,
@@ -14,29 +9,6 @@ import {
 } from "../state";
 import { renderInspectorValue } from "./inspector-view";
 import { renderSchemaBrowser } from "./schema-browser";
-
-function scopeLayers(loc: LocationDef | null): string[] {
-  if (!loc) return [];
-  return [
-    ...(COUNTRY_CODES_WITH_PROVIDERS.has(loc.countryCode)
-      ? [`country:${loc.countryCode}`]
-      : []),
-    `location:${loc.code}`,
-  ];
-}
-
-function displayLayers(names: string[], scope: string[]): string[] {
-  return names.flatMap((name) =>
-    name === "tenant" ? [name, ...scope] : [name],
-  );
-}
-
-function winningScopeLayer(
-  scope: string[],
-  values: Partial<Record<string, unknown>>,
-): string | undefined {
-  return [...scope].reverse().find((layer) => values[layer] !== undefined);
-}
 
 function showPlaceholder(root: HTMLElement): void {
   const placeholder = document.createElement("p");
@@ -92,27 +64,20 @@ class InspectorPresenter {
     }
     const code = getSelectedLocation();
     const loc = code ? (findLocation(code) ?? null) : null;
-    const base = this.client.get(key);
     const value = loc
       ? this.client.getForScope(key, buildScopePath(loc))
-      : base;
-    const scope = scopeLayers(loc);
-    const names = displayLayers(
-      this.config
-        ? [...this.config.layerNames]
-        : ["core", "app", "tenant", "user", "session"],
-      scope,
-    );
-    renderInspectorValue(this.valueRoot, { key, value });
-    this.inspect(key, value, base, loc, scope, names, request);
+      : this.client.get(key);
+    const names = this.config
+      ? [...this.config.layerNames]
+      : ["core", "app", "tenant", "user", "session"];
+    renderInspectorValue(this.valueRoot, { key, value, location: loc });
+    this.inspect(key, value, loc, names, request);
   };
 
   private inspect(
     key: string,
     value: unknown,
-    base: unknown,
     loc: LocationDef | null,
-    scope: string[],
     names: string[],
     request: number,
   ): void {
@@ -120,22 +85,18 @@ class InspectorPresenter {
       .inspect(key)
       .then((inspection) => {
         if (request !== this.generation) return;
-        const effectiveLayer =
-          loc && value !== base
-            ? (winningScopeLayer(scope, inspection.layerValues ?? {}) ??
-              inspection.effectiveLayer)
-            : inspection.effectiveLayer;
         renderInspectorValue(this.valueRoot, {
           key,
           value,
-          effectiveLayer,
+          location: loc,
+          effectiveLayer: loc ? undefined : inspection.effectiveLayer,
           layerNames: names,
           layerValues: inspection.layerValues ?? {},
         });
       })
       .catch(() => {
         if (request === this.generation)
-          renderInspectorValue(this.valueRoot, { key, value });
+          renderInspectorValue(this.valueRoot, { key, value, location: loc });
       });
   }
 }

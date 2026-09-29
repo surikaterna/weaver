@@ -1,3 +1,4 @@
+import type { LocationDef } from "../locations";
 import { getSchemaForKey } from "../schemas";
 
 const VISIBILITY_COLORS: Record<string, string> = {
@@ -102,20 +103,41 @@ export function renderInspectorValue(
   input: {
     key: string;
     value: unknown;
+    location?: LocationDef | null;
     effectiveLayer?: string | undefined;
     layerNames?: string[];
     layerValues?: Partial<Record<string, unknown>>;
   },
 ): void {
-  const { key, value, effectiveLayer, layerNames, layerValues } = input;
+  const { key, value, location, effectiveLayer, layerNames, layerValues } =
+    input;
   body.replaceChildren();
   body.append(node("h3", key));
+  if (location)
+    body.append(
+      node("p", `Selected scope: ${location.label} (${location.code})`),
+    );
   const effective = node("div", "Effective: ", "effective-value");
   effective.append(node("strong", format(value)));
-  const from = node("span", "from ", "effective-layer");
-  from.append(node("em", effectiveLayer ?? "local"));
+  const from = node("span", location ? "" : "from ", "effective-layer");
+  from.append(
+    node(
+      "em",
+      location
+        ? "scoped value (source unspecified)"
+        : (effectiveLayer ?? "local"),
+    ),
+  );
   effective.append(from);
   body.append(effective);
-  if (layerNames) breakdown(body, layerNames, effectiveLayer, layerValues);
+  if (layerNames) {
+    if (location) body.append(node("h4", "Base layers (unscoped)"));
+    breakdown(
+      body,
+      layerNames,
+      location ? undefined : effectiveLayer,
+      layerValues,
+    );
+  }
   metadata(body, key);
 }
