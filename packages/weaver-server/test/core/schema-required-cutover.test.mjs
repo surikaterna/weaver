@@ -50,16 +50,37 @@ function billing(additionalProperties) {
 }
 
 describe("server-bound structural admission", () => {
-  test.each([true, undefined, false])("declared values work but undeclared child is denied when additionalProperties=%s", async (additional) => {
+  test.each([true, undefined, false])("closed/default invalid legacy siblings block declared writes when additionalProperties=%s", async (additional) => {
     const harness = await setup(billing(additional), {
       billing: { mode: "old", unknown: "legacy" }, legacy: { readable: true },
     });
     expect(await harness.service.get("legacy.readable")).toBe(true);
-    expect((await harness.service.set("platform", "billing.mode", "new")).error).toBeUndefined();
+    expect(await harness.service.get("billing.unknown")).toBe("legacy");
+    if (additional === true) {
+      expect((await harness.service.set("platform", "billing.mode", "new")).success).toBe(true);
+    } else {
+      await denial(harness, () => harness.service.set("platform", "billing.mode", "new"), "VALIDATION_ERROR");
+      await denial(harness, () => harness.service.patchRegisteredPath("platform", "/billing/mode", "new", {
+        schemaRegistry: harness.registry,
+      }), "SCHEMA_NOT_REGISTERED");
+    }
     await denial(harness, () => harness.service.set("platform", "billing.unknown", "new"), "SCHEMA_NOT_REGISTERED");
     await denial(harness, () => harness.service.remove("platform", "billing.unknown"), "SCHEMA_NOT_REGISTERED");
     await denial(harness, () => harness.service.set("platform", "billing", { mode: "ok", surprise: true }), "SCHEMA_NOT_REGISTERED");
     await denial(harness, () => harness.service.set("platform", "legacy.readable", false), "SCHEMA_NOT_REGISTERED");
+    expect((await harness.service.set("platform", "billing", { mode: "clean" })).success).toBe(true);
+    expect((await harness.provider.load()).entries.billing).toEqual({ mode: "clean" });
+    expect(await harness.service.get("legacy.readable")).toBe(true);
+  });
+
+  test.each([
+    { "billing.mode": "new", "billing.items": [] },
+    { "billing.items": [], "billing.mode": "new" },
+  ])("combined batch cannot preserve a schema-invalid legacy sibling", async (entries) => {
+    const harness = await setup(billing(false), { billing: { mode: "old", rogue: "legacy" } });
+    await denial(harness, () => harness.service.setMany("platform", entries), "VALIDATION_ERROR");
+    expect(await harness.service.get("billing.rogue")).toBe("legacy");
+    expect((await harness.service.set("platform", "billing", { mode: "clean" })).success).toBe(true);
   });
 
   test("generic array indices never reach the provider while whole arrays and numeric object keys work", async () => {

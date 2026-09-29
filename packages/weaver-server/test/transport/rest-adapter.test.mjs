@@ -132,6 +132,37 @@ describe("RestAdapter v1", () => {
     expect(await svc.get("legacy.value")).toBe("readable");
   });
 
+  test("authorized PUT and PATCH reject a declared write when an invalid legacy sibling remains", async () => {
+    const provider = createTestProvider("p1", "platform", { svc: { mode: "old", rogue: "legacy" } });
+    const write = vi.spyOn(provider, "write");
+    const remove = vi.spyOn(provider, "remove");
+    const flush = vi.fn(async () => {});
+    provider.dirty = true;
+    provider.flush = flush;
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+    const registry = await registerTestService(svc, "svc", "dev", { mode: { type: "string" } });
+    const adapter = createRestAdapter({ configService: svc, schemaRegistry: registry });
+    const revision = svc.revision;
+    const deltas = [];
+    svc.onDelta((delta) => deltas.push(delta));
+    const denied = [
+      ["PUT", "/v1/config/svc/mode", { value: "new" }],
+      ["PATCH", "/v1/config", { entries: { "svc.mode": "new" } }],
+    ];
+    for (const [method, path, body] of denied) {
+      const response = await adapter.handleRequest(method, path, req({ body }));
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe("VALIDATION_ERROR");
+      expect([write.mock.calls.length, remove.mock.calls.length, flush.mock.calls.length, deltas.length]).toEqual([0, 0, 0, 0]);
+      expect(svc.revision).toBe(revision);
+      expect((await provider.load()).entries.svc).toEqual({ mode: "old", rogue: "legacy" });
+    }
+    expect(await svc.get("svc.rogue")).toBe("legacy");
+    const replacement = await adapter.handleRequest("PUT", "/v1/config/svc", req({ body: { value: { mode: "clean" } } }));
+    expect(replacement.status).toBe(200);
+    expect((await provider.load()).entries.svc).toEqual({ mode: "clean" });
+  });
+
   test("authorized generic array-index PUT, DELETE and mixed PATCH remain typed 400 with no effects", async () => {
     const { adapter, svc, provider, registry } = await setup();
     await registerTestSchema(registry, "arrays", "dev", { items: { type: "array", items: { type: "string" } } });

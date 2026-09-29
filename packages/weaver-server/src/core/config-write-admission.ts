@@ -1,5 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
-import type { SchemaValidationResult } from "@weaver-conf/config-engine";
 import {
   canonicalConfigPathFromStorageKey,
   deepGet,
@@ -131,9 +129,7 @@ function errorForSupport(
 
 function anchorValidation(
   anchor: RegisteredSchemaAnchor,
-  layerBefore: Record<string, unknown>,
   layerAfter: Record<string, unknown>,
-  effectiveBefore: Record<string, unknown>,
   effective: Record<string, unknown>,
 ): Prepared | null {
   const key = parseCanonicalConfigPath(anchor.path).storageKey;
@@ -141,21 +137,12 @@ function anchorValidation(
   const options = { path: parseCanonicalConfigPath(anchor.path).segments };
   const layerValid =
     layerValue === undefined ||
-    validWithLegacy(
-      anchor,
-      validatePartialConfiguration(anchor.schema, layerValue, options),
-      deepGet(layerBefore, key),
-      layerValue,
-    );
+    validatePartialConfiguration(anchor.schema, layerValue, options).valid;
   const effectiveValue = deepGet(effective, key);
   const effectiveValid =
     effectiveValue === undefined ||
-    validWithLegacy(
-      anchor,
-      validateEffectiveConfiguration(anchor.schema, effectiveValue, options),
-      deepGet(effectiveBefore, key),
-      effectiveValue,
-    );
+    validateEffectiveConfiguration(anchor.schema, effectiveValue, options)
+      .valid;
   if (!layerValid || !effectiveValid) {
     return denied(
       "VALIDATION_ERROR",
@@ -163,45 +150,6 @@ function anchorValidation(
     );
   }
   return null;
-}
-
-function member(
-  value: unknown,
-  segments: readonly (string | number)[],
-): unknown {
-  let current = value;
-  for (const segment of segments) {
-    if (
-      current === null ||
-      typeof current !== "object" ||
-      !Object.hasOwn(current, String(segment))
-    )
-      return undefined;
-    current = Reflect.get(current, String(segment));
-  }
-  return current;
-}
-
-function validWithLegacy(
-  anchor: RegisteredSchemaAnchor,
-  validation: SchemaValidationResult,
-  before: unknown,
-  after: unknown,
-): boolean {
-  if (validation.valid) return true;
-  const prefix = parseCanonicalConfigPath(anchor.path).segments;
-  return (
-    before !== undefined &&
-    validation.errors.length > 0 &&
-    validation.errors.every((error) => {
-      if (error.code !== "unknown-property") return false;
-      const relative = error.segments.slice(prefix.length);
-      return (
-        relative.length > 0 &&
-        isDeepStrictEqual(member(before, relative), member(after, relative))
-      );
-    })
-  );
 }
 
 function canonicalMutations(
@@ -369,9 +317,7 @@ export function prepareConfigMutation(input: AdmissionContext): Prepared {
       continue;
     const deniedResult = anchorValidation(
       anchor,
-      input.layerBefore,
       candidate.layerAfter,
-      effectiveBefore,
       effective,
     );
     if (deniedResult) return deniedResult;

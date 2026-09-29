@@ -275,6 +275,41 @@ describe("createWeaverScompService", () => {
     expect((await provider.load()).entries.app).toEqual({ name: "old" });
   });
 
+  test("SCOMP set and mixed batches reject declared writes against invalid legacy siblings", async () => {
+    const provider = createTestProvider("p1", "platform", { svc: { mode: "old", rogue: "legacy" } });
+    const remove = vi.spyOn(provider, "remove");
+    const flush = vi.fn(async () => {});
+    provider.dirty = true;
+    provider.flush = flush;
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+    const deps = buildScompDeps(svc);
+    await registerTestSchema(deps.schemaRegistry, "svc", "dev", {
+      mode: { type: "string" }, items: { type: "array", items: { type: "string" } },
+    });
+    const service = createWeaverScompService(deps);
+    const revision = svc.revision;
+    const deltas = [];
+    svc.onDelta((delta) => deltas.push(delta));
+    const direct = await service.router[route("set")].handler({ key: "svc.mode", value: "new", layer: "platform" });
+    expect(direct.error?.code).toBe("VALIDATION_ERROR");
+    for (const entries of [
+      { "svc.mode": "new", "svc.items": [] },
+      { "svc.items": [], "svc.mode": "new" },
+    ]) {
+      const batch = await service.router[route("setMany")].handler({ layer: "platform", entries });
+      expect(batch.error?.code).toBe("VALIDATION_ERROR");
+    }
+    const onlyMode = await service.router[route("setMany")].handler({ layer: "platform", entries: { "svc.mode": "new" } });
+    expect(onlyMode.error?.code).toBe("VALIDATION_ERROR");
+    expect([provider.writeCalls, remove.mock.calls.length, flush.mock.calls.length, deltas.length]).toEqual([0, 0, 0, 0]);
+    expect(svc.revision).toBe(revision);
+    expect((await provider.load()).entries.svc).toEqual({ mode: "old", rogue: "legacy" });
+    expect(await svc.get("svc.rogue")).toBe("legacy");
+    const replacement = await service.router[route("set")].handler({ key: "svc", value: { mode: "clean" }, layer: "platform" });
+    expect(replacement.success).toBe(true);
+    expect((await provider.load()).entries.svc).toEqual({ mode: "clean" });
+  });
+
   test("remove handler deletes key", async () => {
     const provider = createTestProvider("p1", "platform", { app: { x: 1 } });
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
