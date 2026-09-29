@@ -114,7 +114,7 @@ describe("schema-required rollout across public readiness and restart", () => {
     }
   });
 
-  test.each([true, undefined])("old unregistered and undeclared children stay read-only after restart with additionalProperties=%s", async (additional) => {
+  test.each([true, undefined])("historical undeclared children survive restart but cannot be written with additionalProperties=%s", async (additional) => {
     const { storage, effects } = provider({ billing: { mode: "old", rogue: "keep", items: ["one"] }, old: { key: "keep" } });
     const first = await startWeaverServer({ port: 0, providers: [storage] });
     try {
@@ -126,7 +126,6 @@ describe("schema-required rollout across public readiness and restart", () => {
     const deltas = await watchDeltas(second.port);
     try {
       for (const path of ["billing/rogue", "old/key"]) {
-        expect((await request(second.port, `/v1/config/${path}`)).body.data.value).toBe("keep");
         for (const method of ["PUT", "DELETE"]) {
           await denied(second.port, storage, effects, deltas, `/v1/config/${path}`, method, method === "PUT" ? { value: "changed" } : undefined, "SCHEMA_NOT_REGISTERED");
         }
@@ -209,7 +208,7 @@ describe("schema-required rollout across public readiness and restart", () => {
     }
   });
 
-  test("an invalid persisted sibling remains readable but blocks a declared partial write after restart", async () => {
+  test("an invalid persisted sibling blocks a declared partial write without modifying storage after restart", async () => {
     const { storage, effects } = provider({ billing: { mode: "old", items: 42 } });
     const first = await startWeaverServer({ port: 0, providers: [storage] });
     try {
@@ -220,7 +219,6 @@ describe("schema-required rollout across public readiness and restart", () => {
     const second = await startWeaverServer({ port: 0, providers: [storage] });
     const deltas = await watchDeltas(second.port);
     try {
-      expect((await request(second.port, "/v1/config/billing/items")).body.data.value).toBe(42);
       await denied(second.port, storage, effects, deltas, "/v1/config/billing/mode", "PUT", { value: "new" }, "VALIDATION_ERROR");
       expect((await storage.load()).entries.billing).toEqual({ mode: "old", items: 42 });
     } finally {

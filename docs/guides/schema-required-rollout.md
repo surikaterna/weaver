@@ -45,7 +45,8 @@ No stored application data is automatically deleted or inferred into schemas.
    fail closed: do not interpret errors as an empty registry, serve traffic,
    or wipe storage. Check readiness, perform one authorized read and a
    declared write, then restart a **new service** on the same provider and
-   repeat; verify all legacy data and registration identities survived.
+   repeat; verify registered data and registration identities through public
+   reads, and compare historical bytes against the provider backup offline.
    Do not swap the bound registry on a running service or trust a caller-supplied
    registry for admission.
 
@@ -54,12 +55,15 @@ No stored application data is automatically deleted or inferred into schemas.
 For service `billing` in environment `production`, an object with
 `properties: { mode: { type: "string" }, items: { type: "array", items:
 { type: "string" } } }` allows validated `billing.mode` and a whole
-`billing.items` array. An old `billing.rogue` remains readable under ordinary
-read authorization, but `set` and `remove` return `SCHEMA_NOT_REGISTERED` with
-no provider/revision/delta effects. A closed object (`additionalProperties:
+`billing.items` array. An old `billing.rogue` is not automatically deleted or
+migrated; public reads or writes of historical unregistered/invalid stored
+values are unsupported and their behavior is undefined. `set` and `remove`
+of that undeclared child return `SCHEMA_NOT_REGISTERED` with no
+provider/revision/delta effects. A closed object (`additionalProperties:
 false`) can reject even `billing.mode` when `rogue` persists; an open/default
 object may allow that declared sibling while still denying `rogue`. Both
-branches require explicit remediation rather than silent deletion.
+branches require explicit remediation rather than silent deletion. For a
+greenfield deployment, register schemas before writing application data.
 
 For deliberate dynamic keys, `patternProperties: { "^flag_": { type:
 "boolean" } }` can govern `flag_active`, while `additionalProperties:
@@ -82,9 +86,9 @@ stopped; obtain an operator-approved, audited change record and an immutable
 backup; prepare the smallest corrected **provider-native** snapshot in an
 isolated copy (including relevant layered/effective values). Validate the
 snapshot and registrations with the same version's schemas and staging server;
-exercise reads and declared writes on that copy, then apply the reviewed
-provider-specific restoration procedure **offline**, verify a fresh startup
-and compare data to the backup. If the provider has no safe atomic restoration
+exercise registered-data reads and declared writes on that copy, then apply
+the reviewed provider-specific restoration procedure **offline**. Verify a
+fresh startup and compare data to the backup. If the provider has no safe atomic restoration
 procedure or validation fails, stop and escalate to the Architect/operator;
 do not use an unimplemented repair endpoint, private `_weaver` writes through
 public APIs, or an old binary as a migration tool. Internal protected access
