@@ -62,7 +62,7 @@ type ParsedSuccessfulRegistration = Extract<
 >;
 
 export function schemaKey(path: string, environment: string): string {
-  return `${path}:${environment}`;
+  return JSON.stringify([path, environment]);
 }
 
 export function createEmptyState(): RegistryState {
@@ -77,7 +77,16 @@ export function listSchemas(
   state: RegistryState,
 ): Record<string, ConfigurationPropertySchema> {
   const result: Record<string, ConfigurationPropertySchema> = {};
-  for (const [key, entry] of state.schemas) result[key] = entry.schema;
+  for (const entry of state.schemas.values()) {
+    const key = `${entry.path}:${entry.environment}`;
+    if (Object.hasOwn(result, key)) {
+      throw createWeaverError(
+        "SCHEMA_CONFLICT",
+        `Ambiguous legacy schema registry key "${key}"; use exact identity/detail lookup`,
+      );
+    }
+    result[key] = entry.schema;
+  }
   return result;
 }
 
@@ -142,7 +151,7 @@ export function evaluateRegistration(
     : newSchemaResult(parsed.metadata);
   return {
     result,
-    entry: schemaEntry(parsed, key),
+    entry: schemaEntry(parsed),
     key,
     slots: parsed.slots,
     slotKeysToRemove: staleSlots.map((slot) =>
@@ -283,7 +292,16 @@ function evaluateFragmentRegistration(
   key: string,
 ): RegistrationEvaluation {
   const slotPath = parsed.metadata.canonicalSlotPath;
-  if (!slotPath || !state.slots.has(schemaKey(slotPath, parsed.environment))) {
+  const slot = slotPath
+    ? state.slots.get(schemaKey(slotPath, parsed.environment))
+    : undefined;
+  if (
+    !slot ||
+    slot.canonicalSlotPath !== slotPath ||
+    slot.environment !== parsed.environment ||
+    slot.serviceId !== parsed.metadata.serviceId ||
+    slot.servicePath !== parsed.metadata.servicePath
+  ) {
     return validationFailure(`Unknown fragment slot "${slotPath ?? ""}"`);
   }
   if (state.schemas.has(key)) {
@@ -293,18 +311,15 @@ function evaluateFragmentRegistration(
   }
   return {
     result: newSchemaResult(parsed.metadata),
-    entry: schemaEntry(parsed, key),
+    entry: schemaEntry(parsed),
     key,
   };
 }
 
-function schemaEntry(
-  parsed: ParsedSuccessfulRegistration,
-  key: string,
-): SchemaEntry {
+function schemaEntry(parsed: ParsedSuccessfulRegistration): SchemaEntry {
   return {
     kind: parsed.kind,
-    path: key.slice(0, key.length - parsed.environment.length - 1),
+    path: parsed.targetPath,
     schema: parsed.schema,
     environment: parsed.environment,
     metadata: parsed.metadata,

@@ -525,6 +525,7 @@ describe("SchemaRegistry", () => {
       _weaver: {
         registry: {
           schemas: {
+            version: 2,
             environments: {
               default: {
                 schemas: {
