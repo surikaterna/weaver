@@ -98,6 +98,35 @@ const schemaFidelityRequest = {
 };
 
 describe("createWeaverScompService", () => {
+  test("generic denied batches emit no schema-operation audit success through the real SCOMP route", async () => {
+    const provider = createTestProvider("platform", "platform", { svc: { mode: "old" } });
+    const configService = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+    const deps = buildScompDeps(configService);
+    expect((await deps.schemaRegistry.register({
+      serviceId: "svc", environment: "dev", owner: { name: "svc", contact: "svc@example.com" },
+      schema: { type: "object", properties: { mode: { type: "string" } }, additionalProperties: false }, fragmentSlots: [],
+    })).success).toBe(true);
+    const audit = auditCapture();
+    const scomp = createWeaverScompService({ ...deps, auditService: audit.service });
+    const revision = configService.revision;
+    const entries = (await provider.load()).entries;
+    for (const values of [
+      { "svc.mode": "new", "svc.rogue": "bad" },
+      { "svc.rogue": "bad", "svc.mode": "new" },
+    ]) {
+      const result = await scomp.router[route("setMany")].handler({ layer: "platform", entries: values });
+      expect(result.error?.code).toBe("SCHEMA_NOT_REGISTERED");
+    }
+    expect(provider.writeCalls).toBe(0);
+    expect(configService.revision).toBe(revision);
+    expect((await provider.load()).entries).toEqual(entries);
+    expect(audit.entries).toEqual([]);
+    const admitted = await scomp.router[route("setMany")].handler({ layer: "platform", entries: { "svc.mode": "new" } });
+    expect(admitted.success).toBe(true);
+    expect(provider.writeCalls).toBe(1);
+    expect(audit.entries).toEqual([]);
+  });
+
   test("returns a ServiceDefinition with name and router", async () => {
     const provider = createTestProvider("p1", "platform", { app: { name: "test" } });
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });

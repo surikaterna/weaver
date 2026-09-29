@@ -1,6 +1,6 @@
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
-import { createSchemaRegistry } from "../../src/core/schema-registry.ts";
+import { createPersistentSchemaRegistry, createSchemaRegistry } from "../../src/core/schema-registry.ts";
 
 const owner = { name: "Billing", contact: "billing@example.com" };
 
@@ -368,20 +368,35 @@ describe("server-bound structural admission", () => {
   test("scoped batch cannot use another tenant's required property to pass preflight", async () => {
     const platform = createInMemoryStorageProvider({ id: "platform", layer: "platform", initialEntries: { billing: {} } });
     const tenant = createInMemoryStorageProvider({ id: "tenant", layer: "tenant:other", initialEntries: { billing: { mode: "ok" } } });
+    const effects = { writes: 0, removes: 0, flushes: 0, deltas: [] };
+    for (const provider of [platform, tenant]) {
+      const write = provider.write.bind(provider);
+      const remove = provider.remove.bind(provider);
+      provider.write = async (...args) => { effects.writes++; return write(...args); };
+      provider.remove = async (...args) => { effects.removes++; return remove(...args); };
+      provider.dirty = true;
+      provider.flush = async () => { effects.flushes++; };
+    }
     const service = await createWeaverConfigService({ providers: [platform, tenant], environment: "dev" });
+    service.onDelta((delta) => effects.deltas.push(delta));
     const registry = createSchemaRegistry({ configService: service });
     expect((await registry.register({ serviceId: "billing", environment: "dev", owner, schema: { ...billing(false), required: ["mode"] }, fragmentSlots: [] })).success).toBe(true);
-    const revision = service.revision;
+    await service.flush();
+    const before = [structuredClone((await platform.load()).entries), structuredClone((await tenant.load()).entries)];
+    const baseline = { ...effects, deltas: effects.deltas.length, revision: service.revision };
     const result = await service.setMany("platform", { "billing.items": [], "billing.map": { "0": "ok" } }, { scopePath: [{ scopeId: "tenant", value: "other" }] });
     expect(result.error?.code).toBe("VALIDATION_ERROR");
-    expect((await platform.load()).entries.billing).toEqual({});
-    expect(service.revision).toBe(revision);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect([(await platform.load()).entries, (await tenant.load()).entries]).toEqual(before);
+    expect({ ...effects, deltas: effects.deltas.length, revision: service.revision }).toEqual(baseline);
   });
 
   test("root payloads and overlapping fragments enforce both parent and child constraints", async () => {
-    const fragment = { type: "object", properties: { enabled: { type: "boolean" } }, additionalProperties: false };
+    const fragment = { type: "object", properties: { enabled: { type: "boolean" }, source: { type: "string" } }, additionalProperties: false };
     const parent = { type: "object", properties: {
-      mode: { type: "string" }, plugins: { type: "object", properties: { tax: fragment }, additionalProperties: false },
+      mode: { type: "string" }, plugins: { type: "object", properties: { tax: {
+        type: "object", properties: { enabled: { type: "boolean" }, source: { type: "string", const: "parent" } }, additionalProperties: true,
+      } }, additionalProperties: false },
     }, additionalProperties: false };
     const harness = await setup(parent, { billing: { mode: "before" } });
     expect((await harness.registry.register({ serviceId: "billing", environment: "dev", owner, schema: parent,
@@ -392,21 +407,58 @@ describe("server-bound structural admission", () => {
       { billing: { mode: "next", plugins: { tax: { enabled: true, rogue: 1 } } } },
       { "billing.mode": "next", "billing.plugins.tax": { enabled: true, rogue: 1 } },
     ]) await denial(harness, () => harness.service.setMany("platform", entries), "SCHEMA_NOT_REGISTERED");
-    expect((await harness.service.setMany("platform", { billing: { mode: "next", plugins: { tax: { enabled: true } } } })).success).toBe(true);
+    for (const entries of [
+      { "billing.mode": "next", "billing.plugins.tax": { enabled: true, source: "wrong" } },
+      { billing: { mode: "next", plugins: { tax: { enabled: true, source: "wrong" } } } },
+    ]) await denial(harness, () => harness.service.setMany("platform", entries), "VALIDATION_ERROR");
+    expect((await harness.service.setMany("platform", { billing: { mode: "next", plugins: { tax: { enabled: true, source: "parent" } } } })).success).toBe(true);
   });
 
-  test("in-process registration, single writes and batches observe serialized admission", async () => {
-    const harness = await setup(billing(false), { billing: { mode: "before" } });
-    const submitted = [
-      harness.service.setMany("platform", { "billing.mode": "batch" }),
-      harness.service.set("platform", "billing.mode", "single"),
-      harness.registry.register({ serviceId: "other", environment: "dev", owner, schema: { type: "object", properties: { mode: { type: "string" } }, additionalProperties: false }, fragmentSlots: [] }),
-    ];
-    const results = await Promise.all(submitted);
-    expect(results[0].success).toBe(true);
-    expect(results[1].success).toBe(true);
-    expect(results[2].success).toBe(true);
-    expect((await harness.provider.load()).entries.billing.mode).toBe("single");
-    expect((await harness.service.setMany("platform", { "other.mode": "registered" })).success).toBe(true);
+  test.each(["batch-first", "single-first"])("pending registration serializes conflicting %s admission", async (order) => {
+    const provider = createInMemoryStorageProvider({ id: "platform", layer: "platform" });
+    const effects = { writes: 0, removes: 0, deltas: [] };
+    const write = provider.write.bind(provider);
+    const remove = provider.remove.bind(provider);
+    provider.write = async (...args) => { effects.writes++; return write(...args); };
+    provider.remove = async (...args) => { effects.removes++; return remove(...args); };
+    const service = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+    service.onDelta((delta) => effects.deltas.push(delta));
+    const registry = await createPersistentSchemaRegistry({ configService: service });
+    const beforeRevision = service.revision;
+    const request = { serviceId: "billing", environment: "dev", owner,
+      schema: { type: "object", properties: { mode: { type: "string", const: "allowed" } }, additionalProperties: false }, fragmentSlots: [] };
+    expect((await service.setMany("platform", { "billing.mode": "allowed" })).error?.code).toBe("SCHEMA_NOT_REGISTERED");
+    let entered;
+    const writing = new Promise((resolve) => { entered = resolve; });
+    let release;
+    const blocked = new Promise((resolve) => { release = resolve; });
+    provider.write = async (...args) => {
+      if (args[0] === "_weaver.registry.schemas") { entered(); await blocked; }
+      effects.writes++;
+      return write(...args);
+    };
+    const registering = registry.register(request);
+    await writing;
+    const batch = () => service.setMany("platform", { "billing.mode": "forbidden" });
+    const single = () => service.set("platform", "billing.mode", "allowed");
+    const pending = order === "batch-first" ? [batch(), single()] : [single(), batch()];
+    let settled = 0;
+    pending.forEach((operation) => operation.then(() => { settled++; }));
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(settled).toBe(0);
+      expect(effects).toEqual({ writes: 0, removes: 0, deltas: [] });
+      expect(service.revision).toBe(beforeRevision);
+      expect((await provider.load()).entries.billing).toBeUndefined();
+    } finally {
+      release();
+    }
+    expect((await registering).success).toBe(true);
+    const results = await Promise.all(pending);
+    expect(results.map((result) => result.error?.code ?? "success")).toEqual(order === "batch-first"
+      ? ["VALIDATION_ERROR", "success"] : ["success", "VALIDATION_ERROR"]);
+    expect(effects).toMatchObject({ writes: 2, removes: 0 });
+    expect(effects.deltas).toHaveLength(1);
+    expect((await provider.load()).entries.billing).toEqual({ mode: "allowed" });
   });
 });
