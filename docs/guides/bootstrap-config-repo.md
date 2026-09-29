@@ -122,6 +122,10 @@ If `providers` are passed directly to `startWeaverServer()`, bootstrap is skippe
 If neither providers nor a repo URL are provided, the server starts with an
 in-memory `platform` layer.
 
+Before seeding application values or replacing an existing server, follow the
+[schema-required write rollout](schema-required-rollout.md): the authoritative
+registry must be bound and schemas registered before public seed writes.
+
 ## GitHub authentication
 
 Use an HTTPS GitHub URL in `WEAVER_CONFIG_REPO` and put credentials in
