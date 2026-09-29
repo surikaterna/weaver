@@ -34,6 +34,7 @@ export function createHttpContext(options: HttpTransportOptions) {
     baseUrl,
     buildHeaders,
     fetchFn,
+    onError,
     requester,
     sse,
     timeout: options.timeout ?? 30000,

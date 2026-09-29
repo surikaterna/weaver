@@ -11,6 +11,7 @@ import {
   queryString,
   request,
 } from "./http-transport-context";
+import { unknownWriteOutcome, withWriteDeadline } from "./http-write-deadline";
 import type { WeaverTransport, WriteOptions, WriteResult } from "./transport";
 import type { ConfigDelta, ConfigSnapshot, Unsubscribe } from "./types";
 
@@ -179,23 +180,32 @@ async function sendWrite(
   } catch {
     return writeFailure("WRITE_UNAVAILABLE");
   }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), context.timeout);
   try {
-    const response = await context.fetchFn(
-      `${context.baseUrl}${path}${query}`,
-      {
-        method,
-        headers,
-        signal: controller.signal,
-        ...(payload !== undefined ? { body: payload } : {}),
+    return await withWriteDeadline(
+      context.timeout,
+      async (signal) => {
+        const response = await context.fetchFn(
+          `${context.baseUrl}${path}${query}`,
+          {
+            method,
+            headers,
+            signal,
+            ...(payload !== undefined ? { body: payload } : {}),
+          },
+        );
+        return decodeWriteResponse(response);
+      },
+      () => {
+        context.onError?.({
+          type: "timeout",
+          message: "Request timed out",
+          retryable: false,
+        });
+        return unknownWriteOutcome();
       },
     );
-    return await decodeWriteResponse(response);
   } catch {
-    return writeFailure("WRITE_OUTCOME_UNKNOWN");
-  } finally {
-    clearTimeout(timer);
+    return unknownWriteOutcome();
   }
 }
 

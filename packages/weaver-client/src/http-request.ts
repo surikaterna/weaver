@@ -1,8 +1,14 @@
-import { type WeaverError, weaverErrorSchema } from "@weaver-conf/config-types";
+import {
+  createWeaverError,
+  type WeaverError,
+  weaverErrorSchema,
+} from "@weaver-conf/config-types";
 import { z } from "zod";
+import { isJsonContentType } from "./http-content-type";
 import { serializeHttpJsonValue } from "./http-json-value";
-import { fetchWithRetry, type RetryOptions } from "./http-retry";
+import { fetchWithRetry, isReadMethod, type RetryOptions } from "./http-retry";
 import type { TransportError } from "./http-transport-types";
+import { onceWriteError, withWriteDeadline } from "./http-write-deadline";
 
 const serverErrorSchema = weaverErrorSchema.strict();
 const legacyResponseEnvelopeSchema = z
@@ -50,10 +56,6 @@ const validatedResponseEnvelopeSchema = z
       });
     }
   });
-const jsonMediaType = "application/json";
-const tokenCharacterPattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]$/;
-const quotedTextPattern = /^[\t !#-[\]-~]$/;
-const quotedPairPattern = /^[\t !-~]$/;
 
 export type HttpServerError = WeaverError;
 
@@ -136,7 +138,43 @@ export function createHttpRequester(options: HttpRequesterOptions) {
       schema: z.ZodType<T>,
       body?: unknown,
       requestOptions?: ValidatedRequestOptions<T>,
-    ) => requestValidated(options, method, path, schema, body, requestOptions),
+    ) => {
+      if (isReadMethod(method))
+        return requestValidated(
+          options,
+          method,
+          path,
+          schema,
+          body,
+          requestOptions,
+        );
+      const report = onceWriteError(options.onError);
+      return withWriteDeadline(
+        options.timeout,
+        () =>
+          requestValidated(
+            { ...options, onError: report },
+            method,
+            path,
+            schema,
+            body,
+            requestOptions,
+          ),
+        () => {
+          report({
+            type: "timeout",
+            message: "Request timed out",
+            retryable: false,
+          });
+          return Promise.reject(
+            createWeaverError(
+              "WRITE_OUTCOME_UNKNOWN",
+              "Request timed out; write outcome unknown",
+            ),
+          );
+        },
+      );
+    },
   };
 }
 
@@ -218,53 +256,6 @@ function requireJsonContentType(
   const contentType = response.headers.get("content-type");
   if (contentType && isJsonContentType(contentType)) return;
   rejectUnexpectedStatus(options, response, path);
-}
-
-function isJsonContentType(contentType: string): boolean {
-  let index = skipOws(contentType, 0);
-  const mediaType = contentType.slice(index, index + jsonMediaType.length);
-  if (mediaType.toLowerCase() !== jsonMediaType) return false;
-  index = skipOws(contentType, index + jsonMediaType.length);
-  while (index < contentType.length) {
-    if (contentType[index] !== ";") return false;
-    index = skipOws(contentType, index + 1);
-    const nameStart = index;
-    while (tokenCharacterPattern.test(contentType[index] ?? "")) index++;
-    if (index === nameStart) return false;
-    index = skipOws(contentType, index);
-    if (contentType[index] !== "=") return false;
-    index = skipOws(contentType, index + 1);
-    if (contentType[index] === '"') {
-      index = scanQuotedString(contentType, index + 1);
-      if (index < 0) return false;
-    } else {
-      const valueStart = index;
-      while (tokenCharacterPattern.test(contentType[index] ?? "")) index++;
-      if (index === valueStart) return false;
-    }
-    index = skipOws(contentType, index);
-  }
-  return true;
-}
-
-function skipOws(value: string, start: number): number {
-  let index = start;
-  while (value[index] === " " || value[index] === "\t") index++;
-  return index;
-}
-
-function scanQuotedString(value: string, start: number): number {
-  let index = start;
-  while (index < value.length) {
-    const code = value.charCodeAt(index);
-    if (code === 0x22) return index + 1;
-    if (code === 0x5c) {
-      index++;
-      if (!quotedPairPattern.test(value[index] ?? "")) return -1;
-    } else if (!quotedTextPattern.test(value[index] ?? "")) return -1;
-    index++;
-  }
-  return -1;
 }
 
 function reportServerError(
@@ -381,9 +372,4 @@ function fetchResponse(
         : { ...options.retry, maxAttempts: 1 },
     },
   );
-}
-
-/** Mutations are not replayed because their completion is ambiguous. */
-function isReadMethod(method: string): boolean {
-  return method === "GET" || method === "HEAD";
 }

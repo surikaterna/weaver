@@ -242,4 +242,128 @@ describe("HttpTransport", () => {
     }) });
     expect(await transport.remove("billing.mode")).toMatchObject({ error: { code: "WRITE_OUTCOME_UNKNOWN" } });
   });
+
+  it.each(writeCases)("$name settles at deadline when fetch ignores abort", async ({ run }) => {
+    vi.useFakeTimers();
+    try {
+      const errors = [];
+      let calls = 0;
+      const transport = createHttpTransport({ baseUrl: "http://localhost:3399", timeout: 5, onError: (error) => errors.push(error), fetch: async () => {
+        calls++;
+        return new Promise(() => {});
+      } });
+      const pending = run(transport);
+      await vi.advanceTimersByTimeAsync(5);
+      expect(await pending).toMatchObject({ success: false, error: { code: "WRITE_OUTCOME_UNKNOWN" } });
+      expect(calls).toBe(1);
+      expect(errors).toEqual([expect.objectContaining({ type: "timeout", retryable: false })]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["late success", "late rejection"])("ignores %s after dispatch deadline", async (outcome) => {
+    vi.useFakeTimers();
+    try {
+      let finish;
+      let fail;
+      let calls = 0;
+      const errors = [];
+      const transport = createHttpTransport({ baseUrl: "http://localhost:3399", timeout: 5, onError: (error) => errors.push(error), fetch: () => {
+        calls++;
+        return new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+      } });
+      const pending = transport.set("billing.mode", "x");
+      await vi.advanceTimersByTimeAsync(5);
+      expect(await pending).toMatchObject({ error: { code: "WRITE_OUTCOME_UNKNOWN" } });
+      if (outcome === "late success") finish({ ok: true, json: async () => ({ data: { success: true }, meta: { revision: "r", timestamp: "now" } }) });
+      else fail(new Error("late connection failure"));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(calls).toBe(1);
+      expect(errors).toEqual([expect.objectContaining({ type: "timeout", retryable: false })]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["late JSON", "late JSON rejection"])("bounds %s decoding even after fetch has fulfilled", async (outcome) => {
+    vi.useFakeTimers();
+    try {
+      let finishJson;
+      let failJson;
+      const transport = createHttpTransport({ baseUrl: "http://localhost:3399", timeout: 5, fetch: async () => ({
+        ok: true, json: () => new Promise((resolve, reject) => { finishJson = resolve; failJson = reject; }),
+      }) });
+      const pending = transport.setMany({ "billing.mode": "x" });
+      await vi.advanceTimersByTimeAsync(5);
+      expect(await pending).toMatchObject({ error: { code: "WRITE_OUTCOME_UNKNOWN" } });
+      if (outcome === "late JSON") finishJson({ data: { success: true }, meta: { revision: "r", timestamp: "now" } });
+      else failJson(new Error("late JSON failure"));
+      await Promise.resolve();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds validated registered writes without changing their error result contract", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const errors = [];
+      const transport = createHttpTransport({ baseUrl: "http://localhost:3399", timeout: 5, onError: (error) => errors.push(error), fetch: async () => {
+        calls++;
+        return new Promise(() => {});
+      } });
+      const pending = transport.setRegisteredObject("/billing", {});
+      const result = pending.then(() => null, (error) => error);
+      await vi.advanceTimersByTimeAsync(5);
+      expect((await result).code).toBe("WRITE_OUTCOME_UNKNOWN");
+      expect(calls).toBe(1);
+      expect(errors).toEqual([expect.objectContaining({ type: "timeout", retryable: false })]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["late success", "late rejection"])("keeps registered %s from changing timed-out result", async (outcome) => {
+    vi.useFakeTimers();
+    try {
+      let finish;
+      let fail;
+      const errors = [];
+      let calls = 0;
+      const transport = createHttpTransport({ baseUrl: "http://localhost:3399", timeout: 5, onError: (error) => errors.push(error), fetch: () => {
+        calls++;
+        return new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+      } });
+      const pending = transport.patchRegisteredPath("/billing/mode", "x").then(() => null, (error) => error);
+      await vi.advanceTimersByTimeAsync(5);
+      expect((await pending).code).toBe("WRITE_OUTCOME_UNKNOWN");
+      if (outcome === "late success") finish(new Response(JSON.stringify({ data: { success: true }, meta: { revision: "r", timestamp: "now" } }), { status: 200, headers: { "content-type": "application/json" } }));
+      else fail(new Error("late connection failure"));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(calls).toBe(1);
+      expect(errors).toEqual([expect.objectContaining({ type: "timeout", retryable: false })]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds registered JSON receipt when fetch resolves before the deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const errors = [];
+      const transport = createHttpTransport({ baseUrl: "http://localhost:3399", timeout: 5, onError: (error) => errors.push(error), fetch: async () => ({
+        status: 200, ok: true, headers: new Headers({ "content-type": "application/json" }), json: async () => new Promise(() => {}),
+      }) });
+      const pending = transport.setRegisteredObject("/billing", {}).then(() => null, (error) => error);
+      await vi.advanceTimersByTimeAsync(5);
+      expect((await pending).code).toBe("WRITE_OUTCOME_UNKNOWN");
+      expect(errors).toEqual([expect.objectContaining({ type: "timeout", retryable: false })]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
