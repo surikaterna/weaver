@@ -35,6 +35,7 @@ export interface EffectiveValidationOptions {
 }
 
 const forbiddenOptionKeys = new Set(["__proto__", "constructor", "prototype"]);
+const writeAuthoritySchema = z.enum(["local", "server"]);
 const optionRecordSchema = z.unknown().superRefine(validateOptionRecord);
 const scopeWirePartSchema = z
   .string()
@@ -109,6 +110,8 @@ function validateOptionKey(
  * Implementations handle reads, writes, subscriptions, scopes, and schema operations.
  */
 export interface WeaverTransport {
+  /** Declare the write authority explicitly; omitted means facade writes are not sent. */
+  readonly writeAuthority?: z.infer<typeof writeAuthoritySchema>;
   // Reads
   resolveAll(options?: ResolveOptions): Promise<ConfigSnapshot>;
   get(key: string, options?: GetOptions): Promise<unknown>;

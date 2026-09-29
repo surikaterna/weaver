@@ -10,6 +10,7 @@ import {
 import type { ClientRuntime } from "./client-runtime";
 import type { WeaverClient } from "./client-types";
 import {
+  unidentifiedTransport,
   unsupportedRegistration,
   unsupportedValidation,
   unsupportedWrite,
@@ -45,12 +46,14 @@ function registeredWriteMethods(
 > {
   return {
     async setRegisteredObject(path, value, options) {
+      if (!runtime.transport.writeAuthority) return unidentifiedTransport();
       return (
         runtime.transport.setRegisteredObject?.(path, value, options) ??
         unsupportedWrite("setRegisteredObject")
       );
     },
     async patchRegisteredPath(path, value, options) {
+      if (!runtime.transport.writeAuthority) return unidentifiedTransport();
       return (
         runtime.transport.patchRegisteredPath?.(path, value, options) ??
         unsupportedWrite("patchRegisteredPath")

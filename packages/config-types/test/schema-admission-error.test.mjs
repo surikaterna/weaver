@@ -17,3 +17,12 @@ test("registered-schema denial is typed across existing error and write contract
   expect(subpathWriteResultSchema.parse({ success: false, error }).error?.code).toBe(error.code);
   expect(weaverErrorCodeSchema.safeParse("SILENT_ALLOW").success).toBe(false);
 });
+
+test("write outcome taxonomy is typed without claiming server rejection", () => {
+  for (const code of ["WRITE_UNAVAILABLE", "WRITE_OUTCOME_UNKNOWN"]) {
+    const error = { code, message: "Write outcome" };
+    expect(weaverErrorCodeSchema.parse(code)).toBe(code);
+    expect(weaverErrorSchema.parse(error)).toEqual(error);
+    expect(writeResultSchema.parse({ success: false, error }).error?.code).toBe(code);
+  }
+});

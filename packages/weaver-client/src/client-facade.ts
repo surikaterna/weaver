@@ -4,6 +4,7 @@ import { applyNamespace } from "./client-helpers";
 import { registeredMethods } from "./client-registered-methods";
 import type { ClientRuntime } from "./client-runtime";
 import type { WeaverClient } from "./client-types";
+import { unidentifiedTransport } from "./client-unsupported";
 import { createInstanceClient } from "./instance-client";
 import { createNamespaceClient } from "./namespace-client";
 import type { ValidationResult } from "./schema-registry";
@@ -133,7 +134,8 @@ function writeMethods(
       );
     },
     async remove(key, options) {
-      return runtime.transport.remove(
+      return guardedRemove(
+        runtime,
         applyNamespace(runtime.namespace, key),
         options,
       );
@@ -244,7 +246,7 @@ function instanceMethods(
         getState: () => runtime.baseState,
         set: (key, value, options) =>
           validatedSet(runtime, key, value, options),
-        remove: (key, options) => runtime.transport.remove(key, options),
+        remove: (key, options) => guardedRemove(runtime, key, options),
         onChange: (pattern, handler) => client().onChange(pattern, handler),
       });
     },
@@ -276,7 +278,7 @@ function namespaceDeps(runtime: ClientRuntime, client: ClientReference) {
     setMany: (entries: Record<string, unknown>, options?: WriteOptions) =>
       validatedSetMany(runtime, entries, options),
     remove: (key: string, options?: WriteOptions) =>
-      runtime.transport.remove(key, options),
+      guardedRemove(runtime, key, options),
     onChange: (pattern: string, handler: (changes: ConfigDelta[]) => void) =>
       client().onChange(pattern, handler),
   };
@@ -288,6 +290,10 @@ function validatedSet(
   value: unknown,
   options?: WriteOptions,
 ): Promise<WriteResult> {
+  if (!runtime.transport.writeAuthority)
+    return Promise.resolve(unidentifiedTransport());
+  if (runtime.transport.writeAuthority !== "local")
+    return runtime.transport.set(key, value, options);
   const result = validateOnWrite(key, value, runtime.registry);
   if (!result.valid) return Promise.resolve(validationFailure(result.errors));
   return runtime.transport.set(key, value, options);
@@ -298,9 +304,23 @@ function validatedSetMany(
   entries: Record<string, unknown>,
   options?: WriteOptions,
 ): Promise<WriteResult> {
+  if (!runtime.transport.writeAuthority)
+    return Promise.resolve(unidentifiedTransport());
+  if (runtime.transport.writeAuthority !== "local")
+    return runtime.transport.setMany(entries, options);
   const errors = Object.entries(entries).flatMap(
     ([key, value]) => validateOnWrite(key, value, runtime.registry).errors,
   );
   if (errors.length > 0) return Promise.resolve(validationFailure(errors));
   return runtime.transport.setMany(entries, options);
+}
+
+function guardedRemove(
+  runtime: ClientRuntime,
+  key: string,
+  options?: WriteOptions,
+): Promise<WriteResult> {
+  if (!runtime.transport.writeAuthority)
+    return Promise.resolve(unidentifiedTransport());
+  return runtime.transport.remove(key, options);
 }

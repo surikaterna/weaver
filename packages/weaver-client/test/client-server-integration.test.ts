@@ -58,7 +58,7 @@ describe("client schema flow against a real D1 server", () => {
         success: false,
         error: { code: "VALIDATION_ERROR" },
       });
-      expect(remoteWrites).toBe(0);
+      expect(remoteWrites).toBe(1);
       const batch = await first.setMany({
         "checkout.enabled": "wrong",
         "checkout.plugins.analytics.enabled": true,
@@ -67,7 +67,7 @@ describe("client schema flow against a real D1 server", () => {
         success: false,
         error: { code: "VALIDATION_ERROR" },
       });
-      expect(remoteWrites).toBe(0);
+      expect(remoteWrites).toBe(2);
       await first.close();
 
       const rebooted = await createWeaverClient({

@@ -8,6 +8,7 @@ function createMockTransport(
   const subscribers: Array<(delta: ConfigDelta) => void> = [];
 
   return {
+    writeAuthority: "local",
     async resolveAll() {
       return {
         entries: { ...state },
@@ -57,6 +58,30 @@ function createMockTransport(
 }
 
 describe("Integration: WeaverClient full flow", () => {
+  it("does not mistake an unclassified test transport for server acknowledgement", async () => {
+    const transport = createMockTransport();
+    const write = vi.spyOn(transport, "set");
+    const registeredWrite = vi.fn(async () => ({ success: true }));
+    const client = await createWeaverClient({
+      transport: {
+        ...transport,
+        writeAuthority: undefined,
+        setRegisteredObject: registeredWrite,
+      },
+    });
+    try {
+      expect((await client.set("editor.fontSize", 16)).error?.code).toBe(
+        "WRITE_UNAVAILABLE",
+      );
+      expect(write).not.toHaveBeenCalled();
+      expect(
+        (await client.setRegisteredObject("/editor", {})).error?.code,
+      ).toBe("WRITE_UNAVAILABLE");
+      expect(registeredWrite).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
   it("creates client, uses typed namespace, get/set works", async () => {
     const transport = createMockTransport({
       editor: { fontSize: 14, theme: "dark" },

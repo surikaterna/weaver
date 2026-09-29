@@ -114,6 +114,7 @@ function writeMethods(
   };
 }
 
+/** Demo-only in-memory writes acknowledge local state, never a Weaver server commit. */
 export function createDemoTransport(): LocalTransport &
   Required<
     Pick<
@@ -134,6 +135,7 @@ export function createDemoTransport(): LocalTransport &
   const pages = createSeededSchemaPages(seededSchemaIdentities());
   return {
     ...local,
+    writeAuthority: "local",
     ...writeMethods(layers, snapshot, local),
     async fetchSchemas() {
       return registeredSchemaFixtures();

@@ -4,6 +4,16 @@ import type {
 } from "@weaver-conf/config-types";
 import type { WriteResult } from "./transport";
 
+export function unidentifiedTransport(): WriteResult {
+  return {
+    success: false,
+    error: {
+      code: "WRITE_UNAVAILABLE",
+      message: "Transport has no declared write authority; write was not sent",
+    },
+  };
+}
+
 export function unsupportedWrite(method: string): WriteResult {
   return {
     success: false,
