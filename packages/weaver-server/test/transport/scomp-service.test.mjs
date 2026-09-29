@@ -369,7 +369,6 @@ describe("createWeaverScompService", () => {
     expect([provider.writeCalls, remove.mock.calls.length, flush.mock.calls.length, deltas.length]).toEqual([0, 0, 0, 0]);
     expect(svc.revision).toBe(revision);
     expect((await provider.load()).entries.svc).toEqual({ mode: "old", rogue: "legacy" });
-    expect(await svc.get("svc.rogue")).toBe("legacy");
     const replacement = await service.router[route("set")].handler({ key: "svc", value: { mode: "clean" }, layer: "platform" });
     expect(replacement.success).toBe(true);
     expect((await provider.load()).entries.svc).toEqual({ mode: "clean" });

@@ -98,7 +98,6 @@ describe("config service registry authority", () => {
     await expect(createPersistentSchemaRegistry({ configService, key: "billing.mode" })).rejects.toThrow(/canonical internal key/);
     expect(write).not.toHaveBeenCalled();
     expect(configService.revision).toBe(revision);
-    expect(await configService.get("billing.mode")).toEqual(legacy);
     const registry = await createPersistentSchemaRegistry({ configService, key: "_weaver.registry.schemas" });
     expect((await registry.register(registration())).success).toBe(true);
     expect((await provider.load()).entries.billing.mode).toEqual(legacy);

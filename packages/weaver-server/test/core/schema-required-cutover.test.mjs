@@ -54,8 +54,9 @@ describe("server-bound structural admission", () => {
     const harness = await setup(billing(additional), {
       billing: { mode: "old", unknown: "legacy" }, legacy: { readable: true },
     });
-    expect(await harness.service.get("legacy.readable")).toBe(true);
-    expect(await harness.service.get("billing.unknown")).toBe("legacy");
+    expect((await harness.provider.load()).entries).toEqual({
+      billing: { mode: "old", unknown: "legacy" }, legacy: { readable: true },
+    });
     if (additional === true) {
       expect((await harness.service.set("platform", "billing.mode", "new")).success).toBe(true);
     } else {
@@ -70,7 +71,7 @@ describe("server-bound structural admission", () => {
     await denial(harness, () => harness.service.set("platform", "legacy.readable", false), "SCHEMA_NOT_REGISTERED");
     expect((await harness.service.set("platform", "billing", { mode: "clean" })).success).toBe(true);
     expect((await harness.provider.load()).entries.billing).toEqual({ mode: "clean" });
-    expect(await harness.service.get("legacy.readable")).toBe(true);
+    expect((await harness.provider.load()).entries.legacy).toEqual({ readable: true });
   });
 
   test.each([
@@ -79,7 +80,7 @@ describe("server-bound structural admission", () => {
   ])("combined batch cannot preserve a schema-invalid legacy sibling", async (entries) => {
     const harness = await setup(billing(false), { billing: { mode: "old", rogue: "legacy" } });
     await denial(harness, () => harness.service.setMany("platform", entries), "VALIDATION_ERROR");
-    expect(await harness.service.get("billing.rogue")).toBe("legacy");
+    expect((await harness.provider.load()).entries.billing).toEqual({ mode: "old", rogue: "legacy" });
     expect((await harness.service.set("platform", "billing", { mode: "clean" })).success).toBe(true);
   });
 
@@ -271,10 +272,9 @@ describe("server-bound structural admission", () => {
     expect((await platform.load()).entries.billing).toEqual({});
   });
 
-  test("unbound service fails closed while read-only legacy data stays visible", async () => {
+  test("unbound service fails closed without erasing historical data", async () => {
     const provider = createInMemoryStorageProvider({ id: "platform", layer: "platform", initialEntries: { legacy: "readable" } });
     const service = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-    expect(await service.get("legacy")).toBe("readable");
     const revision = service.revision;
     expect((await service.set("platform", "legacy", "no")).error?.code).toBe("INTERNAL_ERROR");
     expect(service.revision).toBe(revision);

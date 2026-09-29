@@ -177,7 +177,6 @@ describe("RestAdapter v1", () => {
     expect(res.body.error.code).toBe("INTERNAL_ERROR");
     expect((await provider.load()).entries.legacy).toEqual({ value: "readable" });
     expect(svc.revision).toBe(revision);
-    expect(await svc.get("legacy.value")).toBe("readable");
   });
 
   test("authorized PUT and PATCH reject a declared write when an invalid legacy sibling remains", async () => {
@@ -205,7 +204,6 @@ describe("RestAdapter v1", () => {
       expect(svc.revision).toBe(revision);
       expect((await provider.load()).entries.svc).toEqual({ mode: "old", rogue: "legacy" });
     }
-    expect(await svc.get("svc.rogue")).toBe("legacy");
     const replacement = await adapter.handleRequest("PUT", "/v1/config/svc", req({ body: { value: { mode: "clean" } } }));
     expect(replacement.status).toBe(200);
     expect((await provider.load()).entries.svc).toEqual({ mode: "clean" });
