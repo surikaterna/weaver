@@ -30,11 +30,16 @@ const persistedEnvironmentRegistrySchema = z.strictObject({
   slots: z.record(z.string(), fragmentSlotRegistrationMetadataSchema),
 });
 
+const environmentsSchema = z.record(
+  registrationEnvironmentSchema,
+  persistedEnvironmentRegistrySchema,
+);
+const legacyRegistrySchema = z.strictObject({
+  environments: environmentsSchema,
+});
 const persistedSchemaRegistrySchema = z.strictObject({
-  environments: z.record(
-    registrationEnvironmentSchema,
-    persistedEnvironmentRegistrySchema,
-  ),
+  version: z.literal(2),
+  environments: environmentsSchema,
 });
 
 type PersistedSchemaEntry = z.infer<typeof persistedSchemaEntrySchema>;
@@ -42,6 +47,7 @@ interface SerializedSchemaEntry extends Omit<PersistedSchemaEntry, "schema"> {
   readonly schema: PersistedSchemaGraph;
 }
 interface SerializedSchemaRegistry {
+  readonly version: 2;
   readonly environments: Record<
     string,
     {
@@ -77,7 +83,7 @@ export function serializeRegistry(
     const env = getPersistedEnvironment(environments, slot.environment);
     env.slots.set(slot.canonicalSlotPath, slot);
   }
-  return { environments: serializeEnvironments(environments) };
+  return { version: 2, environments: serializeEnvironments(environments) };
 }
 
 export function parsePersistedRegistry(raw: unknown): RegistryState {
@@ -92,7 +98,9 @@ export function parsePersistedRegistry(raw: unknown): RegistryState {
     );
   }
   validateRawEnvironmentKeys(raw.environments);
-  const persisted = persistedSchemaRegistrySchema.parse(raw);
+  const persisted = Object.hasOwn(raw, "version")
+    ? persistedSchemaRegistrySchema.parse(raw)
+    : legacyRegistrySchema.parse(raw);
   for (const [environment, env] of Object.entries(persisted.environments)) {
     for (const [path, entry] of Object.entries(env.schemas)) {
       validatePersistedEntry(environment, path, entry);

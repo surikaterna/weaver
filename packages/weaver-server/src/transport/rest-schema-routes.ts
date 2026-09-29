@@ -4,6 +4,7 @@ import {
   registeredObjectWriteResponseSchema,
   registeredPathPatchResponseSchema,
   schemaRegistrationResponseSchema,
+  WeaverErrorInstance,
 } from "@weaver-conf/config-types";
 import type { AuditService } from "../audit/audit-service";
 import type {
@@ -160,7 +161,20 @@ function listSchemasRoute(deps: SchemaRouteDeps): RestRoute {
       if (denied) return denied;
       parseAdminQuery(req.query);
       if (!schemaRegistry) return unavailable(configService);
-      return registeredSchemasResponse(configService, schemaRegistry.listAll());
+      try {
+        return registeredSchemasResponse(
+          configService,
+          schemaRegistry.listAll(),
+        );
+      } catch (error: unknown) {
+        if (
+          error instanceof WeaverErrorInstance &&
+          error.code === "SCHEMA_CONFLICT"
+        ) {
+          return v1Error(configService, error.code, error.message);
+        }
+        throw error;
+      }
     },
   };
 }
