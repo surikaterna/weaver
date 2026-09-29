@@ -72,90 +72,103 @@ export function createRegisteredWriteOperations(
   options: RegisteredWriteOperationsOptions,
 ): RegisteredWriteOperations {
   return {
-    async setRegisteredObject(layer, path, value, context) {
-      const protectedError = protectedConfigMutationError(path);
-      if (protectedError) return protectedError;
-      const snapshot = snapshotSubmitted(value);
-      if (!snapshot.success) return snapshot.result;
-      return options.serialize(async () => {
-        const failure = registeredWritePreflight(options, path, context);
-        if (failure !== null) return failure;
-        const registry = options.getRegistry();
-        if (!registry) return registryUnavailable();
-        const verified = {
-          ...context,
-          schemaRegistry: registry,
-          environment: context.environment ?? options.defaultEnvironment,
-        };
-        const prepared = await prepareRegisteredObjectWrite(
-          path,
-          snapshot.value,
-          verified,
-          options.defaultEnvironment,
-        );
-        if (!prepared.success) return prepared.result;
-        return options.setPrepared(
-          layer,
-          prepared.key,
-          prepared.value,
-          parseCanonicalConfigPath(path).storageKey,
-          snapshot.value,
-          verified,
-        );
-      });
-    },
-    async patchRegisteredPath(layer, path, value, context) {
-      const protectedError = protectedConfigMutationError(path);
-      if (protectedError) return protectedError;
-      const snapshot = snapshotSubmitted(value);
-      if (!snapshot.success) return snapshot.result;
-      return options.serialize(async () => {
-        const failure = registeredWritePreflight(options, path, context);
-        if (failure !== null) return failure;
-        const registry = options.getRegistry();
-        if (!registry) return registryUnavailable();
-        const verified = {
-          ...context,
-          schemaRegistry: registry,
-          environment: context.environment ?? options.defaultEnvironment,
-        };
-        const prepared = await prepareRegisteredPatchWrite(
-          path,
-          snapshot.value,
-          verified,
-          options.defaultEnvironment,
-          (key) => options.getLayerValue(layer, key),
-        );
-        if (!prepared.success) return prepared.result;
-        return options.setPrepared(
-          layer,
-          prepared.key,
-          prepared.value,
-          parseCanonicalConfigPath(path).storageKey,
-          snapshot.value,
-          verified,
-        );
-      });
-    },
-    async validateRegisteredEffective(path, context) {
-      const registry = options.getRegistry();
-      if (!registry)
-        return invalidPathValidation("Schema registry is unavailable");
-      const getOptions = context.scopePath
-        ? { scopePath: context.scopePath }
-        : undefined;
-      return validateRegisteredEffectiveConfiguration(
+    setRegisteredObject: (layer, path, value, context) =>
+      performRegisteredWrite(
+        options,
+        layer,
         path,
-        {
-          ...context,
-          schemaRegistry: registry,
-          environment: context.environment ?? options.defaultEnvironment,
-        },
-        options.defaultEnvironment,
-        (key) => options.get(key, getOptions),
-      );
-    },
+        value,
+        context,
+        (verified, input) =>
+          prepareRegisteredObjectWrite(
+            path,
+            input,
+            verified,
+            options.defaultEnvironment,
+          ),
+      ),
+    patchRegisteredPath: (layer, path, value, context) =>
+      performRegisteredWrite(
+        options,
+        layer,
+        path,
+        value,
+        context,
+        (verified, input) =>
+          prepareRegisteredPatchWrite(
+            path,
+            input,
+            verified,
+            options.defaultEnvironment,
+            (key) => options.getLayerValue(layer, key),
+          ),
+      ),
+    validateRegisteredEffective: (path, context) =>
+      validateBoundEffective(options, path, context),
   };
+}
+
+function validateBoundEffective(
+  options: RegisteredWriteOperationsOptions,
+  path: string,
+  context: EffectiveValidationContext,
+): Promise<SchemaValidationResult> {
+  const registry = options.getRegistry();
+  if (!registry)
+    return Promise.resolve(
+      invalidPathValidation("Schema registry is unavailable"),
+    );
+  const getOptions = context.scopePath
+    ? { scopePath: context.scopePath }
+    : undefined;
+  return validateRegisteredEffectiveConfiguration(
+    path,
+    {
+      ...context,
+      schemaRegistry: registry,
+      environment: context.environment ?? options.defaultEnvironment,
+    },
+    options.defaultEnvironment,
+    (key) => options.get(key, getOptions),
+  );
+}
+
+async function performRegisteredWrite(
+  options: RegisteredWriteOperationsOptions,
+  layer: string,
+  path: string,
+  value: unknown,
+  context: SchemaWriteContext,
+  prepare: (
+    verified: SchemaWriteContext,
+    input: unknown,
+  ) => Promise<SchemaWritePreparation>,
+): Promise<WriteResult> {
+  const protectedError = protectedConfigMutationError(path);
+  if (protectedError) return protectedError;
+  const snapshot = snapshotSubmitted(value);
+  if (!snapshot.success) return snapshot.result;
+  return options.serialize(async () => {
+    const failure = registeredWritePreflight(options, path, context);
+    if (failure) return failure;
+    const registry = options.getRegistry();
+    if (!registry) return registryUnavailable();
+    const verified = {
+      ...context,
+      schemaRegistry: registry,
+      environment: context.environment ?? options.defaultEnvironment,
+    };
+    const prepared = await prepare(verified, snapshot.value);
+    if (!prepared.success) return prepared.result;
+    return options.setPrepared(
+      layer,
+      prepared.key,
+      prepared.value,
+      parseCanonicalConfigPath(path).storageKey,
+      snapshot.value,
+      verified,
+    );
+  });
 }
 
 function registryUnavailable(): WriteResult {
