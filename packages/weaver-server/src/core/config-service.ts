@@ -275,6 +275,18 @@ export async function createWeaverConfigService(
     };
   }
 
+  function registryRoot(entries: Record<string, unknown>): unknown {
+    const internal = entries._weaver;
+    if (
+      internal !== undefined &&
+      (internal === null ||
+        typeof internal !== "object" ||
+        Array.isArray(internal))
+    )
+      throw new Error("Persisted internal config root is invalid");
+    return deepGet(entries, "_weaver.registry");
+  }
+
   function updateRevision(): void {
     revision = computeRevision(getRevisionState());
   }
@@ -652,6 +664,35 @@ export async function createWeaverConfigService(
   };
 
   registerInternalConfigAccess(service, {
+    environment,
+    hasPersistedRegistry: () => {
+      if (
+        providers.length === 0 ||
+        inputProviders.some(
+          (provider) =>
+            provider.layer === "platform" &&
+            degradedProviders.includes(provider.id),
+        )
+      )
+        throw new Error("Schema registry provider is unavailable");
+      return providers.some(
+        (provider) =>
+          registryRoot(layerData.get(provider.id) ?? {}) !== undefined,
+      );
+    },
+    readRegistry: async (layer, key) => {
+      const provider = resolveProvider(layer);
+      if (!provider)
+        throw new Error(
+          `Schema registry provider for layer "${layer}" is unavailable`,
+        );
+      const entries = layerData.get(provider.id) ?? {};
+      const root = registryRoot(entries);
+      const value = deepGet(entries, key);
+      if (value === undefined && root !== undefined)
+        throw new Error("Persisted schema registry is incomplete");
+      return value;
+    },
     read: async (key) => deepGet(getMergedState(), key),
     write: (layer, key, value, opts) =>
       service.set(layer, key, value, withInternalWrite(opts)),

@@ -21,7 +21,11 @@ import { z } from "zod";
 import type { WeaverError } from "../types/errors";
 import { createWeaverError } from "../types/errors";
 import {
-  readInternalConfig,
+  beginRegistryBinding,
+  bindInMemoryRegistry,
+  finishRegistryBinding,
+  readPersistentRegistry,
+  serviceRegistryEnvironment,
   writeInternalConfig,
 } from "./config-service-internal";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
@@ -168,7 +172,7 @@ export function createSchemaRegistry(
     state,
     _options.schemaIdentityMaxPageSize ?? 200,
   );
-  return {
+  const registry: SchemaRegistry = {
     async register(request, context) {
       const evaluation = evaluateRegistration(state, request, context);
       if (!evaluation.result.success) return evaluation.result;
@@ -216,6 +220,8 @@ export function createSchemaRegistry(
         : null;
     },
   };
+  bindInMemoryRegistry(_options.configService, registry);
+  return registry;
 }
 
 function getRegisteredServiceSchema(
@@ -234,11 +240,22 @@ function getRegisteredServiceSchema(
 export async function createPersistentSchemaRegistry(
   options: PersistentSchemaRegistryOptions,
 ): Promise<SchemaRegistry> {
+  const cancelBinding = beginRegistryBinding(options.configService);
+  try {
+    return await hydratePersistentRegistry(options);
+  } finally {
+    cancelBinding();
+  }
+}
+
+async function hydratePersistentRegistry(
+  options: PersistentSchemaRegistryOptions,
+): Promise<SchemaRegistry> {
   const layer = options.layer ?? defaultPersistenceLayer;
   const key = options.key ?? defaultPersistenceKey;
-  const defaultEnvironment = options.environment;
+  const defaultEnvironment = serviceRegistryEnvironment(options.configService);
   const state = parsePersistedRegistry(
-    await readInternalConfig(options.configService, key),
+    await readPersistentRegistry(options.configService, layer, key),
   );
   const persist = createSchemaPersistenceWriter(options, layer, key);
   const pages = new SchemaIdentityPages(
@@ -276,7 +293,7 @@ export async function createPersistentSchemaRegistry(
     return work;
   }
 
-  return {
+  const registry: SchemaRegistry = {
     register: registerSerialized,
 
     async getSchema(serviceId, environment) {
@@ -307,6 +324,8 @@ export async function createPersistentSchemaRegistry(
         : null;
     },
   };
+  finishRegistryBinding(options.configService, registry);
+  return registry;
 }
 
 function findRegisteredAnchor(

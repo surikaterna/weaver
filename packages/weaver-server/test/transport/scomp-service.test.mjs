@@ -1,7 +1,7 @@
 import { createWeaverScompService } from "../../src/transport/scomp-service.ts";
 import { createAuditService } from "../../src/audit/audit-service.ts";
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
-import { createSchemaRegistry } from "../../src/core/schema-registry.ts";
+import { createPersistentSchemaRegistry, createSchemaRegistry } from "../../src/core/schema-registry.ts";
 import { createScopeManager } from "../../src/core/scope-manager.ts";
 import { deepSet, deepRemove } from "@weaver-conf/config-engine";
 import { vi } from "vitest";
@@ -35,8 +35,8 @@ function createTestProvider(id, layer, entries, writable = true) {
   };
 }
 
-function buildScompDeps(configService, defaultEnvironment = "dev") {
-  const schemaRegistry = createSchemaRegistry({ configService });
+function buildScompDeps(configService, defaultEnvironment = "dev", registry) {
+  const schemaRegistry = registry ?? createSchemaRegistry({ configService });
   const scopeManager = createScopeManager({ configService, schemaRegistry });
   return { configService, scopeManager, schemaRegistry, defaultEnvironment };
 }
@@ -310,7 +310,7 @@ describe("createWeaverScompService", () => {
   test("read and subscription handlers omit tainted mount markers", async () => {
     const mount = (source) => ({ _weaver: "mount", source });
     const provider = createTestProvider("p1", "platform", {
-      _weaver: { registry: { schemas: { private: true } } },
+      _weaver: { registry: { schemas: { version: 2, environments: {} } } },
       direct: mount("_weaver.registry.schemas"),
       nested: { leak: mount("_weaver.registry.schemas") },
       chained: mount("direct"),
@@ -320,7 +320,8 @@ describe("createWeaverScompService", () => {
       providers: [provider],
       environment: "dev",
     });
-    const service = createWeaverScompService(buildScompDeps(svc));
+    const registry = await createPersistentSchemaRegistry({ configService: svc });
+    const service = createWeaverScompService(buildScompDeps(svc, "dev", registry));
 
     const snapshot = await service.router[route("resolveAll")].handler({});
     const namespace = await service.router[route("getNamespace")].handler({

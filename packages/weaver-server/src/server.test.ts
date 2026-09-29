@@ -989,18 +989,6 @@ describe("Weaver server provider health", () => {
       body: { status: "degraded", degradedProviders: ["failed"] },
     },
     {
-      name: "all failed providers",
-      providers: [
-        createFailingProvider("first"),
-        createFailingProvider("second"),
-      ],
-      status: 503,
-      body: {
-        status: "unavailable",
-        degradedProviders: ["first", "second"],
-      },
-    },
-    {
       name: "all healthy providers",
       providers: [
         createInMemoryStorageProvider({ id: "first", layer: "platform" }),
@@ -1026,6 +1014,19 @@ describe("Weaver server provider health", () => {
     } finally {
       await server.close();
     }
+    expect(disposeCalls).toBe(1);
+  });
+
+  it("does not expose ready when every registry provider fails to load", async () => {
+    let disposeCalls = 0;
+    await expect(
+      startWithProviders(
+        [createFailingProvider("first"), createFailingProvider("second")],
+        () => {
+          disposeCalls += 1;
+        },
+      ),
+    ).rejects.toThrow(/registry provider.*unavailable/);
     expect(disposeCalls).toBe(1);
   });
 });
