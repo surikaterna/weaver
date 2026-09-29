@@ -1,6 +1,6 @@
 import type {
   RegisteredSchemaDetailResponse,
-  RegisteredSchemaIdentityListResponse,
+  RegisteredSchemaIdentityPageResponse,
 } from "@weaver-conf/config-types";
 import { WeaverErrorInstance } from "@weaver-conf/config-types";
 import type { WeaverClient } from "@weaver-conf/weaver-client";
@@ -15,6 +15,8 @@ type Panel = ReturnType<typeof createPanel>;
 type BrowseState = {
   selections: Selection[];
   request: number;
+  pageRequest: number;
+  nextCursor: string | null;
 };
 
 class SchemaIdentityMismatchError extends Error {}
@@ -24,6 +26,8 @@ export function schemaBrowseError(error: unknown): string {
     return "Malformed schema response or request.";
   const text = error instanceof Error ? error.message : String(error);
   if (error instanceof WeaverErrorInstance) {
+    if (error.code === "REVISION_CONFLICT")
+      return "Schema page is stale (409). Restart from the first page.";
     if (error.code === "UNSUPPORTED_OPERATION")
       return "Schema browsing unsupported by this transport.";
     if (error.code === "NOT_FOUND")
@@ -41,6 +45,8 @@ export function schemaBrowseError(error: unknown): string {
     return "Schema browsing requires authentication (401).";
   if (/\b403\b|forbidden/i.test(text))
     return "Schema browsing access denied (403).";
+  if (/REVISION_CONFLICT|\b409\b/i.test(text))
+    return "Schema page is stale (409). Restart from the first page.";
   if (
     /ZodError|invalid_type|invalid_format|validation/i.test(text) ||
     (error instanceof Error && error.name === "ZodError")
@@ -57,7 +63,7 @@ function optionFor(selection: Selection): HTMLOptionElement {
 }
 
 function visibleSelections(
-  list: RegisteredSchemaIdentityListResponse,
+  list: RegisteredSchemaIdentityPageResponse,
   includeFragments: boolean,
 ): Selection[] {
   return [
@@ -80,14 +86,29 @@ function createPanel(container: HTMLElement) {
   label.append(toggle, " Include fragments and declared slots");
   const selector = document.createElement("select");
   selector.setAttribute("aria-label", "Registered schema identity");
+  const next = document.createElement("button");
+  next.textContent = "Next page";
+  next.disabled = true;
+  const restart = document.createElement("button");
+  restart.textContent = "Restart first page";
   const identity = document.createElement("p");
   const status = document.createElement("p");
   status.setAttribute("role", "status");
   const code = document.createElement("code");
   const pre = document.createElement("pre");
   pre.append(code);
-  container.append(heading, provenance, label, selector, identity, status, pre);
-  return { toggle, selector, identity, status, code };
+  container.append(
+    heading,
+    provenance,
+    label,
+    selector,
+    next,
+    restart,
+    identity,
+    status,
+    pre,
+  );
+  return { toggle, selector, next, restart, identity, status, code };
 }
 
 function clear(panel: Panel, state: BrowseState, message: string): void {
@@ -99,7 +120,7 @@ function clear(panel: Panel, state: BrowseState, message: string): void {
 function populate(
   panel: Panel,
   state: BrowseState,
-  list: RegisteredSchemaIdentityListResponse,
+  list: RegisteredSchemaIdentityPageResponse,
 ): void {
   state.selections = visibleSelections(list, panel.toggle.checked);
   panel.selector.replaceChildren(
@@ -113,23 +134,9 @@ function populate(
     state,
     state.selections.length
       ? "Select an identity to load its schema."
-      : "Supported registry is empty.",
-  );
-}
-
-function slotHasFragment(slot: Selection, selections: Selection[]): boolean {
-  return selections.some(
-    (anchor) =>
-      anchor.kind === "fragment" &&
-      anchor.environment === slot.environment &&
-      anchor.path.startsWith(`${slot.path}/`) &&
-      !selections.some(
-        (inner) =>
-          inner.kind === "slot" &&
-          inner.environment === slot.environment &&
-          inner.path.startsWith(`${slot.path}/`) &&
-          anchor.path.startsWith(`${inner.path}/`),
-      ),
+      : list.anchors.length + list.slots.length === 0 && !list.hasMore
+        ? "Supported registry is empty."
+        : "No identities match on this page. Try the next page or include fragments.",
   );
 }
 
@@ -139,8 +146,6 @@ async function select(
   client: WeaverClient,
 ): Promise<void> {
   const selected = state.selections[panel.selector.selectedIndex - 1];
-  const filledSlot =
-    selected?.kind === "slot" && slotHasFragment(selected, state.selections);
   panel.identity.textContent = selected
     ? `${selected.kind}: ${selected.path} · environment: ${selected.environment}`
     : "";
@@ -148,9 +153,7 @@ async function select(
     panel,
     state,
     selected?.kind === "slot"
-      ? filledSlot
-        ? "Declared slot has a registered fragment; select the fragment anchor to load its schema."
-        : "Declared slot is empty; no schema is registered for this declaration."
+      ? "Declared slot; fragments may be on another page. Select a fragment anchor to load its schema."
       : selected
         ? "Loading selected schema…"
         : "Select an identity to load its schema.",
@@ -181,22 +184,48 @@ export function renderSchemaBrowser(
   client: WeaverClient,
 ): void {
   const panel = createPanel(container);
-  const state: BrowseState = { selections: [], request: 0 };
-  let list: RegisteredSchemaIdentityListResponse | undefined;
+  const state: BrowseState = {
+    selections: [],
+    request: 0,
+    pageRequest: 0,
+    nextCursor: null,
+  };
+  let list: RegisteredSchemaIdentityPageResponse | undefined;
+  async function load(cursor?: string): Promise<void> {
+    const current = ++state.pageRequest;
+    state.selections = [];
+    list = undefined;
+    panel.selector.replaceChildren();
+    panel.identity.textContent = "";
+    panel.next.disabled = true;
+    clear(panel, state, "Loading schema identities…");
+    try {
+      const result = await client.listRegisteredSchemaIdentityPage({
+        limit: 50,
+        ...(cursor ? { cursor } : {}),
+      });
+      if (current !== state.pageRequest) return;
+      state.nextCursor = result.nextCursor;
+      list = result;
+      populate(panel, state, result);
+      panel.next.disabled = !result.hasMore;
+    } catch (error) {
+      if (current !== state.pageRequest) return;
+      state.nextCursor = null;
+      clear(panel, state, schemaBrowseError(error));
+    }
+  }
   panel.selector.addEventListener("change", () => {
     void select(panel, state, client);
   });
   panel.toggle.addEventListener("change", () => {
     if (list) populate(panel, state, list);
   });
-  clear(panel, state, "Loading schema identities…");
-  void client.listRegisteredSchemaIdentities().then(
-    (result) => {
-      list = result;
-      populate(panel, state, result);
-    },
-    (error: unknown) => {
-      clear(panel, state, schemaBrowseError(error));
-    },
-  );
+  panel.next.addEventListener("click", () => {
+    if (state.nextCursor) void load(state.nextCursor);
+  });
+  panel.restart.addEventListener("click", () => {
+    void load();
+  });
+  void load();
 }
