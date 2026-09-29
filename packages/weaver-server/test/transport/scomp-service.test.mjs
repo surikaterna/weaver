@@ -6,6 +6,7 @@ import { createScopeManager } from "../../src/core/scope-manager.ts";
 import { deepSet, deepRemove } from "@weaver-conf/config-engine";
 import { vi } from "vitest";
 import { createScompTransport } from "@weaver-conf/transport-scomp";
+import { registerTestSchema } from "../fixtures/schema-authority.mjs";
 
 const PREFIX = "weaver-config-v1";
 
@@ -230,20 +231,35 @@ describe("createWeaverScompService", () => {
   test("set handler writes and succeeds", async () => {
     const provider = createTestProvider("p1", "platform", {});
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-    const service = createWeaverScompService(buildScompDeps(svc));
+    const deps = buildScompDeps(svc);
+    await registerTestSchema(deps.schemaRegistry, "app", "dev", { name: { type: "string" } });
+    const service = createWeaverScompService(deps);
     const result = await service.router[route("set")].handler({ key: "app.name", value: "hello", layer: "platform" });
     expect(result.success).toBe(true);
     const get = await service.router[route("get")].handler({ key: "app.name" });
     expect(get).toEqual({ value: "hello" });
   });
 
-  test("remove handler deletes key", async () => {
-    const provider = createTestProvider("p1", "platform", { x: 1 });
+  test("legacy unregistered SCOMP set stays successful before the policy flip", async () => {
+    const provider = createTestProvider("p1", "platform", {});
     const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
     const service = createWeaverScompService(buildScompDeps(svc));
-    const result = await service.router[route("remove")].handler({ key: "x", layer: "platform" });
+    const result = await service.router[route("set")].handler({
+      key: "legacy.value", value: "old-policy", layer: "platform",
+    });
     expect(result.success).toBe(true);
-    const get = await service.router[route("get")].handler({ key: "x" });
+    expect(await svc.get("legacy.value")).toBe("old-policy");
+  });
+
+  test("remove handler deletes key", async () => {
+    const provider = createTestProvider("p1", "platform", { app: { x: 1 } });
+    const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
+    const deps = buildScompDeps(svc);
+    await registerTestSchema(deps.schemaRegistry, "app", "dev", { x: { type: "integer" } });
+    const service = createWeaverScompService(deps);
+    const result = await service.router[route("remove")].handler({ key: "app.x", layer: "platform" });
+    expect(result.success).toBe(true);
+    const get = await service.router[route("get")].handler({ key: "app.x" });
     expect(get).toEqual({ value: undefined });
   });
 

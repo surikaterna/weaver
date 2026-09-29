@@ -248,7 +248,8 @@ describe("public graph registration pipelines", () => {
       expect((await first.registry.register(registration(schema))).success).toBe(true);
       expect((await first.registry.register(fragmentRegistration(schema))).success).toBe(true);
       const writesAfterRegistration = tracked.writes();
-      const restarted = await createPersistentSchemaRegistry({ configService: first.service });
+      const restartedService = await harness(tracked.provider);
+      const restarted = restartedService.registry;
       expect(tracked.writes()).toBe(writesAfterRegistration);
       expectRestoredAliases(await restarted.getSchema("svc", "test"), depth);
       expectRestoredAliases(
@@ -264,7 +265,7 @@ describe("public graph registration pipelines", () => {
           hasBreakingChanges: false,
         }),
       );
-      const effects = await expectPatchEffects(first.service, restarted, tracked);
+      const effects = await expectPatchEffects(restartedService.service, restarted, tracked);
       recordResources(
         "persistent-memory-restart",
         depth,
@@ -331,7 +332,7 @@ describe("public graph registration pipelines", () => {
     const first = await harness(tracked.provider);
     expect(tracked.writes()).toBe(0);
     expect(await first.registry.getSchema("svc", "test")).toEqual({ type: "object" });
-    const unchanged = await createPersistentSchemaRegistry({ configService: first.service });
+    const unchanged = (await harness(tracked.provider)).registry;
     expect(unchanged.listAll()).toEqual(first.registry.listAll());
     expect(tracked.writes()).toBe(0);
     expect((await first.registry.register(registration({ type: "object" }))).success).toBe(true);

@@ -1,5 +1,6 @@
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { deepSet, deepRemove } from "@weaver-conf/config-engine";
+import { registerTestService } from "../fixtures/schema-authority.mjs";
 
 function createTestProvider(id, layer, entries, writable = true) {
   let data = JSON.parse(JSON.stringify(entries));
@@ -146,6 +147,10 @@ describe("WeaverConfigService read path", () => {
       environment: "dev",
     });
 
+    await registerTestService(svc, "db", "dev", {
+      host: { type: "string" },
+      port: { type: "integer" },
+    });
     const result = await svc.setMany("platform", {
       "db.host": "localhost",
       "db.port": 5432,

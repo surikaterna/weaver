@@ -107,8 +107,11 @@ describe("persistent schema registry hardening", () => {
     expect(result.success).toBe(true);
     expect(Object.keys(registry.listAll())).toEqual(["/svc:staging"]);
 
+    const restartedService = await createWeaverConfigService({
+      providers: [valid.provider], environment: "dev",
+    });
     const restarted = await createPersistentSchemaRegistry({
-      configService: valid.configService,
+      configService: restartedService,
     });
     expect(await restarted.getSchema("svc", "staging")).toEqual({
       type: "object",
@@ -199,7 +202,10 @@ describe("persistent schema registry hardening", () => {
 
     expect(registry.listAll()).toEqual({});
     expect(await configService.get("_weaver.registry.schemas")).toBeUndefined();
-    const restarted = await createPersistentSchemaRegistry({ configService });
+    const restartedService = await createWeaverConfigService({
+      providers: [provider], environment: "dev",
+    });
+    const restarted = await createPersistentSchemaRegistry({ configService: restartedService });
     expect(restarted.listAll()).toEqual({});
   });
 

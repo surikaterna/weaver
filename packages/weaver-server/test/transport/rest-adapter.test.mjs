@@ -1,6 +1,7 @@
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { createRestAdapter } from "../../src/transport/rest-adapter.ts";
 import { deepSet, deepRemove } from "@weaver-conf/config-engine";
+import { registerTestService, registerTestSchema } from "../fixtures/schema-authority.mjs";
 
 function createTestProvider(id, layer, entries, writable = true) {
   let data = JSON.parse(JSON.stringify(entries));
@@ -23,7 +24,12 @@ function createTestProvider(id, layer, entries, writable = true) {
 async function setup(opts = {}) {
   const provider = createTestProvider("p1", "platform", { app: { name: "test" }, db: { host: "localhost" } });
   const svc = await createWeaverConfigService({ providers: [provider], environment: "dev" });
-  const adapter = createRestAdapter({ configService: svc, ...opts });
+  const registry = await registerTestService(svc, "app", "dev", { name: { type: "string" } });
+  await registerTestSchema(registry, "db", "dev", {
+    host: { type: "string" }, port: { type: "integer" },
+  });
+  await registerTestSchema(registry, "new", "dev", { key: { type: "integer" } });
+  const adapter = createRestAdapter({ configService: svc, schemaRegistry: registry, ...opts });
   return { svc, adapter };
 }
 
@@ -96,6 +102,16 @@ describe("RestAdapter v1", () => {
     assertEnvelope(res.body);
     assertV1Headers(res);
     expect(res.body.data.success).toBe(true);
+  });
+
+  test("legacy unregistered PUT remains permissive until the strict cutover", async () => {
+    const { adapter, svc } = await setup();
+    const res = await adapter.handleRequest("PUT", "/v1/config/legacy/value", req({
+      body: { value: "old-policy" },
+    }));
+    expect(res.status).toBe(200);
+    expect(res.body.data.success).toBe(true);
+    expect(await svc.get("legacy.value")).toBe("old-policy");
   });
 
   test("PUT /v1/config/new/key defaults layer to platform", async () => {
