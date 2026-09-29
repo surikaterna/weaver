@@ -90,6 +90,14 @@ do not use an unimplemented repair endpoint, private `_weaver` writes through
 public APIs, or an old binary as a migration tool. Internal protected access
 is limited to canonical registry and existing pinned/scope recovery needs.
 
+**MongoDB restoration has not been verified for this rollout.** Although the
+bootstrap guide permits a MongoDB provider, this runbook supplies **no MongoDB
+repair or restore procedure** and does not authorize direct MongoDB edits.
+Treat MongoDB-backed invalid values or registry migrations as blocked until
+the Architect and operator approve a provider-specific backup, validation and
+restore procedure and verify it offline; do not infer one from the in-memory
+restart tests.
+
 The registry key is exactly `_weaver.registry.schemas` on the authoritative
 platform provider. Historical custom-key registry data must be backed up and
 migrated **offline**, with ownership/environment/identity/slot checks and
