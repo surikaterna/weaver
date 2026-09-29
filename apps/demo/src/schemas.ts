@@ -5,7 +5,7 @@ export const schemaRegistry = createSchemaRegistry();
 
 // Register UI namespace schemas
 schemaRegistry.register({
-  ownerId: "demo",
+  ownerId: "demo-ui",
   namespace: "app.ui",
   properties: {
     theme: {
@@ -49,7 +49,7 @@ schemaRegistry.register({
 
 // Register feature namespace schemas
 schemaRegistry.register({
-  ownerId: "demo",
+  ownerId: "demo-feature",
   namespace: "app.feature",
   properties: {
     "analytics.enabled": {
@@ -77,7 +77,7 @@ schemaRegistry.register({
 
 // Register network namespace schemas
 schemaRegistry.register({
-  ownerId: "demo",
+  ownerId: "demo-network",
   namespace: "app.network",
   properties: {
     "timeout.ms": {

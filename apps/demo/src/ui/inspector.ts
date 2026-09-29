@@ -6,205 +6,160 @@ import {
   findLocation,
   type LocationDef,
 } from "../locations";
-import { getSchemaForKey } from "../schemas";
 import {
   getSelectedKey,
   getSelectedLocation,
   onSelectedKeyChange,
   onSelectedLocationChange,
 } from "../state";
+import { renderInspectorValue } from "./inspector-view";
+import { renderSchemaBrowser } from "./schema-browser";
 
-const VISIBILITY_COLORS: Record<string, string> = {
-  public: "#6bcb77",
-  admin: "#e8a838",
-  platform: "#5b9bd5",
-  internal: "#e74c3c",
-};
+function scopeLayers(loc: LocationDef | null): string[] {
+  if (!loc) return [];
+  return [
+    ...(COUNTRY_CODES_WITH_PROVIDERS.has(loc.countryCode)
+      ? [`country:${loc.countryCode}`]
+      : []),
+    `location:${loc.code}`,
+  ];
+}
 
-const POLICY_COLORS: Record<string, string> = {
-  "direct-allowed": "#6bcb77",
-  "staging-gate": "#e8d838",
-  "full-pipeline": "#e8a838",
-  "emergency-override": "#e74c3c",
-};
+function displayLayers(names: string[], scope: string[]): string[] {
+  return names.flatMap((name) =>
+    name === "tenant" ? [name, ...scope] : [name],
+  );
+}
 
-function requireQuery(container: HTMLElement, selector: string): Element {
-  const element = container.querySelector(selector);
-  if (element === null) {
-    throw new Error(`Missing required element: ${selector}`);
+function winningScopeLayer(
+  scope: string[],
+  values: Partial<Record<string, unknown>>,
+): string | undefined {
+  return [...scope].reverse().find((layer) => values[layer] !== undefined);
+}
+
+function showPlaceholder(root: HTMLElement): void {
+  const placeholder = document.createElement("p");
+  placeholder.className = "placeholder";
+  placeholder.textContent = "Select a key to inspect";
+  root.replaceChildren(placeholder);
+}
+
+function restoreFocus(
+  root: HTMLElement,
+  inspector: HTMLElement,
+  key: string | null,
+): void {
+  if (!root.contains(document.activeElement)) return;
+  if (key !== null) root.querySelector("button")?.focus();
+  else {
+    inspector.tabIndex = -1;
+    inspector.focus();
   }
-  return element;
+}
+
+class InspectorPresenter {
+  private generation = 0;
+  private previousKey = getSelectedKey();
+  private cleanup: (() => void) | undefined;
+  private readonly browser;
+
+  constructor(
+    private readonly container: HTMLElement,
+    private readonly valueRoot: HTMLElement,
+    private readonly schemaRoot: HTMLElement,
+    private readonly client: WeaverClient,
+    private readonly config?: WeaverConfig,
+  ) {
+    this.browser = renderSchemaBrowser(schemaRoot, client);
+  }
+
+  render = (): void => {
+    const request = ++this.generation;
+    const key = getSelectedKey();
+    if (key !== this.previousKey) {
+      restoreFocus(this.schemaRoot, this.container, key);
+      this.browser.reset();
+      this.previousKey = key;
+      this.cleanup?.();
+      this.cleanup =
+        key === null ? undefined : this.client.onChange(key, this.render);
+    }
+    this.schemaRoot.hidden = key === null;
+    if (key === null) {
+      showPlaceholder(this.valueRoot);
+      return;
+    }
+    const code = getSelectedLocation();
+    const loc = code ? (findLocation(code) ?? null) : null;
+    const base = this.client.get(key);
+    const value = loc
+      ? this.client.getForScope(key, buildScopePath(loc))
+      : base;
+    const scope = scopeLayers(loc);
+    const names = displayLayers(
+      this.config
+        ? [...this.config.layerNames]
+        : ["core", "app", "tenant", "user", "session"],
+      scope,
+    );
+    renderInspectorValue(this.valueRoot, { key, value });
+    this.inspect(key, value, base, loc, scope, names, request);
+  };
+
+  private inspect(
+    key: string,
+    value: unknown,
+    base: unknown,
+    loc: LocationDef | null,
+    scope: string[],
+    names: string[],
+    request: number,
+  ): void {
+    this.client
+      .inspect(key)
+      .then((inspection) => {
+        if (request !== this.generation) return;
+        const effectiveLayer =
+          loc && value !== base
+            ? (winningScopeLayer(scope, inspection.layerValues ?? {}) ??
+              inspection.effectiveLayer)
+            : inspection.effectiveLayer;
+        renderInspectorValue(this.valueRoot, {
+          key,
+          value,
+          effectiveLayer,
+          layerNames: names,
+          layerValues: inspection.layerValues ?? {},
+        });
+      })
+      .catch(() => {
+        if (request === this.generation)
+          renderInspectorValue(this.valueRoot, { key, value });
+      });
+  }
 }
 
 export function renderInspector(
   container: HTMLElement,
   client: WeaverClient,
-  weaverConfig?: WeaverConfig,
+  config?: WeaverConfig,
 ): void {
-  container.innerHTML = `<h2>Key Inspector</h2><div class="inspector-body"></div>`;
-  const body = requireQuery(container, ".inspector-body");
-
-  function render(): void {
-    const key = getSelectedKey();
-    if (key === null) {
-      body.innerHTML = `<p class="placeholder">Select a key to inspect</p>`;
-      return;
-    }
-
-    const locationCode = getSelectedLocation();
-    const loc = locationCode ? findLocation(locationCode) : null;
-
-    const baseValue = client.get(key);
-    const scopedValue = loc
-      ? client.getForScope(key, buildScopePath(loc))
-      : baseValue;
-
-    const scopeLayers = buildScopeLayerNames(loc);
-    const layerNames = weaverConfig
-      ? [...weaverConfig.layerNames]
-      : ["core", "app", "tenant", "user", "session"];
-    const displayLayers = insertScopeLayers(layerNames, scopeLayers);
-
-    // Use async inspect for layer breakdown
-    client
-      .inspect(key)
-      .then((inspection) => {
-        const isLocationWinner = loc !== null && scopedValue !== baseValue;
-        const effectiveLayer = isLocationWinner
-          ? (findWinnerScopeLayer(scopeLayers, inspection.layerValues) ??
-            inspection.effectiveLayer)
-          : inspection.effectiveLayer;
-
-        let html = `<h3>${key}</h3>`;
-        html += buildEffectiveSection({
-          effectiveValue: scopedValue,
-          effectiveLayer,
-        });
-        html += buildLayerBreakdown(displayLayers, {
-          effectiveLayer,
-          layerValues: inspection.layerValues ?? {},
-        });
-        html += buildSchemaSection(key);
-        body.innerHTML = html;
-      })
-      .catch(() => {
-        // Fallback: show effective value without layer breakdown
-        let html = `<h3>${key}</h3>`;
-        html += buildEffectiveSection({
-          effectiveValue: scopedValue,
-          effectiveLayer: undefined,
-        });
-        html += buildSchemaSection(key);
-        body.innerHTML = html;
-      });
-  }
-
-  render();
-  onSelectedKeyChange(() => render());
-  onSelectedLocationChange(() => render());
-
-  let cleanupOnChange: (() => void) | null = null;
-  onSelectedKeyChange((key) => {
-    cleanupOnChange?.();
-    if (key !== null) {
-      cleanupOnChange = client.onChange(key, () => render());
-    }
-  });
-}
-
-function buildEffectiveSection(inspection: {
-  effectiveValue: unknown;
-  effectiveLayer: string | undefined;
-}): string {
-  return `<div class="effective-value">
-    Effective: <strong>${formatValue(inspection.effectiveValue)}</strong>
-    <span class="effective-layer">from <em>${inspection.effectiveLayer ?? "local"}</em></span>
-  </div>`;
-}
-
-function buildLayerBreakdown(
-  layerNames: string[],
-  inspection: {
-    effectiveLayer: string | undefined;
-    layerValues: Partial<Record<string, unknown>>;
-  },
-): string {
-  let html = `<div class="layer-breakdown">`;
-  for (const layer of layerNames) {
-    const value = inspection.layerValues[layer];
-    const isWinner = layer === inspection.effectiveLayer;
-    html += `
-      <div class="layer-row${isWinner ? " winner" : ""}">
-        <span class="layer-label">${layer}</span>
-        <span class="layer-val">${value !== undefined ? formatValue(value) : "—"}</span>
-      </div>`;
-  }
-  html += `</div>`;
-  return html;
-}
-
-function buildSchemaSection(key: string): string {
-  const schema = getSchemaForKey(key);
-  if (!schema) {
-    return `<div class="schema-meta"><p class="placeholder">No schema registered</p></div>`;
-  }
-
-  const visibility = schema.visibility ?? "public";
-  const visColor = VISIBILITY_COLORS[visibility] ?? "#8892a4";
-  const policy = schema.changePolicy ?? "direct-allowed";
-  const polColor = POLICY_COLORS[policy] ?? "#8892a4";
-  const ceiling = schema.maxOverrideLayer;
-
-  return `<div class="schema-meta">
-    <h4>Schema Metadata</h4>
-    <dl>
-      <dt>Description</dt>
-      <dd>${schema.description ?? "—"}</dd>
-      <dt>Visibility</dt>
-      <dd><span class="schema-badge" style="background:${visColor}20;color:${visColor}">${visibility}</span></dd>
-      <dt>Change Policy</dt>
-      <dd><span class="schema-badge" style="background:${polColor}20;color:${polColor}">${policy}</span></dd>
-      <dt>Max Override Layer</dt>
-      <dd>${ceiling ? `<strong>🔒 ${ceiling}</strong>` : "—"}</dd>
-    </dl>
-  </div>`;
-}
-
-function formatValue(value: unknown): string {
-  if (value === undefined) return "<em>undefined</em>";
-  return JSON.stringify(value);
-}
-
-function buildScopeLayerNames(loc: LocationDef | null | undefined): string[] {
-  if (!loc) return [];
-  const layers: string[] = [];
-  if (COUNTRY_CODES_WITH_PROVIDERS.has(loc.countryCode)) {
-    layers.push(`country:${loc.countryCode}`);
-  }
-  layers.push(`location:${loc.code}`);
-  return layers;
-}
-
-function insertScopeLayers(
-  layerNames: string[],
-  scopeLayers: string[],
-): string[] {
-  if (scopeLayers.length === 0) return layerNames;
-  const result: string[] = [];
-  for (const name of layerNames) {
-    result.push(name);
-    if (name === "tenant") result.push(...scopeLayers);
-  }
-  return result;
-}
-
-function findWinnerScopeLayer(
-  scopeLayers: string[],
-  values: Partial<Record<string, unknown>>,
-): string | undefined {
-  for (let i = scopeLayers.length - 1; i >= 0; i--) {
-    const layer = scopeLayers[i];
-    if (layer !== undefined && values[layer] !== undefined) return layer;
-  }
-  return undefined;
+  const heading = document.createElement("h2");
+  heading.textContent = "Key Inspector";
+  const valueRoot = document.createElement("div");
+  valueRoot.className = "inspector-body";
+  const schemaRoot = document.createElement("div");
+  schemaRoot.className = "inspector-schema";
+  container.replaceChildren(heading, valueRoot, schemaRoot);
+  const presenter = new InspectorPresenter(
+    container,
+    valueRoot,
+    schemaRoot,
+    client,
+    config,
+  );
+  presenter.render();
+  onSelectedKeyChange(presenter.render);
+  onSelectedLocationChange(presenter.render);
 }

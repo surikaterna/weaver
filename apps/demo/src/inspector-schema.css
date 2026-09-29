@@ -1,0 +1,12 @@
+#content, #sidebar, #inspector, #editor { min-width: 0; }
+#inspector { overflow-wrap: anywhere; }
+.inspector-schema { margin-top: 0.75rem; border-top: 1px solid var(--color-border); padding-top: 0.5rem; }
+.inspector-schema button, .inspector-schema select { padding: 0.3rem 0.5rem; margin: 0.2rem; }
+.inspector-schema select { max-width: 100%; background: var(--bg); color: var(--color-text); }
+.inspector-schema p { margin: 0.35rem 0; font-size: 0.8rem; }
+.inspector-schema pre { max-height: 16rem; max-width: 100%; overflow: auto; white-space: pre; font-size: 0.75rem; }
+.inspector-schema [hidden] { display: none; }
+@media (max-width: 768px) {
+  #app { min-width: 0; }
+  .inspector-schema pre { max-height: 12rem; }
+}
