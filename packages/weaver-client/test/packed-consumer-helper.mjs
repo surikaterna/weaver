@@ -1,14 +1,21 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const root = fileURLToPath(new URL("../../../", import.meta.url));
 export const packages = ["config-types", "config-engine", "config-runtime", "config-sync", "weaver-client"];
 export const requireTool = createRequire(join(root, "package.json"));
+export const browserExports = [
+  "HttpResponseContractError", "HttpServerResponseError", "createClientSchemaRegistry",
+  "createHttpTransport", "createIndexedDbPersistence", "createInstanceClient",
+  "createLocalTransport", "createNamespaceClient", "createScopeLoader",
+  "createStalenessMonitor", "createSyncRuntimeBridge", "createWeaverClient",
+  "createWeaverSyncTransport", "createWriteQueue", "fetchWithRetry", "flattenObject",
+  "validateOnRead", "validateOnWrite", "withMiddleware",
+].sort();
 
 export function run(command, args, cwd) {
   return execFileSync(command, args, {
@@ -19,7 +26,8 @@ export function run(command, args, cwd) {
 }
 
 export async function installConsumer() {
-  const directory = await mkdtemp(join(tmpdir(), "weaver-browser-packed-"));
+  await mkdir("/tmp/opencode", { recursive: true });
+  const directory = await mkdtemp("/tmp/opencode/weaver-browser-packed-");
   const dependencies = {};
   for (const name of packages) {
     const source = join(root, "packages", name);

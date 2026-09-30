@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises";
 import test from "node:test";
-import { bootFixture, fixture, installConsumer, run, snapshot } from "./packed-consumer-helper.mjs";
+import { bootFixture, browserExports, fixture, installConsumer, run, snapshot } from "./packed-consumer-helper.mjs";
 
 const filesystemProof = `
 const fs = await import("node:fs/promises");
@@ -44,6 +44,9 @@ test("packed Node root retains real atomic filesystem persistence in ESM and CJS
 (async () => {
 const assert = await import("node:assert/strict");
 assert.deepEqual(Object.keys(api).filter(key => key !== "createFileSystemPersistence").sort(), Object.keys(browser).sort());
+assert.deepEqual(Object.keys(browser).sort(), ${JSON.stringify(browserExports)});
+assert.equal(typeof api.createFileSystemPersistence, "function");
+console.log("Node root export parity: " + JSON.stringify(Object.keys(api).sort()));
 ${bootFixture}
 ${filesystemProof}
 })().catch(error => { console.error(error); process.exitCode = 1; });`);
