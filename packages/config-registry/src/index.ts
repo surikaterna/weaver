@@ -17,3 +17,8 @@ export {
   schemaRegistrationRequestSchema,
   schemaRegistrationResultSchema,
 } from "./registry-contracts";
+export {
+  type StructuralSupport,
+  schemaWriteSupport,
+  structuralSupportSchema,
+} from "./schema-write-support";

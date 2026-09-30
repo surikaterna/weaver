@@ -7,7 +7,7 @@ import { createContext, runInContext } from "node:vm";
 import { build } from "esbuild";
 
 const expected = {
-  root: ["canonicalSchemaRegistryOptionsSchema", "createCanonicalSchemaRegistry", "registeredSchemaAnchorSchema", "schemaRegistrationAuditMetadataSchema", "schemaRegistrationContextSchema", "schemaRegistrationRequestSchema", "schemaRegistrationResultSchema"],
+  root: ["canonicalSchemaRegistryOptionsSchema", "createCanonicalSchemaRegistry", "registeredSchemaAnchorSchema", "schemaRegistrationAuditMetadataSchema", "schemaRegistrationContextSchema", "schemaRegistrationRequestSchema", "schemaRegistrationResultSchema", "schemaWriteSupport", "structuralSupportSchema"],
   internal: ["SchemaIdentityPages", "buildIdentityIndex", "cloneState", "createEmptyState", "createRegistryAdapter", "schemaKey", "registryStateSchema", "schemaEntrySchema"],
 };
 const smoke = `
