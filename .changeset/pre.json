@@ -19,5 +19,25 @@
     "@weaver-conf/weaver-client": "0.1.2",
     "@weaver-conf/weaver-server": "0.1.4"
   },
-  "changesets": []
+  "changesets": [
+    "audit-sink-fail-open",
+    "bright-otters-validate",
+    "bright-registry-keys",
+    "calm-compositions-weave",
+    "calm-plans-validate",
+    "canonical-paths-register",
+    "client-writes-server-authority",
+    "curious-schema-browser",
+    "fast-composition-validation",
+    "fresh-nodes-wave",
+    "graph-safe-registration",
+    "path-first-client-flow",
+    "quiet-targets-envelope",
+    "registered-transports-connect",
+    "required-schema-admission",
+    "safe-paths-settle",
+    "schema-audit-boundary",
+    "single-registry-authority",
+    "tidy-identity-pages"
+  ]
 }

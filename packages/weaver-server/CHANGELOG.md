@@ -1,5 +1,53 @@
 # @weaver-conf/weaver-server
 
+## 0.2.0-alpha.0
+
+### Minor Changes
+
+- [#157](https://github.com/surikaterna/weaver/pull/157) [`c092133`](https://github.com/surikaterna/weaver/commit/c0921332fdb46a25e4c6395ca658b4776b3a6c40) Thanks [@spralle](https://github.com/spralle)! - Add schema validation primitives and dedicated registered-configuration write and validation APIs.
+
+- [#163](https://github.com/surikaterna/weaver/pull/163) [`de46525`](https://github.com/surikaterna/weaver/commit/de465259b1581903ddf02e82c05192e01218c1fd) Thanks [@spralle](https://github.com/spralle)! - Support `anyOf`, `oneOf`, `allOf`, and `not` in configuration validation and registered schema patch writes.
+
+- [#155](https://github.com/surikaterna/weaver/pull/155) [`4081689`](https://github.com/surikaterna/weaver/commit/4081689aaa06236e354cf62ec56ef7ccaede370f) Thanks [@spralle](https://github.com/spralle)! - Introduce canonical JSON Schema service and fragment registration contracts, address registry entries by canonical paths, and preserve schema requests directly across transport and server boundaries. Remove namespace-derived registration and its Zod-to-JSON-Schema conversion so the canonical request and response are the only registration transport contracts.
+
+- [#172](https://github.com/surikaterna/weaver/pull/172) [`fcf5f23`](https://github.com/surikaterna/weaver/commit/fcf5f23ab9dfe601bf9b0ad1599e2cfe1da35436) Thanks [@spralle](https://github.com/spralle)! - Add exact registered-schema identity listing and on-demand detail contracts for authenticated HTTP and trusted SCOMP peers. Keep bulk fetching available as deprecated compatibility for opted-in boot validation.
+
+- [#158](https://github.com/surikaterna/weaver/pull/158) [`c95cc74`](https://github.com/surikaterna/weaver/commit/c95cc74934cb172da7bfe04de4bcaa7c02d02b49) Thanks [@spralle](https://github.com/spralle)! - Add runtime-validated REST and SCOMP contracts for registered writes and effective validation, including authorized canonical REST routes and accurate degraded-provider health.
+
+- [#177](https://github.com/surikaterna/weaver/pull/177) [`33ce80b`](https://github.com/surikaterna/weaver/commit/33ce80b5f7f0405075a72e6cdc4c3b83b1163ce7) Thanks [@spralle](https://github.com/spralle)! - Require registered structural declarations for public configuration mutations and expose `SCHEMA_NOT_REGISTERED`, `WRITE_UNAVAILABLE` (proven unsent), and `WRITE_OUTCOME_UNKNOWN` (dispatch or receipt uncertain) as typed errors. Existing schemaless writes must register schemas before they can succeed. Persistent schema registries now accept only the omitted or exact `_weaver.registry.schemas` key; operators using a custom key must back up, inventory and migrate its metadata offline to that protected key before upgrading. Custom keys are rejected without moving or deleting stored data.
+
+- [#160](https://github.com/surikaterna/weaver/pull/160) [`9501058`](https://github.com/surikaterna/weaver/commit/9501058744b84db85669e73dabe54125f20b00a8) Thanks [@spralle](https://github.com/spralle)! - Add typed schema operation audit events for REST and SCOMP registration, registered writes, and effective validation, and keep internal schema registry metadata out of public configuration reads.
+
+- [#174](https://github.com/surikaterna/weaver/pull/174) [`52f3786`](https://github.com/surikaterna/weaver/commit/52f3786b6e8ffa8e0cb2ad46ce726cb9a38b73b5) Thanks [@spralle](https://github.com/spralle)! - Add opt-in bounded-count schema identity pages with configurable server maximum and local-revision cursors without changing legacy bulk/list APIs.
+
+### Patch Changes
+
+- [#169](https://github.com/surikaterna/weaver/pull/169) [`a2b33b0`](https://github.com/surikaterna/weaver/commit/a2b33b041d54d04228051e453bb07287d99efb30) Thanks [@spralle](https://github.com/spralle)! - Preserve completed schema operation results when audit recording fails, while keeping sink failures isolated and diagnostics sanitized.
+
+- [#173](https://github.com/surikaterna/weaver/pull/173) [`ff20c4c`](https://github.com/surikaterna/weaver/commit/ff20c4cb4cdb3d1bbda51b10ca0fea901c53c0c1) Thanks [@spralle](https://github.com/spralle)! - Preserve distinct schema and slot registrations whose path/environment pairs used to collide, and fail ambiguous legacy bulk projection instead of overwriting entries.
+
+- [#167](https://github.com/surikaterna/weaver/pull/167) [`139b311`](https://github.com/surikaterna/weaver/commit/139b3113436f7b7ccaa0513563f04ac2f7e27de1) Thanks [@spralle](https://github.com/spralle)! - Safely reuse unchanged call-local schema preparation across registered patch validation stages.
+
+- [#166](https://github.com/surikaterna/weaver/pull/166) [`a16d5a6`](https://github.com/surikaterna/weaver/commit/a16d5a62915663a361001ca1f70bb2b4fd2fccc4) Thanks [@spralle](https://github.com/spralle)! - Remove fixed composition-validation overhead from ordinary configuration checks while preserving composition and graph-safety semantics. Bump the server so its workspace dependency delivers the config-engine runtime fix to server consumers.
+
+- [`dc99c56`](https://github.com/surikaterna/weaver/commit/dc99c56222bdd67ebe7f3409ad5057db3926a9ff) Thanks [@kennyek](https://github.com/kennyek)! - Update development types to Node.js 26.
+
+- [#165](https://github.com/surikaterna/weaver/pull/165) [`efb7660`](https://github.com/surikaterna/weaver/commit/efb766065b9a95fff271984030e79dbec90e8f60) Thanks [@spralle](https://github.com/spralle)! - Parse recursive configuration schemas as identity-aware graphs and persist registered schemas with a compact deterministic graph encoding.
+
+- [#168](https://github.com/surikaterna/weaver/pull/168) [`7b1f1cb`](https://github.com/surikaterna/weaver/commit/7b1f1cb921b626705e6abe046fd269b2ca5688d2) Thanks [@spralle](https://github.com/spralle)! - Return revision-safe REST envelopes for pre-routing invalid request targets and JWT failures, so strict clients can map 400/401 errors without exposing protected state.
+
+- [#156](https://github.com/surikaterna/weaver/pull/156) [`b894b26`](https://github.com/surikaterna/weaver/commit/b894b26bada468e3ca74ae91e8ac3459d209d2e2) Thanks [@spralle](https://github.com/spralle)! - Reject unsafe persisted paths and environments plus non-object schema roots before mutation, and expose an enforced runtime schema for lexically stable canonical path round trips.
+
+- [#177](https://github.com/surikaterna/weaver/pull/177) [`779bca1`](https://github.com/surikaterna/weaver/commit/779bca151e39c42a2635449bf15d7c622be827ea) Thanks [@spralle](https://github.com/spralle)! - Prevent multiple schema registries from binding to one config service and require verified persistence before exposing a hydrated registry. Generic writes retain their existing behavior until the schema-required cutover.
+
+- Updated dependencies [[`c092133`](https://github.com/surikaterna/weaver/commit/c0921332fdb46a25e4c6395ca658b4776b3a6c40), [`de46525`](https://github.com/surikaterna/weaver/commit/de465259b1581903ddf02e82c05192e01218c1fd), [`139b311`](https://github.com/surikaterna/weaver/commit/139b3113436f7b7ccaa0513563f04ac2f7e27de1), [`4081689`](https://github.com/surikaterna/weaver/commit/4081689aaa06236e354cf62ec56ef7ccaede370f), [`fcf5f23`](https://github.com/surikaterna/weaver/commit/fcf5f23ab9dfe601bf9b0ad1599e2cfe1da35436), [`a16d5a6`](https://github.com/surikaterna/weaver/commit/a16d5a62915663a361001ca1f70bb2b4fd2fccc4), [`dc99c56`](https://github.com/surikaterna/weaver/commit/dc99c56222bdd67ebe7f3409ad5057db3926a9ff), [`efb7660`](https://github.com/surikaterna/weaver/commit/efb766065b9a95fff271984030e79dbec90e8f60), [`c95cc74`](https://github.com/surikaterna/weaver/commit/c95cc74934cb172da7bfe04de4bcaa7c02d02b49), [`33ce80b`](https://github.com/surikaterna/weaver/commit/33ce80b5f7f0405075a72e6cdc4c3b83b1163ce7), [`b894b26`](https://github.com/surikaterna/weaver/commit/b894b26bada468e3ca74ae91e8ac3459d209d2e2), [`9501058`](https://github.com/surikaterna/weaver/commit/9501058744b84db85669e73dabe54125f20b00a8), [`52f3786`](https://github.com/surikaterna/weaver/commit/52f3786b6e8ffa8e0cb2ad46ce726cb9a38b73b5)]:
+  - @weaver-conf/config-engine@0.2.0-alpha.0
+  - @weaver-conf/config-types@0.2.0-alpha.0
+  - @weaver-conf/transport-scomp@0.2.0-alpha.0
+  - @weaver-conf/storage-providers@0.1.3-alpha.0
+  - @weaver-conf/config-runtime@0.1.3-alpha.0
+  - @weaver-conf/config-auth@0.1.3-alpha.0
+
 ## 0.1.4
 
 ### Patch Changes
