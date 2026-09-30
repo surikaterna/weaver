@@ -110,6 +110,14 @@ Configuration is stored as nested JSON objects. The resolution engine composes v
 - [Server Quickstart](./docs/guides/server-quickstart.md)
 - [Bootstrap Config Repository](./docs/guides/bootstrap-config-repo.md)
 
+## Proposed designs
+
+These configuration-release designs are proposals, not implemented features or accepted decisions (weaver-txq8):
+
+- [Enterprise configuration release PRD](./docs/prd/enterprise-config-release-tooling.md)
+- [ADR 0005: Target-aware configuration releases](./docs/adr/0005-target-aware-config-releases.md)
+- [Configuration release workflow and benefits for Dev, Ops and Customers](./docs/guides/config-release-workflow.md)
+
 ## Development
 
 ```bash
