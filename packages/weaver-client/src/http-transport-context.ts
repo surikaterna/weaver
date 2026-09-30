@@ -30,7 +30,15 @@ export function createHttpContext(options: HttpTransportOptions) {
     retry,
     timeout: options.timeout ?? 30000,
   });
-  return { baseUrl, buildHeaders, fetchFn, requester, sse };
+  return {
+    baseUrl,
+    buildHeaders,
+    fetchFn,
+    onError,
+    requester,
+    sse,
+    timeout: options.timeout ?? 30000,
+  };
 }
 
 export type HttpContext = ReturnType<typeof createHttpContext>;

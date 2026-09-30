@@ -88,7 +88,7 @@ export function serializeRegistry(
 
 export function parsePersistedRegistry(raw: unknown): RegistryState {
   const state = createEmptyState();
-  if (raw === undefined || raw === null) return state;
+  if (raw === undefined) return state;
   if (!isRecord(raw)) {
     throw new Error("Persisted schema registry must be an object");
   }

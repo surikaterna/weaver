@@ -5,9 +5,17 @@ import {
   createSchemaRegistry,
 } from "../src/core/schema-registry.js";
 
-const configService = {} as Parameters<
-  typeof createSchemaRegistry
->[0]["configService"];
+async function freshService() {
+  const provider = createInMemoryStorageProvider({
+    id: "platform",
+    layer: "platform",
+    initialEntries: {},
+  });
+  return createWeaverConfigService({
+    providers: [provider],
+    environment: "prod",
+  });
+}
 
 function service(serviceId: string, environment = "prod") {
   return {
@@ -21,7 +29,9 @@ function service(serviceId: string, environment = "prod") {
 
 describe("schema identity pages", () => {
   it("iterates ordinal pages in environment/path/kind code-unit order", async () => {
-    const registry = createSchemaRegistry({ configService });
+    const registry = createSchemaRegistry({
+      configService: await freshService(),
+    });
     for (const [id, env] of [
       ["svc", "z:env"],
       ["app", "A:env"],
@@ -50,7 +60,9 @@ describe("schema identity pages", () => {
     ]);
   });
   it("orders mixed identities by code unit, never exposes bodies, and invalidates only committed local changes", async () => {
-    const registry = createSchemaRegistry({ configService });
+    const registry = createSchemaRegistry({
+      configService: await freshService(),
+    });
     expect(registry.listRegisteredSchemaIdentityPage()).toEqual({
       anchors: [],
       slots: [],
@@ -117,7 +129,7 @@ describe("schema identity pages", () => {
 
   it("respects raised operator max and exact boundary", async () => {
     const registry = createSchemaRegistry({
-      configService,
+      configService: await freshService(),
       schemaIdentityMaxPageSize: 250,
     });
     for (let i = 0; i < 110; i++) await registry.register(service(`svc${i}`));
@@ -130,7 +142,9 @@ describe("schema identity pages", () => {
   });
 
   it("rejects malformed, noncanonical, unsafe and impossible ordinal cursors", async () => {
-    const registry = createSchemaRegistry({ configService });
+    const registry = createSchemaRegistry({
+      configService: await freshService(),
+    });
     await registry.register(service("svc"));
     const cursor =
       registry.listRegisteredSchemaIdentityPage({ limit: 1 }).nextCursor ?? "";
@@ -186,8 +200,12 @@ describe("schema identity pages", () => {
     await first.register(service("other", "prod"));
     const cursor =
       first.listRegisteredSchemaIdentityPage({ limit: 1 }).nextCursor ?? "";
+    const restartedService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "prod",
+    });
     const restarted = await createPersistentSchemaRegistry({
-      configService: config,
+      configService: restartedService,
     });
     expect(
       restarted.listRegisteredSchemaIdentityPage({ limit: 10 }).slots,
@@ -200,6 +218,7 @@ describe("schema identity pages", () => {
     expect(() =>
       restarted.listRegisteredSchemaIdentityPage({ cursor }),
     ).toThrow();
+    await restartedService.flush();
     await config.flush();
   });
 
@@ -222,12 +241,17 @@ describe("schema identity pages", () => {
     ]);
     expect(results.every(({ success }) => success)).toBe(true);
     expect(registry.listRegisteredSchemaIdentityPage().anchors).toHaveLength(2);
+    const restartedService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "prod",
+    });
     const restarted = await createPersistentSchemaRegistry({
-      configService: config,
+      configService: restartedService,
     });
     expect(restarted.listRegisteredSchemaIdentityPage().anchors).toHaveLength(
       2,
     );
+    await restartedService.flush();
     await config.flush();
   });
 });

@@ -44,6 +44,7 @@ export function createLocalTransport(
   }
 
   return {
+    writeAuthority: "local",
     async resolveAll(_opts?: ResolveOptions): Promise<ConfigSnapshot> {
       return withLatency(snapshot);
     },

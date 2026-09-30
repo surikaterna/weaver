@@ -115,6 +115,7 @@ function createMockTransport(
   overrides: Partial<WeaverTransport> = {},
 ): WeaverTransport {
   return {
+    writeAuthority: "local",
     resolveAll: async () => ({
       entries: {},
       scopes: {},

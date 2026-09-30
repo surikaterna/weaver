@@ -1,3 +1,4 @@
+import { parsePath } from "@weaver-conf/config-engine";
 import {
   type ScopeDefinition,
   weaverErrorSchema,
@@ -10,13 +11,34 @@ import {
   queryString,
   request,
 } from "./http-transport-context";
+import { unknownWriteOutcome, withWriteDeadline } from "./http-write-deadline";
 import type { WeaverTransport, WriteOptions, WriteResult } from "./transport";
 import type { ConfigDelta, ConfigSnapshot, Unsubscribe } from "./types";
 
 const legacyWriteEnvelopeSchema = z.looseObject({
   data: z.unknown(),
+  meta: z.object({ revision: z.string(), timestamp: z.string() }),
   error: weaverErrorSchema.optional(),
 });
+
+function writeFailure(
+  code: "WRITE_UNAVAILABLE" | "WRITE_OUTCOME_UNKNOWN",
+): WriteResult {
+  return {
+    success: false,
+    error: {
+      code,
+      message:
+        code === "WRITE_UNAVAILABLE"
+          ? "Write was not sent"
+          : "Write outcome cannot be determined; check server state before retrying",
+    },
+  };
+}
+
+function writePath(key: string): string {
+  return `/v1/config/${parsePath(key).map(encodeURIComponent).join("/")}`;
+}
 
 export function readMethods(
   context: HttpContext,
@@ -114,25 +136,25 @@ export function writeMethods(
 ): Pick<WeaverTransport, "set" | "setMany" | "remove"> {
   return {
     async set(key, value, options) {
-      return sendWrite(
-        context,
-        "PUT",
-        `/v1/config/${key.replace(/\./g, "/")}`,
-        { value },
-        options,
-      );
+      let path: string;
+      try {
+        path = writePath(key);
+      } catch {
+        return writeFailure("WRITE_UNAVAILABLE");
+      }
+      return sendWrite(context, "PUT", path, { value }, options);
     },
     async setMany(entries, options) {
       return sendWrite(context, "PATCH", "/v1/config", { entries }, options);
     },
     async remove(key, options) {
-      return sendWrite(
-        context,
-        "DELETE",
-        `/v1/config/${key.replace(/\./g, "/")}`,
-        undefined,
-        options,
-      );
+      let path: string;
+      try {
+        path = writePath(key);
+      } catch {
+        return writeFailure("WRITE_UNAVAILABLE");
+      }
+      return sendWrite(context, "DELETE", path, undefined, options);
     },
   };
 }
@@ -150,13 +172,58 @@ async function sendWrite(
   });
   const headers = context.buildHeaders();
   if (options?.ifRevision) headers["If-Match"] = `"${options.ifRevision}"`;
-  const response = await context.fetchFn(`${context.baseUrl}${path}${query}`, {
-    method,
-    headers,
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
-  const envelope = legacyWriteEnvelopeSchema.parse(await response.json());
-  if (response.ok) return writeResultSchema.parse(envelope.data);
-  const error = weaverErrorSchema.parse(envelope.error);
-  return { success: false, error };
+  let payload: string | undefined;
+  try {
+    if (body !== undefined) payload = JSON.stringify(body);
+    if (body !== undefined && payload === undefined)
+      return writeFailure("WRITE_UNAVAILABLE");
+  } catch {
+    return writeFailure("WRITE_UNAVAILABLE");
+  }
+  try {
+    return await withWriteDeadline(
+      context.timeout,
+      async (signal) => {
+        const response = await context.fetchFn(
+          `${context.baseUrl}${path}${query}`,
+          {
+            method,
+            headers,
+            signal,
+            ...(payload !== undefined ? { body: payload } : {}),
+          },
+        );
+        return decodeWriteResponse(response);
+      },
+      () => {
+        context.onError?.({
+          type: "timeout",
+          message: "Request timed out",
+          retryable: false,
+        });
+        return unknownWriteOutcome();
+      },
+    );
+  } catch {
+    return unknownWriteOutcome();
+  }
+}
+
+async function decodeWriteResponse(response: Response): Promise<WriteResult> {
+  const parsed = legacyWriteEnvelopeSchema.safeParse(await response.json());
+  if (!parsed.success) return writeFailure("WRITE_OUTCOME_UNKNOWN");
+  if (response.ok) {
+    if (parsed.data.error !== undefined)
+      return writeFailure("WRITE_OUTCOME_UNKNOWN");
+    const result = writeResultSchema.safeParse(parsed.data.data);
+    return result.success &&
+      result.data.success &&
+      result.data.error === undefined
+      ? result.data
+      : writeFailure("WRITE_OUTCOME_UNKNOWN");
+  }
+  const error = weaverErrorSchema.safeParse(parsed.data.error);
+  if (!error.success || parsed.data.data !== null)
+    return writeFailure("WRITE_OUTCOME_UNKNOWN");
+  return { success: false, error: error.data };
 }

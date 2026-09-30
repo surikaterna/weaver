@@ -45,6 +45,7 @@ test("nested seeds preserve base and scoped values", async () => {
 
 test("successful local writes publish exactly one valid delta and update reads", async () => {
   const transport = createDemoTransport();
+  assert.equal(transport.writeAuthority, "local");
   const bootSnapshot = await transport.resolveAll();
   const client = await createWeaverClient({ transport });
   const received: unknown[] = [];

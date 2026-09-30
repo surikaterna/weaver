@@ -67,7 +67,7 @@ export function v1Error(
 export function unavailable(configService: WeaverConfigService): RestResponse {
   return v1Error(
     configService,
-    "VALIDATION_ERROR",
+    "INTERNAL_ERROR",
     "Schema registry not configured",
   );
 }
@@ -123,13 +123,29 @@ export function writeFailureResponse(
   const details = options.includeDetails
     ? recordDetails(error?.details)
     : undefined;
-  return v1Error(configService, code, error?.message ?? fallback, details);
+  const response = v1Error(
+    configService,
+    code,
+    error?.message ?? fallback,
+    details,
+  );
+  return code === "UNSUPPORTED_OPERATION"
+    ? { ...response, status: 400 }
+    : response;
 }
 
 function writeErrorCode(code: string | undefined): WeaverErrorCode {
-  return code === "REVISION_CONFLICT"
-    ? "REVISION_CONFLICT"
-    : "VALIDATION_ERROR";
+  switch (code) {
+    case "SCHEMA_NOT_REGISTERED":
+    case "UNSUPPORTED_OPERATION":
+    case "REVISION_CONFLICT":
+    case "VALIDATION_ERROR":
+    case "INTERNAL_ERROR":
+    case "SERVER_DEGRADED":
+      return code;
+    default:
+      return "VALIDATION_ERROR";
+  }
 }
 
 function recordDetails(

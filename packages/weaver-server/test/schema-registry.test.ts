@@ -72,6 +72,7 @@ function compositionSchema(): ConfigurationPropertySchema {
       properties: {
         kind: { type: "string", const: "text" },
         value: { type: "string" },
+        nested: { type: "string" },
       },
       additionalProperties: true,
     },
@@ -80,6 +81,7 @@ function compositionSchema(): ConfigurationPropertySchema {
       properties: {
         kind: { type: "string", const: "count" },
         value: { type: "number" },
+        nested: { type: "string" },
       },
       additionalProperties: true,
     },
@@ -243,14 +245,13 @@ describe("SchemaRegistry", () => {
   });
 
   it("hydrates exact composition and uses it for registered writes after restart", async () => {
+    const provider = createInMemoryStorageProvider({
+      id: "platform",
+      layer: "platform",
+      initialEntries: {},
+    });
     const persistentConfigService = await createWeaverConfigService({
-      providers: [
-        createInMemoryStorageProvider({
-          id: "platform",
-          layer: "platform",
-          initialEntries: {},
-        }),
-      ],
+      providers: [provider],
       environment: "default",
     });
     const registry = await createPersistentSchemaRegistry({
@@ -274,8 +275,12 @@ describe("SchemaRegistry", () => {
       ).success,
     ).toBe(true);
 
+    const restartedService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+    });
     const restarted = await createPersistentSchemaRegistry({
-      configService: persistentConfigService,
+      configService: restartedService,
     });
     expect(restarted.listRegisteredSchemaIdentities()).toEqual({
       anchors: [
@@ -314,7 +319,7 @@ describe("SchemaRegistry", () => {
     ).toEqual(schema);
 
     expect(
-      await persistentConfigService.setRegisteredObject(
+      await restartedService.setRegisteredObject(
         "platform",
         "/example-service",
         { kind: "text", value: "old", nested: "safe" },
@@ -322,7 +327,7 @@ describe("SchemaRegistry", () => {
       ),
     ).toEqual({ success: true });
     expect(
-      await persistentConfigService.patchRegisteredPath(
+      await restartedService.patchRegisteredPath(
         "platform",
         "/example-service/value",
         "new",
@@ -330,10 +335,9 @@ describe("SchemaRegistry", () => {
       ),
     ).toEqual({ success: true });
     expect(
-      await persistentConfigService.validateRegisteredEffective(
-        "/example-service",
-        { schemaRegistry: restarted },
-      ),
+      await restartedService.validateRegisteredEffective("/example-service", {
+        schemaRegistry: restarted,
+      }),
     ).toEqual({ valid: true, errors: [] });
   });
 
@@ -493,8 +497,12 @@ describe("SchemaRegistry", () => {
     );
     expect(Object.getPrototypeOf({})).toBe(objectPrototype);
 
+    const restartedService = await createWeaverConfigService({
+      providers: [provider],
+      environment: "default",
+    });
     const restarted = await createPersistentSchemaRegistry({
-      configService: persistentConfigService,
+      configService: restartedService,
     });
     expect(restarted.listAll()).toEqual({});
   });

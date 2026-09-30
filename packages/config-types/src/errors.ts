@@ -4,6 +4,9 @@ import { z } from "zod";
 export const weaverErrorCodes = [
   "NOT_FOUND",
   "UNSUPPORTED_OPERATION",
+  "SCHEMA_NOT_REGISTERED",
+  "WRITE_UNAVAILABLE",
+  "WRITE_OUTCOME_UNKNOWN",
   "UNAUTHORIZED",
   "FORBIDDEN",
   "SCOPE_NOT_FOUND",

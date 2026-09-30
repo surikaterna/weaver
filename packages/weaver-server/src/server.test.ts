@@ -896,6 +896,28 @@ describe("Weaver server bootstrap", () => {
     expect(disposeCalled).toBe(true);
   });
 
+  async function registerThemeSchema(port: number): Promise<void> {
+    const response = await fetch(
+      `http://localhost:${port}/v1/admin/schemas/services`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          serviceId: "app",
+          environment: "development",
+          owner: { name: "App", contact: "app@example.com" },
+          schema: {
+            type: "object",
+            properties: { theme: { type: "string" } },
+            additionalProperties: false,
+          },
+          fragmentSlots: [],
+        }),
+      },
+    );
+    expect(response.status).toBe(201);
+  }
+
   it("routes tenant:<id> writes to matching scoped providers", async () => {
     const server = await startWeaverServer({
       port: 0,
@@ -914,6 +936,7 @@ describe("Weaver server bootstrap", () => {
     });
 
     try {
+      await registerThemeSchema(server.port);
       const writeResponse = await fetch(
         `http://localhost:${server.port}/v1/config/app/theme?layer=tenant:surikat`,
         {
@@ -954,6 +977,7 @@ describe("Weaver server bootstrap", () => {
     });
 
     try {
+      await registerThemeSchema(server.port);
       const writeResponse = await fetch(
         `http://localhost:${server.port}/v1/config/app/theme?layer=tenant:surikat`,
         {
@@ -989,18 +1013,6 @@ describe("Weaver server provider health", () => {
       body: { status: "degraded", degradedProviders: ["failed"] },
     },
     {
-      name: "all failed providers",
-      providers: [
-        createFailingProvider("first"),
-        createFailingProvider("second"),
-      ],
-      status: 503,
-      body: {
-        status: "unavailable",
-        degradedProviders: ["first", "second"],
-      },
-    },
-    {
       name: "all healthy providers",
       providers: [
         createInMemoryStorageProvider({ id: "first", layer: "platform" }),
@@ -1026,6 +1038,19 @@ describe("Weaver server provider health", () => {
     } finally {
       await server.close();
     }
+    expect(disposeCalls).toBe(1);
+  });
+
+  it("does not expose ready when every registry provider fails to load", async () => {
+    let disposeCalls = 0;
+    await expect(
+      startWithProviders(
+        [createFailingProvider("first"), createFailingProvider("second")],
+        () => {
+          disposeCalls += 1;
+        },
+      ),
+    ).rejects.toThrow(/registry provider.*unavailable/);
     expect(disposeCalls).toBe(1);
   });
 });

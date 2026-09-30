@@ -21,8 +21,15 @@ import { z } from "zod";
 import type { WeaverError } from "../types/errors";
 import { createWeaverError } from "../types/errors";
 import {
-  readInternalConfig,
-  writeInternalConfig,
+  beginRegistryBinding,
+  bindInMemoryRegistry,
+  finishRegistryBinding,
+  INTERNAL_SCHEMA_REGISTRY_KEY,
+  inMemoryRegistryEnvironment,
+  readPersistentRegistry,
+  serializeConfigMutation,
+  serviceRegistryEnvironment,
+  writeRegistryInternalConfig,
 } from "./config-service-internal";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
 import {
@@ -115,7 +122,7 @@ export interface SchemaRegistry {
 export type { SchemaRegistrationAuditMetadata };
 
 const defaultPersistenceLayer = "platform";
-const defaultPersistenceKey = "_weaver.registry.schemas";
+const defaultPersistenceKey = INTERNAL_SCHEMA_REGISTRY_KEY;
 
 function createSchemaPersistenceWriter(
   options: PersistentSchemaRegistryOptions,
@@ -140,7 +147,7 @@ function persistenceWriter(
       environment,
       ...(actor ? { actor } : {}),
     };
-    const writeResult = await writeInternalConfig(
+    const writeResult = await writeRegistryInternalConfig(
       options.configService,
       layer,
       key,
@@ -168,24 +175,30 @@ export function createSchemaRegistry(
     state,
     _options.schemaIdentityMaxPageSize ?? 200,
   );
-  return {
+  const defaultEnvironment = inMemoryRegistryEnvironment(
+    _options.configService,
+  );
+  const registry: SchemaRegistry = {
     async register(request, context) {
-      const evaluation = evaluateRegistration(state, request, context);
-      if (!evaluation.result.success) return evaluation.result;
-      const candidate = cloneState(state);
-      applyEvaluation(candidate, evaluation);
-      const index = buildIdentityIndex(candidate);
-      pages.assertCanPublish();
-      applyEvaluation(state, evaluation);
-      pages.publish(index);
-      return evaluation.result;
+      return serializeConfigMutation(_options.configService, async () => {
+        const evaluation = evaluateRegistration(state, request, context);
+        if (!evaluation.result.success) return evaluation.result;
+        const candidate = cloneState(state);
+        applyEvaluation(candidate, evaluation);
+        const index = buildIdentityIndex(candidate);
+        pages.assertCanPublish();
+        applyEvaluation(state, evaluation);
+        pages.publish(index);
+        return evaluation.result;
+      });
     },
 
     async getSchema(serviceId, environment) {
       try {
         const { servicePath } = deriveServicePath(serviceId);
-        return (
-          state.schemas.get(schemaKey(servicePath, environment))?.schema ?? null
+        return structuredClone(
+          state.schemas.get(schemaKey(servicePath, environment))?.schema ??
+            null,
         );
       } catch {
         return null;
@@ -196,12 +209,12 @@ export function createSchemaRegistry(
       return findRegisteredAnchor(
         state.schemas.values(),
         path,
-        environment ?? "",
+        environment ?? defaultEnvironment,
       );
     },
 
     listAll() {
-      return listSchemas(state);
+      return structuredClone(listSchemas(state));
     },
     listRegisteredSchemaIdentities() {
       return listSchemaIdentities(state);
@@ -216,6 +229,8 @@ export function createSchemaRegistry(
         : null;
     },
   };
+  bindInMemoryRegistry(_options.configService, registry);
+  return registry;
 }
 
 function getRegisteredServiceSchema(
@@ -225,7 +240,9 @@ function getRegisteredServiceSchema(
 ): ObjectConfigurationPropertySchema | null {
   try {
     const { servicePath } = deriveServicePath(serviceId);
-    return schemas.get(schemaKey(servicePath, environment))?.schema ?? null;
+    return structuredClone(
+      schemas.get(schemaKey(servicePath, environment))?.schema ?? null,
+    );
   } catch {
     return null;
   }
@@ -234,11 +251,29 @@ function getRegisteredServiceSchema(
 export async function createPersistentSchemaRegistry(
   options: PersistentSchemaRegistryOptions,
 ): Promise<SchemaRegistry> {
+  const key = options.key === undefined ? defaultPersistenceKey : options.key;
+  if (key !== defaultPersistenceKey) {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Persistent schema registry key must be the canonical internal key",
+    );
+  }
+  const cancelBinding = beginRegistryBinding(options.configService);
+  try {
+    return await hydratePersistentRegistry(options, key);
+  } finally {
+    cancelBinding();
+  }
+}
+
+async function hydratePersistentRegistry(
+  options: PersistentSchemaRegistryOptions,
+  key: string,
+): Promise<SchemaRegistry> {
   const layer = options.layer ?? defaultPersistenceLayer;
-  const key = options.key ?? defaultPersistenceKey;
-  const defaultEnvironment = options.environment;
+  const defaultEnvironment = serviceRegistryEnvironment(options.configService);
   const state = parsePersistedRegistry(
-    await readInternalConfig(options.configService, key),
+    await readPersistentRegistry(options.configService, layer, key),
   );
   const persist = createSchemaPersistenceWriter(options, layer, key);
   const pages = new SchemaIdentityPages(
@@ -251,24 +286,26 @@ export async function createPersistentSchemaRegistry(
     request: SchemaRegistrationRequest,
     context?: SchemaRegistrationContext,
   ): Promise<SchemaRegistrationResult> {
-    const work = pending.then(async () => {
-      const environment = request.environment || defaultEnvironment || "";
-      const evaluation = evaluateRegistration(
-        state,
-        { ...request, environment },
-        context,
-      );
-      if (!evaluation.result.success) return evaluation.result;
-      const candidate = cloneState(state);
-      applyEvaluation(candidate, evaluation);
-      const index = buildIdentityIndex(candidate);
-      pages.assertCanPublish();
-      const failure = await persist(candidate, environment, context);
-      if (failure) return failure;
-      applyEvaluation(state, evaluation);
-      pages.publish(index);
-      return evaluation.result;
-    });
+    const work = pending.then(() =>
+      serializeConfigMutation(options.configService, async () => {
+        const environment = request.environment || defaultEnvironment || "";
+        const evaluation = evaluateRegistration(
+          state,
+          { ...request, environment },
+          context,
+        );
+        if (!evaluation.result.success) return evaluation.result;
+        const candidate = cloneState(state);
+        applyEvaluation(candidate, evaluation);
+        const index = buildIdentityIndex(candidate);
+        pages.assertCanPublish();
+        const failure = await persist(candidate, environment, context);
+        if (failure) return failure;
+        applyEvaluation(state, evaluation);
+        pages.publish(index);
+        return evaluation.result;
+      }),
+    );
     pending = work.then(
       () => undefined,
       () => undefined,
@@ -276,7 +313,7 @@ export async function createPersistentSchemaRegistry(
     return work;
   }
 
-  return {
+  const registry: SchemaRegistry = {
     register: registerSerialized,
 
     async getSchema(serviceId, environment) {
@@ -292,7 +329,7 @@ export async function createPersistentSchemaRegistry(
     },
 
     listAll() {
-      return listSchemas(state);
+      return structuredClone(listSchemas(state));
     },
     listRegisteredSchemaIdentities() {
       return listSchemaIdentities(state);
@@ -307,6 +344,8 @@ export async function createPersistentSchemaRegistry(
         : null;
     },
   };
+  finishRegistryBinding(options.configService, registry);
+  return registry;
 }
 
 function findRegisteredAnchor(
@@ -333,9 +372,9 @@ function registeredAnchorFromEntry(entry: SchemaEntry): RegisteredSchemaAnchor {
   return {
     kind: entry.kind,
     path: entry.path,
-    schema: entry.schema,
+    schema: structuredClone(entry.schema),
     environment: entry.environment,
-    metadata: entry.metadata,
+    metadata: structuredClone(entry.metadata),
   };
 }
 

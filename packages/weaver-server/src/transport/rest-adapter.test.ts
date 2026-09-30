@@ -386,7 +386,7 @@ describe("REST body validation", () => {
 
     expect(res.status).toBe(400);
     const body = res.body as { error: { code: string } };
-    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.code).toBe("SCHEMA_NOT_REGISTERED");
     expect(await configService.get("missing")).toBeUndefined();
   });
 

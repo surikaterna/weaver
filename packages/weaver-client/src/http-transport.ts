@@ -33,6 +33,7 @@ export function createHttpTransport(
     requestValidated: context.requester.requestValidated,
   };
   return {
+    writeAuthority: "server",
     ...readMethods(context),
     ...namespaceMethods(context),
     ...writeMethods(context),

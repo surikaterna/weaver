@@ -1,10 +1,8 @@
 import type {
   CanonicalConfigPath,
-  SchemaValidationPathSegment,
   SchemaValidationResult,
 } from "@weaver-conf/config-engine";
 import {
-  assertPublicConfigPath,
   parseCanonicalConfigPath,
   validateEffectiveConfiguration,
   validatePartialConfiguration,
@@ -15,16 +13,21 @@ import {
 } from "@weaver-conf/config-engine/internal/schema-validation-session";
 import type { ScopeInstance, WriteResult } from "@weaver-conf/config-types";
 import {
-  buildSchemaPatch,
-  type SchemaPatchResult,
-} from "./config-service-schema-patches";
+  invalidPathValidation,
+  normalizeCanonicalPath,
+  patchFailure,
+  validationFailure,
+  writeFailure,
+} from "./config-service-schema-errors";
+import { buildSchemaPatch } from "./config-service-schema-patches";
 import type {
   EffectiveValidationContext,
   SchemaWriteContext,
   WeaverConfigService,
 } from "./config-service-types";
+import { snapshotSubmitted } from "./config-write-snapshot";
 import { protectedConfigMutationError } from "./protected-config-paths";
-import type { RegisteredSchemaAnchor } from "./schema-registry";
+import type { RegisteredSchemaAnchor, SchemaRegistry } from "./schema-registry";
 
 export interface PreparedSchemaWrite {
   readonly success: true;
@@ -34,7 +37,7 @@ export interface PreparedSchemaWrite {
 
 export type SchemaWritePreparation = PreparedSchemaWrite | FailedSchemaWrite;
 
-interface FailedSchemaWrite {
+export interface FailedSchemaWrite {
   readonly success: false;
   readonly result: WriteResult;
 }
@@ -46,7 +49,16 @@ interface RegisteredWriteOperationsOptions {
     key: string,
     options?: { scopePath?: ScopeInstance[] },
   ) => Promise<unknown>;
-  readonly set: WeaverConfigService["set"];
+  readonly setPrepared: (
+    layer: string,
+    key: string,
+    value: unknown,
+    targetKey: string,
+    targetValue: unknown,
+    context: SchemaWriteContext,
+  ) => Promise<WriteResult>;
+  readonly getRegistry: () => SchemaRegistry | undefined;
+  readonly serialize: <T>(task: () => Promise<T>) => Promise<T>;
   readonly isInternalWrite: (options: SchemaWriteContext) => boolean;
   readonly checkRevision: (expected: string | undefined) => WriteResult | null;
 }
@@ -60,41 +72,111 @@ export function createRegisteredWriteOperations(
   options: RegisteredWriteOperationsOptions,
 ): RegisteredWriteOperations {
   return {
-    async setRegisteredObject(layer, path, value, context) {
-      const failure = registeredWritePreflight(options, path, context);
-      if (failure !== null) return failure;
-      const prepared = await prepareRegisteredObjectWrite(
+    setRegisteredObject: (layer, path, value, context) =>
+      performRegisteredWrite(
+        options,
+        layer,
         path,
         value,
         context,
-        options.defaultEnvironment,
-      );
-      if (!prepared.success) return prepared.result;
-      return options.set(layer, prepared.key, prepared.value, context);
-    },
-    async patchRegisteredPath(layer, path, value, context) {
-      const failure = registeredWritePreflight(options, path, context);
-      if (failure !== null) return failure;
-      const prepared = await prepareRegisteredPatchWrite(
+        (verified, input) =>
+          prepareRegisteredObjectWrite(
+            path,
+            input,
+            verified,
+            options.defaultEnvironment,
+          ),
+      ),
+    patchRegisteredPath: (layer, path, value, context) =>
+      performRegisteredWrite(
+        options,
+        layer,
         path,
         value,
         context,
-        options.defaultEnvironment,
-        (key) => options.getLayerValue(layer, key),
-      );
-      if (!prepared.success) return prepared.result;
-      return options.set(layer, prepared.key, prepared.value, context);
+        (verified, input) =>
+          prepareRegisteredPatchWrite(
+            path,
+            input,
+            verified,
+            options.defaultEnvironment,
+            (key) => options.getLayerValue(layer, key),
+          ),
+      ),
+    validateRegisteredEffective: (path, context) =>
+      validateBoundEffective(options, path, context),
+  };
+}
+
+function validateBoundEffective(
+  options: RegisteredWriteOperationsOptions,
+  path: string,
+  context: EffectiveValidationContext,
+): Promise<SchemaValidationResult> {
+  const registry = options.getRegistry();
+  if (!registry)
+    return Promise.resolve(
+      invalidPathValidation("Schema registry is unavailable"),
+    );
+  const getOptions = context.scopePath
+    ? { scopePath: context.scopePath }
+    : undefined;
+  return validateRegisteredEffectiveConfiguration(
+    path,
+    {
+      ...context,
+      schemaRegistry: registry,
+      environment: context.environment ?? options.defaultEnvironment,
     },
-    validateRegisteredEffective(path, context) {
-      const getOptions = context.scopePath
-        ? { scopePath: context.scopePath }
-        : undefined;
-      return validateRegisteredEffectiveConfiguration(
-        path,
-        context,
-        options.defaultEnvironment,
-        (key) => options.get(key, getOptions),
-      );
+    options.defaultEnvironment,
+    (key) => options.get(key, getOptions),
+  );
+}
+
+async function performRegisteredWrite(
+  options: RegisteredWriteOperationsOptions,
+  layer: string,
+  path: string,
+  value: unknown,
+  context: SchemaWriteContext,
+  prepare: (
+    verified: SchemaWriteContext,
+    input: unknown,
+  ) => Promise<SchemaWritePreparation>,
+): Promise<WriteResult> {
+  const protectedError = protectedConfigMutationError(path);
+  if (protectedError) return protectedError;
+  const snapshot = snapshotSubmitted(value);
+  if (!snapshot.success) return snapshot.result;
+  return options.serialize(async () => {
+    const failure = registeredWritePreflight(options, path, context);
+    if (failure) return failure;
+    const registry = options.getRegistry();
+    if (!registry) return registryUnavailable();
+    const verified = {
+      ...context,
+      schemaRegistry: registry,
+      environment: context.environment ?? options.defaultEnvironment,
+    };
+    const prepared = await prepare(verified, snapshot.value);
+    if (!prepared.success) return prepared.result;
+    return options.setPrepared(
+      layer,
+      prepared.key,
+      prepared.value,
+      parseCanonicalConfigPath(path).storageKey,
+      snapshot.value,
+      verified,
+    );
+  });
+}
+
+function registryUnavailable(): WriteResult {
+  return {
+    success: false,
+    error: {
+      code: "INTERNAL_ERROR",
+      message: "Schema registry is not bound to the config service",
     },
   };
 }
@@ -231,7 +313,7 @@ export async function validateRegisteredEffectiveConfiguration(
   });
 }
 
-interface ResolvedWriteAnchor {
+export interface ResolvedWriteAnchor {
   readonly success: true;
   readonly anchor: RegisteredSchemaAnchor;
   readonly environment: string;
@@ -254,10 +336,17 @@ async function resolveWriteAnchor(
     environment,
   );
   if (anchor === null) {
-    return writeFailure(
-      `No registered schema anchor for path "${normalized.value.path}" in environment "${environment}"`,
-      { path: normalized.value.path, environment },
-    );
+    return {
+      success: false,
+      result: {
+        success: false,
+        error: {
+          code: "SCHEMA_NOT_REGISTERED",
+          message: `No registered schema anchor for path "${normalized.value.path}" in environment "${environment}"`,
+          details: { path: normalized.value.path, environment },
+        },
+      },
+    };
   }
   return {
     success: true,
@@ -280,18 +369,6 @@ function validateExistingLayerValue(
     : validationFailure(validation, resolved);
 }
 
-function validationFailure(
-  validation: SchemaValidationResult,
-  resolved: ResolvedWriteAnchor,
-): FailedSchemaWrite {
-  return writeFailure("Configuration does not match registered schema", {
-    path: resolved.path,
-    anchorPath: resolved.anchor.path,
-    environment: resolved.environment,
-    errors: validation.errors,
-  });
-}
-
 function preparedWrite(
   anchor: RegisteredSchemaAnchor,
   value: unknown,
@@ -300,77 +377,5 @@ function preparedWrite(
     success: true,
     key: parseCanonicalConfigPath(anchor.path).storageKey,
     value,
-  };
-}
-
-function writeFailure(
-  message: string,
-  details: Record<string, unknown>,
-): FailedSchemaWrite {
-  return {
-    success: false,
-    result: {
-      success: false,
-      error: { code: "VALIDATION_ERROR", message, details },
-    },
-  };
-}
-
-function patchFailure(
-  failure: Exclude<SchemaPatchResult, { readonly success: true }>,
-  resolved: ResolvedWriteAnchor,
-): FailedSchemaWrite {
-  const details = {
-    path: resolved.path,
-    anchorPath: resolved.anchor.path,
-    environment: resolved.environment,
-  };
-  if (failure.reason === "array-index-out-of-range") {
-    return writeFailure(
-      `Array patch index ${String(failure.index)} exceeds current length ${String(failure.length)}`,
-      { ...details, index: failure.index, length: failure.length },
-    );
-  }
-  return writeFailure("Configuration patch cannot traverse the current value", {
-    ...details,
-    segment: failure.segment,
-  });
-}
-
-type NormalizedPath =
-  | { readonly success: true; readonly value: CanonicalConfigPath }
-  | { readonly success: false; readonly message: string };
-
-function normalizeCanonicalPath(path: string): NormalizedPath {
-  try {
-    const value = parseCanonicalConfigPath(assertPublicConfigPath(path));
-    return value.segments.length === 0
-      ? { success: false, message: "Configuration writes must not target root" }
-      : { success: true, value };
-  } catch (error: unknown) {
-    return {
-      success: false,
-      message: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-function invalidPathValidation(
-  message: string,
-  segments: readonly SchemaValidationPathSegment[] = [],
-): SchemaValidationResult {
-  return {
-    valid: false,
-    errors: [
-      {
-        code: "invalid-path",
-        message,
-        segments: [...segments],
-        path: segments.reduce<string>(
-          (current, segment) => `${current}.${String(segment)}`,
-          "$",
-        ),
-      },
-    ],
   };
 }

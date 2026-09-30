@@ -36,7 +36,10 @@ function diamond(
   }
   return {
     type: "object",
-    properties: { value: { type: "string" } },
+    properties: {
+      value: { type: "string" },
+      plugins: { type: "object", properties: { plugin: leaf }, additionalProperties: false },
+    },
     required: ["value"],
     additionalProperties: true,
     allOf: [shared, shared],
@@ -129,7 +132,7 @@ function recordResources(mode, depth, schema, effects) {
     `GRAPH_RESOURCE ${JSON.stringify({
       mode,
       depth,
-      inputIdentities: depth + 4,
+      inputIdentities: depth + 5,
       parsedIdentities: encoded.nodes.length,
       encodedNodes: encoded.nodes.length,
       jsonBytes: Buffer.byteLength(json),
@@ -203,7 +206,7 @@ describe("schema graph v1 codec", () => {
 
   it("stays linear and compact at depth 40", () => {
     const encoded = encodeSchemaGraph(diamond(40));
-    expect(encoded.nodes).toHaveLength(44);
+    expect(encoded.nodes).toHaveLength(45);
     expect(JSON.stringify(encoded).length).toBeLessThan(64 * 1024);
     expectRestoredAliases(decodeSchemaGraph(encoded), 40);
   });
@@ -248,7 +251,8 @@ describe("public graph registration pipelines", () => {
       expect((await first.registry.register(registration(schema))).success).toBe(true);
       expect((await first.registry.register(fragmentRegistration(schema))).success).toBe(true);
       const writesAfterRegistration = tracked.writes();
-      const restarted = await createPersistentSchemaRegistry({ configService: first.service });
+      const restartedService = await harness(tracked.provider);
+      const restarted = restartedService.registry;
       expect(tracked.writes()).toBe(writesAfterRegistration);
       expectRestoredAliases(await restarted.getSchema("svc", "test"), depth);
       expectRestoredAliases(
@@ -264,7 +268,7 @@ describe("public graph registration pipelines", () => {
           hasBreakingChanges: false,
         }),
       );
-      const effects = await expectPatchEffects(first.service, restarted, tracked);
+      const effects = await expectPatchEffects(restartedService.service, restarted, tracked);
       recordResources(
         "persistent-memory-restart",
         depth,
@@ -331,7 +335,7 @@ describe("public graph registration pipelines", () => {
     const first = await harness(tracked.provider);
     expect(tracked.writes()).toBe(0);
     expect(await first.registry.getSchema("svc", "test")).toEqual({ type: "object" });
-    const unchanged = await createPersistentSchemaRegistry({ configService: first.service });
+    const unchanged = (await harness(tracked.provider)).registry;
     expect(unchanged.listAll()).toEqual(first.registry.listAll());
     expect(tracked.writes()).toBe(0);
     expect((await first.registry.register(registration({ type: "object" }))).success).toBe(true);

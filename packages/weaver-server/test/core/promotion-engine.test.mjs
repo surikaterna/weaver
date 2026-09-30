@@ -1,6 +1,7 @@
 import { createPromotionEngine } from "../../src/core/promotion-engine.ts";
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { deepSet, deepRemove } from "@weaver-conf/config-engine";
+import { registerTestService, registerTestSchema } from "../fixtures/schema-authority.mjs";
 
 function createTestProvider(id, layer, entries, writable = true) {
   let data = JSON.parse(JSON.stringify(entries));
@@ -29,6 +30,8 @@ describe("PromotionEngine", () => {
       providers: [provider],
       environment: "staging",
     });
+    const registry = await registerTestService(configService, "db", "staging", { host: { type: "string" } });
+    await registerTestSchema(registry, "db", "production", { host: { type: "string" } });
     const engine = createPromotionEngine({ configService });
 
     const result = await engine.promote({
@@ -89,6 +92,8 @@ describe("PromotionEngine", () => {
       providers: [provider],
       environment: "dev",
     });
+    const registry = await registerTestService(configService, "feature", "dev", { flag: { type: "boolean" } });
+    await registerTestSchema(registry, "feature", "prod", { flag: { type: "boolean" } });
     const engine = createPromotionEngine({ configService });
 
     const result = await engine.promote({

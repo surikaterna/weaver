@@ -35,6 +35,13 @@ async function harness(initialEntries = {}) {
   return { provider, configService };
 }
 
+async function restartedRegistry(provider) {
+  const configService = await createWeaverConfigService({
+    providers: [provider], environment: "default",
+  });
+  return createPersistentSchemaRegistry({ configService });
+}
+
 const fragments = [
   fragment("prod/dev:x", "/plugins", "p"),
   fragment("x", "/plugins/p:prod", "dev"),
@@ -68,7 +75,7 @@ for (const persistent of [false, true]) {
       await check(registry);
       if (persistent) {
         expect((await provider.load()).entries._weaver.registry.schemas.version).toBe(2);
-        await check(await createPersistentSchemaRegistry({ configService }));
+        await check(await restartedRegistry(provider));
       }
     });
   }
@@ -76,7 +83,7 @@ for (const persistent of [false, true]) {
 
 for (const persistent of [false, true]) {
   test(`slot tuples remain independent ${persistent ? "persistently" : "transiently"}`, async () => {
-    const { configService } = await harness();
+    const { configService, provider } = await harness();
     const registry = persistent
       ? await createPersistentSchemaRegistry({ configService })
       : createSchemaRegistry({ configService });
@@ -85,7 +92,7 @@ for (const persistent of [false, true]) {
     expect((await registry.register(first)).success).toBe(true);
     expect((await registry.register(second)).success).toBe(true);
     const restart = async () => persistent
-      ? createPersistentSchemaRegistry({ configService }) : registry;
+      ? restartedRegistry(provider) : registry;
     expect((await restart()).listRegisteredSchemaIdentities().slots).toHaveLength(2);
     expect((await registry.register({ ...first, fragmentSlots: [] })).success).toBe(true);
     const missing = fragment("prod:dev", "/plugins", "p");
@@ -118,7 +125,7 @@ test("legacy grouped collisions hydrate without aliasing and upgrade only after 
   expect(() => hydrated.listAll()).toThrow(expect.objectContaining({ code: "SCHEMA_CONFLICT" }));
   expect((await hydrated.register(service("x", "/plugins/p:prod"))).success).toBe(true);
   expect((await restored.provider.load()).entries._weaver.registry.schemas.version).toBe(2);
-  expect((await createPersistentSchemaRegistry({ configService: restored.configService }))
+  expect((await restartedRegistry(restored.provider))
     .listRegisteredSchemaIdentities().anchors).toHaveLength(4);
   const state = parsePersistedRegistry(legacy);
   expect(state.schemas.size).toBe(4);
@@ -157,5 +164,5 @@ test("a failed v1 upgrade write leaves the hydrated identities and stored bytes 
   expect(registry.listRegisteredSchemaIdentityPage({ cursor }).anchors.length + registry.listRegisteredSchemaIdentityPage({ cursor }).slots.length).toBe(1);
   expect(registry.listRegisteredSchemaIdentities()).toEqual(before);
   expect((await provider.load()).entries).toEqual(legacy);
-  expect((await createPersistentSchemaRegistry({ configService })).listRegisteredSchemaIdentities()).toEqual(before);
+  expect((await restartedRegistry(provider)).listRegisteredSchemaIdentities()).toEqual(before);
 });

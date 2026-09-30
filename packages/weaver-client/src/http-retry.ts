@@ -1,3 +1,4 @@
+import { createWeaverError } from "@weaver-conf/config-types";
 import type { TransportError } from "./http-transport-types";
 
 /** Configuration for retry behavior on failed HTTP requests. */
@@ -19,6 +20,10 @@ function isRetryableStatus(status: number): boolean {
   return status === 429 || status === 503 || status >= 500;
 }
 
+export function isReadMethod(method: string): boolean {
+  return method === "GET" || method === "HEAD";
+}
+
 function computeDelay(attempt: number, base: number, max: number): number {
   return Math.min(base * 2 ** attempt, max);
 }
@@ -28,6 +33,7 @@ type AttemptFailureType = CancellationType | "connection";
 
 interface AttemptCancellation {
   readonly controller: AbortController;
+  readonly cancelled: Promise<never>;
   readonly cleanup: () => void;
   readonly type: () => CancellationType | undefined;
 }
@@ -53,10 +59,16 @@ function createAttemptCancellation(
 ): AttemptCancellation {
   const controller = new AbortController();
   let cancellationType: CancellationType | undefined;
+  let rejectCancellation: (error: Error) => void = () => {};
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
   const cancel = (type: CancellationType, reason?: unknown) => {
     if (cancellationType) return;
     cancellationType = type;
-    controller.abort(reason);
+    const error = reason instanceof Error ? reason : new Error("timed out");
+    controller.abort(error);
+    rejectCancellation(error);
   };
   const onCallerAbort = () => {
     if (callerSignal) cancel("abort", abortError(callerSignal));
@@ -66,6 +78,7 @@ function createAttemptCancellation(
   const timer = setTimeout(() => cancel("timeout"), timeout);
   return {
     controller,
+    cancelled,
     type: () => cancellationType,
     cleanup: () => {
       clearTimeout(timer);
@@ -131,10 +144,15 @@ async function executeAttempt(
     options.timeout,
   );
   try {
-    const response = await options.fetchFn(url, {
-      ...init,
-      signal: cancellation.controller.signal,
-    });
+    const response = await Promise.race([
+      Promise.resolve().then(() =>
+        options.fetchFn(url, {
+          ...init,
+          signal: cancellation.controller.signal,
+        }),
+      ),
+      cancellation.cancelled,
+    ]);
     if (cancellation.type()) throw cancellation.controller.signal.reason;
     return { ok: true, response };
   } catch (error) {
@@ -169,7 +187,16 @@ export async function fetchWithRetry(
     const retryable = attempt < retry.maxAttempts - 1;
     const result = await executeAttempt(url, init, options, retryable);
     if (!result.ok) {
-      if (!retryable || result.type === "abort") throw result.error;
+      if (!retryable || result.type === "abort") {
+        if (init.method && !isReadMethod(init.method)) {
+          const reason =
+            result.error instanceof Error
+              ? result.error.message
+              : "Connection lost";
+          throw createWeaverError("WRITE_OUTCOME_UNKNOWN", reason);
+        }
+        throw result.error;
+      }
     } else if (!isRetryableStatus(result.response.status) || !retryable) {
       return result.response;
     } else {

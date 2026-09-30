@@ -1,5 +1,6 @@
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { deepSet, deepRemove } from "@weaver-conf/config-engine";
+import { registerTestService } from "../fixtures/schema-authority.mjs";
 
 function createTestProvider(id, layer, entries, writable = true) {
   let data = JSON.parse(JSON.stringify(entries));
@@ -159,6 +160,7 @@ describe("Resolution pipeline", () => {
 
     expect(await svc.get("app.ref")).toBe("original");
 
+    await registerTestService(svc, "shared", "dev", { value: { type: "string" } });
     await svc.set("platform", "shared.value", "updated");
     expect(await svc.get("app.ref")).toBe("updated");
   });

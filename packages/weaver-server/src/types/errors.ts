@@ -14,6 +14,9 @@ import type { WeaverErrorCode } from "@weaver-conf/config-types";
 export const HTTP_STATUS_MAP: Record<WeaverErrorCode, number> = {
   NOT_FOUND: 404,
   UNSUPPORTED_OPERATION: 501,
+  SCHEMA_NOT_REGISTERED: 400,
+  WRITE_UNAVAILABLE: 503,
+  WRITE_OUTCOME_UNKNOWN: 500,
   UNAUTHORIZED: 401,
   FORBIDDEN: 403,
   SCOPE_NOT_FOUND: 404,

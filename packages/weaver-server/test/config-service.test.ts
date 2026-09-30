@@ -1,9 +1,33 @@
+import { deepRemove, deepSet } from "@weaver-conf/config-engine";
+import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
+import type { WeaverConfigService } from "../src/core/config-service.js";
 import { createWeaverConfigService } from "../src/core/config-service.js";
 import { isProtectedConfigPath } from "../src/core/protected-config-paths.js";
+import {
+  createPersistentSchemaRegistry,
+  createSchemaRegistry,
+} from "../src/core/schema-registry.js";
 import { createSSEAdapter } from "../src/transport/sse-adapter.js";
 
 describe("WeaverConfigService", () => {
+  async function declare(
+    service: WeaverConfigService,
+    serviceId: string,
+    properties: Record<string, ConfigurationPropertySchema>,
+    additionalProperties: boolean | ConfigurationPropertySchema = false,
+  ) {
+    const registry = createSchemaRegistry({ configService: service });
+    const result = await registry.register({
+      serviceId,
+      environment: "test",
+      owner: { name: serviceId, contact: `${serviceId}@example.com` },
+      schema: { type: "object", properties, additionalProperties },
+      fragmentSlots: [],
+    });
+    expect(result.success, result.error?.message).toBe(true);
+    return registry;
+  }
   const reservedKeys = ["__proto__", "constructor", "prototype"] as const;
   const inheritedTrapKey = "inheritedProjectionSetter";
   function defineOwnData(
@@ -77,6 +101,14 @@ describe("WeaverConfigService", () => {
     initial: Record<string, unknown>,
   ): Promise<void> {
     const svc = await makeReservedService(layer, initial);
+    await declare(
+      svc,
+      "payload",
+      {
+        nested: { type: "object", additionalProperties: { type: "string" } },
+      },
+      { type: "string" },
+    );
     const deltas: Array<{ value?: unknown }> = [];
     svc.onDelta((delta) => deltas.push(delta));
 
@@ -157,6 +189,7 @@ describe("WeaverConfigService", () => {
 
   it("sets a value and updates revision", async () => {
     const svc = await makeService({});
+    await declare(svc, "new", { key: { type: "string" } });
     const oldRev = svc.revision;
     const result = await svc.set("app", "new.key", "value");
     expect(result.success).toBe(true);
@@ -387,7 +420,7 @@ describe("WeaverConfigService", () => {
       id: "platform",
       layer: "platform",
       initialEntries: {
-        _weaver: { registry: { schemas: { private: true } } },
+        _weaver: { registry: { schemas: { version: 2, environments: {} } } },
         public: { value: "visible" },
       },
     });
@@ -400,6 +433,35 @@ describe("WeaverConfigService", () => {
       providers: [platform, tenant],
       environment: "test",
     });
+    const registry = await createPersistentSchemaRegistry({
+      configService: svc,
+    });
+    const marker = {
+      type: "object" as const,
+      properties: {
+        _weaver: { type: "string" as const },
+        source: { type: "string" as const },
+      },
+      additionalProperties: false,
+    };
+    for (const [serviceId, properties] of Object.entries({
+      direct: marker.properties,
+      chained: marker.properties,
+      alias: marker.properties,
+      scoped: marker.properties,
+      ordinary: marker.properties,
+      nested: { visible: { type: "boolean" as const }, leak: marker },
+    })) {
+      expect(
+        await registry.register({
+          serviceId,
+          environment: "test",
+          owner: { name: serviceId, contact: `${serviceId}@example.com` },
+          schema: { type: "object", properties, additionalProperties: false },
+          fragmentSlots: [],
+        }),
+      ).toMatchObject({ success: true });
+    }
     const deltas: Array<{ key: string; value?: unknown; action: string }> = [];
     svc.onDelta((delta) => deltas.push(delta));
     const sseClient = await createSSEAdapter({
@@ -500,7 +562,11 @@ describe("WeaverConfigService", () => {
   });
 
   it("removes a value", async () => {
-    const svc = await makeService({ "rm.key": "gone" });
+    const svc = await makeService({ rm: { key: "gone", retained: true } });
+    await declare(svc, "rm", {
+      key: { type: "string" },
+      retained: { type: "boolean" },
+    });
     const result = await svc.remove("app", "rm.key");
     expect(result.success).toBe(true);
     const val = await svc.get("rm.key");
@@ -509,9 +575,10 @@ describe("WeaverConfigService", () => {
 
   it("fires delta on set", async () => {
     const svc = await makeService({});
+    await declare(svc, "app", { x: { type: "number" } });
     const deltas: unknown[] = [];
     svc.onDelta((d) => deltas.push(d));
-    await svc.set("app", "x", 1);
+    await svc.set("app", "app.x", 1);
     expect(deltas.length).toBe(1);
   });
 
@@ -532,7 +599,7 @@ describe("WeaverConfigService", () => {
       },
       async writeLayer(layer: string, key: string, value: unknown) {
         const entries = { ...(scopedEntries.get(layer) ?? {}) };
-        entries[key] = value;
+        deepSet(entries, key, value);
         scopedEntries.set(layer, entries);
         return { success: true } as const;
       },
@@ -541,7 +608,7 @@ describe("WeaverConfigService", () => {
       },
       async removeLayer(layer: string, key: string) {
         const entries = { ...(scopedEntries.get(layer) ?? {}) };
-        delete entries[key];
+        deepRemove(entries, key);
         scopedEntries.set(layer, entries);
         return { success: true } as const;
       },
@@ -555,6 +622,7 @@ describe("WeaverConfigService", () => {
       providers: [platformProvider, tenantBaseProvider],
       environment: "test",
     });
+    await declare(svc, "app", { theme: { type: "string" } });
 
     const oldRev = svc.revision;
     const setResult = await svc.set("tenant:surikat", "app.theme", "dark");
@@ -565,7 +633,7 @@ describe("WeaverConfigService", () => {
 
   it("updates revision for dynamic scoped removes", async () => {
     const scopedEntries = new Map<string, Record<string, unknown>>();
-    scopedEntries.set("tenant:surikat", { "app.theme": "dark" });
+    scopedEntries.set("tenant:surikat", { app: { theme: "dark" } });
 
     const tenantBaseProvider = {
       id: "tenant-base",
@@ -582,7 +650,7 @@ describe("WeaverConfigService", () => {
       },
       async writeLayer(layer: string, key: string, value: unknown) {
         const entries = { ...(scopedEntries.get(layer) ?? {}) };
-        entries[key] = value;
+        deepSet(entries, key, value);
         scopedEntries.set(layer, entries);
         return { success: true } as const;
       },
@@ -591,7 +659,7 @@ describe("WeaverConfigService", () => {
       },
       async removeLayer(layer: string, key: string) {
         const entries = { ...(scopedEntries.get(layer) ?? {}) };
-        delete entries[key];
+        deepRemove(entries, key);
         scopedEntries.set(layer, entries);
         return { success: true } as const;
       },
@@ -605,6 +673,7 @@ describe("WeaverConfigService", () => {
       providers: [platformProvider, tenantBaseProvider],
       environment: "test",
     });
+    await declare(svc, "app", { theme: { type: "string" } });
 
     await svc.set("tenant:surikat", "app.theme", "dark");
     const revBeforeRemove = svc.revision;
@@ -631,7 +700,7 @@ describe("WeaverConfigService", () => {
       },
       async writeLayer(layer: string, key: string, value: unknown) {
         const entries = { ...(scopedEntries.get(layer) ?? {}) };
-        entries[key] = value;
+        deepSet(entries, key, value);
         scopedEntries.set(layer, entries);
         return { success: true } as const;
       },
@@ -640,7 +709,7 @@ describe("WeaverConfigService", () => {
       },
       async removeLayer(layer: string, key: string) {
         const entries = { ...(scopedEntries.get(layer) ?? {}) };
-        delete entries[key];
+        deepRemove(entries, key);
         scopedEntries.set(layer, entries);
         return { success: true } as const;
       },
@@ -654,6 +723,7 @@ describe("WeaverConfigService", () => {
       providers: [platformProvider, tenantBaseProvider],
       environment: "test",
     });
+    await declare(svc, "app", { theme: { type: "string" } });
 
     await svc.set("tenant:surikat", "app.theme", "dark");
     const inspection = await svc.inspect("app.theme");
@@ -679,7 +749,7 @@ describe("WeaverConfigService", () => {
       },
       async writeLayer(layer: string, key: string, value: unknown) {
         const entries = { ...(scopedEntries.get(layer) ?? {}) };
-        entries[key] = value;
+        deepSet(entries, key, value);
         scopedEntries.set(layer, entries);
         return { success: true } as const;
       },
@@ -688,7 +758,7 @@ describe("WeaverConfigService", () => {
       },
       async removeLayer(layer: string, key: string) {
         const entries = { ...(scopedEntries.get(layer) ?? {}) };
-        delete entries[key];
+        deepRemove(entries, key);
         scopedEntries.set(layer, entries);
         return { success: true } as const;
       },
@@ -702,6 +772,7 @@ describe("WeaverConfigService", () => {
       providers: [platformProvider, tenantBaseProvider],
       environment: "test",
     });
+    await declare(svc, "app", { theme: { type: "string" } });
 
     await svc.set("tenant:surikat", "app.theme", "dark");
     const snapshot = await svc.resolveAll();
