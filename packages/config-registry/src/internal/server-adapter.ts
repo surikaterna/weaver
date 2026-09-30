@@ -2,6 +2,7 @@ import { createWeaverError } from "@weaver-conf/config-types";
 import { buildIdentityIndex, type IdentityRef } from "../identity-index";
 import { SchemaIdentityPages } from "../identity-pages";
 import { evaluateRegistration } from "../registration-evaluation";
+import { guardRegistrationInput } from "../registration-parser";
 import type {
   CanonicalSchemaRegistryOptions,
   CanonicalSchemaRegistryReader,
@@ -31,6 +32,8 @@ export {
 export interface PreparedRegistration {
   readonly result: SchemaRegistrationResult;
   readonly candidate: RegistryState | undefined;
+  readonly environment: string | undefined;
+  readonly context: SchemaRegistrationContext | undefined;
   publish(): void;
 }
 
@@ -39,6 +42,7 @@ export interface RegistryAdapter {
   prepare(
     request: SchemaRegistrationRequest,
     context?: SchemaRegistrationContext,
+    fallbackEnvironment?: string,
   ): PreparedRegistration;
 }
 
@@ -51,7 +55,8 @@ export function createRegistryAdapter(
   const authority = new RegistryAuthority(options, initialState, entropy);
   return {
     reader: authority.reader,
-    prepare: (request, context) => authority.prepare(request, context),
+    prepare: (request, context, fallbackEnvironment) =>
+      authority.prepare(request, context, fallbackEnvironment),
   };
 }
 
@@ -82,10 +87,17 @@ class RegistryAuthority {
   prepare(
     request: SchemaRegistrationRequest,
     context?: SchemaRegistrationContext,
+    fallbackEnvironment?: string,
   ): PreparedRegistration {
-    const evaluation = evaluateRegistration(this.state, request, context);
+    const input = guardRegistrationInput(request, context, fallbackEnvironment);
+    if (!input.success) return rejectedPreparation(input.result);
+    const evaluation = evaluateRegistration(
+      this.state,
+      input.request,
+      input.context,
+    );
     const result = detachedResult(evaluation.result);
-    if (!result.success) return { result, candidate: undefined, publish() {} };
+    if (!result.success) return rejectedPreparation(result);
     const candidate = cloneState(this.state);
     applyEvaluation(candidate, evaluation);
     const index = buildIdentityIndex(candidate);
@@ -93,6 +105,8 @@ class RegistryAuthority {
     const expectedGeneration = this.generation;
     return {
       result,
+      environment: input.request.environment,
+      context: input.context,
       // Pure synchronous registrations need no persistence snapshot traversal.
       get candidate() {
         return structuredClone(candidate);
@@ -116,6 +130,18 @@ class RegistryAuthority {
     this.pages.publish(index);
     this.generation++;
   }
+}
+
+function rejectedPreparation(
+  result: SchemaRegistrationResult,
+): PreparedRegistration {
+  return {
+    result,
+    candidate: undefined,
+    environment: undefined,
+    context: undefined,
+    publish() {},
+  };
 }
 
 function detachedResult(

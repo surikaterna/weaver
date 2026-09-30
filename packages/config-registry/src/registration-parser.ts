@@ -14,7 +14,83 @@ import {
   fragmentSchemaRegistrationRequestSchema,
   serviceSchemaRegistrationRequestSchema,
 } from "@weaver-conf/config-types";
-import type { SchemaRegistrationResult } from "./registry-contracts";
+import { snapshotPlainData } from "./plain-data-graph";
+import type {
+  SchemaRegistrationContext,
+  SchemaRegistrationResult,
+} from "./registry-contracts";
+import { schemaRegistrationContextSchema } from "./registry-contracts";
+
+type GuardedRegistrationInput =
+  | {
+      readonly success: true;
+      readonly request: SchemaRegistrationRequest;
+      readonly context: SchemaRegistrationContext | undefined;
+    }
+  | { readonly success: false; readonly result: SchemaRegistrationResult };
+
+export function guardRegistrationInput(
+  request: unknown,
+  context?: unknown,
+  fallbackEnvironment?: string,
+): GuardedRegistrationInput {
+  const captured = snapshotPlainData(request);
+  const capturedContext = snapshotPlainData(context);
+  if (!captured.success || !capturedContext.success) {
+    return {
+      success: false,
+      result: validationFailure("Expected plain registration data"),
+    };
+  }
+  const parsedContext = schemaRegistrationContextSchema
+    .optional()
+    .safeParse(capturedContext.value);
+  if (!parsedContext.success)
+    return {
+      success: false,
+      result: validationFailure("Invalid schema registration context"),
+    };
+  const parsed = validateRequestSnapshot(captured.value, fallbackEnvironment);
+  return parsed.success
+    ? { success: true, request: parsed.data, context: parsedContext.data }
+    : {
+        success: false,
+        result: validationFailure(firstIssueMessage(parsed.error)),
+      };
+}
+
+function validateRequestSnapshot(value: unknown, fallbackEnvironment?: string) {
+  const request = normalizeEnvironment(value, fallbackEnvironment);
+  const fragment =
+    request !== null && typeof request === "object" && "providerId" in request;
+  return fragment
+    ? fragmentSchemaRegistrationRequestSchema.safeParse(request)
+    : serviceSchemaRegistrationRequestSchema.safeParse(request);
+}
+
+function normalizeEnvironment(
+  value: unknown,
+  fallbackEnvironment?: string,
+): unknown {
+  if (
+    fallbackEnvironment === undefined ||
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  )
+    return value;
+  const environment = Object.getOwnPropertyDescriptor(
+    value,
+    "environment",
+  )?.value;
+  Object.defineProperty(value, "environment", {
+    value: environment || fallbackEnvironment || "",
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+  return value;
+}
 
 export type ParsedRegistration =
   | {
@@ -37,8 +113,11 @@ export function parseRegistrationRequest(
   request: SchemaRegistrationRequest,
 ): ParsedRegistration {
   try {
-    if ("providerId" in request) return parseFragmentRegistration(request);
-    return parseServiceRegistration(request);
+    const input = guardRegistrationInput(request);
+    if (!input.success) return { success: false, result: input.result };
+    if ("providerId" in input.request)
+      return parseFragmentRegistration(input.request);
+    return parseServiceRegistration(input.request);
   } catch (error: unknown) {
     return parsedValidationFailure(
       error instanceof Error ? error.message : String(error),
@@ -47,12 +126,8 @@ export function parseRegistrationRequest(
 }
 
 function parseServiceRegistration(
-  request: SchemaRegistrationRequest,
+  data: Extract<SchemaRegistrationRequest, { fragmentSlots: unknown }>,
 ): ParsedRegistration {
-  const parsed = serviceSchemaRegistrationRequestSchema.safeParse(request);
-  if (!parsed.success)
-    return parsedValidationFailure(firstIssueMessage(parsed.error));
-  const data = parsed.data;
   const service = deriveServicePath(data.serviceId);
   const metadata: SchemaRegistrationMetadata = {
     ...service,
@@ -106,12 +181,8 @@ function deriveSlotMetadata(
 }
 
 function parseFragmentRegistration(
-  request: SchemaRegistrationRequest,
+  data: Extract<SchemaRegistrationRequest, { providerId: string }>,
 ): ParsedRegistration {
-  const parsed = fragmentSchemaRegistrationRequestSchema.safeParse(request);
-  if (!parsed.success)
-    return parsedValidationFailure(firstIssueMessage(parsed.error));
-  const data = parsed.data;
   const derived = deriveFragmentPath(
     data.serviceId,
     data.slotPath,

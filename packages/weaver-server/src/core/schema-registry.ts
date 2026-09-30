@@ -193,12 +193,16 @@ function persistentRegistrationQueue(
   return (request, context) => {
     const work = pending.then(() =>
       serializeConfigMutation(service, async () => {
-        const environment = request.environment || defaultEnvironment || "";
-        const prepared = adapter.prepare({ ...request, environment }, context);
+        const prepared = adapter.prepare(request, context, defaultEnvironment);
         if (!prepared.result.success) return prepared.result;
         const candidate = prepared.candidate;
-        if (!candidate) return prepared.result;
-        const failure = await persist(candidate, environment, context);
+        if (!candidate || prepared.environment === undefined)
+          return prepared.result;
+        const failure = await persist(
+          candidate,
+          prepared.environment,
+          prepared.context,
+        );
         if (failure) return failure;
         prepared.publish();
         return prepared.result;
