@@ -29,7 +29,7 @@
     "build": "tsup",
     "start": "node dist/cli.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && node --import tsx --test test/canonical-registry*.node.mjs",
+    "test": "vitest run && node --import tsx --test test/canonical-registry*.node.mjs test/resolution-snapshot.node.mjs",
     "lint": "biome check ."
   },
   "dependencies": {

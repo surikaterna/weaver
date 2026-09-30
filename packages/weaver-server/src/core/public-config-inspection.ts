@@ -1,4 +1,10 @@
-import { deepGet, deepMerge } from "@weaver-conf/config-engine";
+import {
+  deepGet,
+  deepMerge,
+  inspectResolvedPath,
+  parsePath,
+  resolveConfigurationSnapshot,
+} from "@weaver-conf/config-engine";
 import type {
   ConfigDelta,
   ConfigMount,
@@ -148,12 +154,10 @@ export function inspectPublicConfig(
 ): ConfigurationInspection<unknown> {
   if (isProtectedConfigPath(key)) return emptyInspection(key);
 
-  let state: Record<string, unknown> = {};
-  for (const layer of layers) state = deepMerge(state, layer.entries);
+  const snapshot = resolutionSnapshot(layers);
+  const state = snapshot.entries;
   const classifier = createMountTaintClassifier(state);
   const layerValues: Record<string, unknown> = {};
-  let effectiveValue: unknown;
-  let effectiveLayer: string | undefined;
   for (const layer of layers) {
     const entries = projectRecord(
       filterProtectedConfigEntries(layer.entries),
@@ -163,10 +167,32 @@ export function inspectPublicConfig(
     const value = deepGet(entries, key);
     if (value === undefined) continue;
     defineOwnData(layerValues, layer.layer, value);
-    effectiveValue = value;
-    effectiveLayer = layer.layer;
   }
-  return { key, effectiveValue, effectiveLayer, layerValues };
+  const inspection = inspectResolvedPath(snapshot, parsePath(key).map(String));
+  const effectiveValue = safeDeepGet(
+    projectPublicEntries(snapshot.entries, state),
+    key,
+  );
+  return {
+    key,
+    effectiveValue,
+    effectiveLayer:
+      effectiveValue === undefined ? undefined : inspection.effectiveLayer,
+    layerValues,
+  };
+}
+
+function resolutionSnapshot(layers: readonly ConfigInspectionLayer[]) {
+  return resolveConfigurationSnapshot({
+    configuredRanks: layers.length ? layers.map((_, rank) => rank) : [0],
+    ceilings: [],
+    layers: layers.map((layer, rank) => ({
+      layer: layer.layer,
+      providerId: `inspection:${rank}`,
+      rank,
+      entries: layer.entries,
+    })),
+  });
 }
 
 function emptyInspection(key: string): ConfigurationInspection<unknown> {

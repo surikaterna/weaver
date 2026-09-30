@@ -24,6 +24,7 @@ export async function checkDeclarations(directory, mode) {
     const resolved = ts.resolveModuleName(specifier, filename, options, ts.sys, undefined,
       undefined, mode === "cjs" ? ts.ModuleKind.CommonJS : ts.ModuleKind.ESNext).resolvedModule;
     assert.ok(resolved, specifier);
+    if (specifier === "@weaver-conf/config-engine") assert.match(resolved.resolvedFileName, /index\.d\.ts$/);
     await assertInstalled(resolved.resolvedFileName, directory);
     const statement = program.getSourceFile(filename).statements.find(statement =>
       ts.isImportDeclaration(statement) && statement.moduleSpecifier.text === specifier);
@@ -34,7 +35,7 @@ export async function checkDeclarations(directory, mode) {
   assert.equal(diagnostics.length, 0, ts.formatDiagnosticsWithColorAndContext(diagnostics, {
     getCanonicalFileName: name => name, getCurrentDirectory: () => directory, getNewLine: () => "\n" }));
   if (!bundler) run(process.execPath, [join(directory, mode, `strict.${mode === "cjs" ? "cjs" : "mjs"}`)], directory);
-  console.log(`strict ${mode}: skipLibCheck=false types=[]; unsuppressed nine-API fixture`);
+   console.log(`strict ${mode}: skipLibCheck=false types=[]; tooling and snapshot fixture; inherited root index.d.ts`);
 }
 
 export async function strictDeclarations(directory) {

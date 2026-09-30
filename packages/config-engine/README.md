@@ -61,7 +61,32 @@ inspection.effectiveLayer; // "tenant"
 inspection.layerValues;    // { core: "light", tenant: "dark" }
 ```
 
-`inspectKey` performs a direct lookup of a **flat entry key** in each layer. It does not traverse nested objects or compute deep-merged object values: the last layer containing that exact key wins, even if its value is `undefined`. `resolveConfiguration` deep merges entries and skips `undefined` for provenance. Neither public helper enforces schema override ceilings or provides governed service inspection; ceiling enforcement is separate work.
+`inspectKey` performs a direct lookup of a **flat entry key** in each layer. It does not traverse nested objects or compute deep-merged object values: the last layer containing that exact key wins, even if its value is `undefined`. `resolveConfiguration` deep merges entries and skips `undefined` for provenance. These legacy helpers do not enforce override ceilings; use the snapshot API for nested resolution and inspection.
+
+### Immutable nested resolution snapshots
+
+```typescript
+import { resolveConfigurationSnapshot, inspectResolvedPath } from "@weaver-conf/config-engine";
+
+const snapshot = resolveConfigurationSnapshot({
+  configuredRanks: [0, 1],
+  ceilings: [{ path: ["cfg", "locked"], maxRank: 0 }],
+  layers: [
+    { layer: "core", providerId: "defaults", rank: 0, entries: { cfg: { locked: 1, a: 1 } } },
+    { layer: "user", providerId: "preferences", rank: 1, entries: { cfg: { locked: 9, b: 2 } } },
+  ],
+});
+inspectResolvedPath(snapshot, ["cfg", "locked"]).effectiveLayer; // "core"
+inspectResolvedPath(snapshot, ["cfg"]).effectiveLayer; // undefined: composite origins
+```
+
+Paths are literal segment arrays (a dot inside a segment is not a separator). Ranks must be finite configured positions; layer array order determines precedence, including repeated slots from different providers. Duplicate layer/provider pairs are rejected. Ancestor ceilings tighten descendants; a child cannot loosen its parent. Allowed object siblings survive pruning. Atomic arrays, null and primitives cannot replace an ancestor of any blocked declared descendant, even when that descendant is currently absent.
+
+The engine consumes a host-compiled ceiling plan, not schemas or authorization. `trustedEmergency: true` is a **trusted host capability**, never a caller role or an automatic property of a session layer. Hosts must validate emergency eligibility separately. It does not authorize writes, reveal sensitive data, or bypass registry, role or session policy.
+
+Snapshots descriptor-copy plain data before resolution, reject accessors without invoking getters, cycles, symbols and prototype hazards, and accept acyclic sharing/null-prototype records. Values, ordered raw contributions and surviving trace records are detached and deeply frozen. Inspection uses the same generation without I/O or a second merge. Defined equal-valued overrides change origin; object inspection has a single effective layer/provider only when all surviving origins agree. Arrays are atomic, including inspection of their present children. Undefined skips an ordinary merge operation, but own nested undefined remains present on first object insertion, matching legacy deep merge.
+
+Co-located exported Zod schemas describe the input, layer, ceiling, origin, trace, snapshot and inspection data. They describe record shapes; the resolver additionally enforces descriptor safety and rank/duplicate constraints. Opaque `merge` strategies are rejected with `UNSUPPORTED_OPERATION` before executing a callback. Legacy `resolveConfiguration` custom merge identity/order/count remain unchanged; the private legacy ceiling helper is not exported or corrected by this API.
 
 ### Schema registry
 

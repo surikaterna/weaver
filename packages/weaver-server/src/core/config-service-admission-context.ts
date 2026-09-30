@@ -1,4 +1,3 @@
-import { deepMerge } from "@weaver-conf/config-engine";
 import type {
   ConfigurationStorageProvider,
   ScopeInstance,
@@ -10,6 +9,7 @@ import {
 } from "./config-service-internal";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
 import { type Mutation, prepareConfigMutation } from "./config-write-admission";
+import { resolveOrderedEntries } from "./ordered-config-resolution";
 import {
   isSameScopeLayer,
   isScopedLayer,
@@ -44,11 +44,10 @@ function projectedState(
       scope.scopeId !== scoped?.scopeId || scope.value !== scoped.value,
   );
   if (scoped) scopes.push(scoped);
-  let merged: Record<string, unknown> = {};
+  const ordered: Record<string, unknown>[] = [];
   for (const provider of deps.providers) {
     if (isScopedLayer(provider.layer)) continue;
-    merged = deepMerge(
-      merged,
+    ordered.push(
       provider === target && !dynamicWrite
         ? candidate
         : (deps.layerData.get(provider.id) ?? {}),
@@ -62,21 +61,28 @@ function projectedState(
         provider === target && !dynamicWrite
           ? candidate
           : (deps.layerData.get(provider.id) ?? {});
-      merged = deepMerge(merged, entries);
+      ordered.push(entries);
     }
     const dynamic =
       dynamicWrite && isSameScopeLayer(layer, scopedLayer)
         ? candidate
         : deps.dynamicScopeEntries.get(scopedLayer);
-    if (dynamic) merged = deepMerge(merged, dynamic);
+    if (dynamic) ordered.push(dynamic);
   }
-  return merged;
+  return resolveOrderedEntries(ordered);
 }
 
 function layerError(layer: string, message: string): WriteResult {
   return {
     success: false,
     error: { code: "LAYER_NOT_FOUND", message: `${message} "${layer}"` },
+  };
+}
+
+function scopeUnavailable(): WriteResult {
+  return {
+    success: false,
+    error: { code: "INTERNAL_ERROR", message: "Scoped layer is unavailable" },
   };
 }
 
@@ -96,13 +102,7 @@ export function createConfigAdmission(deps: AdmissionDependencies) {
       await deps.warmScopeLayers(opts?.scopePath);
       if (dynamic) await deps.getLayerValue(layer, mutations[0]?.key ?? "");
     } catch {
-      return {
-        success: false,
-        error: {
-          code: "INTERNAL_ERROR",
-          message: "Scoped layer is unavailable",
-        },
-      };
+      return scopeUnavailable();
     }
     const before = dynamic
       ? (deps.dynamicScopeEntries.get(normalizeScopeLayer(layer)) ?? {})

@@ -44,6 +44,10 @@ export {
   parseCanonicalConfigPath,
   WEAVER_INTERNAL_ROOT,
 } from "./registration-paths";
+export {
+  inspectResolvedPath,
+  resolveConfigurationSnapshot,
+} from "./resolution-snapshot";
 // schema-diff.ts — Schema comparison utilities
 export type { BreakingChange } from "./schema-diff";
 export {
@@ -87,6 +91,7 @@ export {
 } from "./schema-validation-schemas";
 // scope.ts — Scope chain builder
 export type { BuildScopeChainResult, ScopeChainEntry } from "./scope";
+export * from "./snapshot-contracts";
 // utils — shared utilities (formerly @weaver-conf/storage-provider-core)
 export { cloneValue } from "./utils/clone";
 export { extractErrorMessage, isNodeError } from "./utils/error-utils";

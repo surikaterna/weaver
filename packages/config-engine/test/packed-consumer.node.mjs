@@ -8,6 +8,7 @@ import { checkRoot } from "./root-behavior.mjs";
 import { run, withConsumer } from "./packed-consumer-helper.mjs";
 import { strictDeclarations } from "./packed-declarations.mjs";
 import { checkRuntimeClosure } from "./packed-runtime.mjs";
+import { checkSnapshot } from "./snapshot-behavior.mjs";
 
 test("packed root supports isolated ESM/CJS behavior and strict declarations", async () => {
   await withConsumer(async directory => {
@@ -17,7 +18,7 @@ test("packed root supports isolated ESM/CJS behavior and strict declarations", a
       const prelude = mode === "esm"
         ? 'import * as engine from "@weaver-conf/config-engine"; import assert from "node:assert/strict";'
         : 'const engine = require("@weaver-conf/config-engine"); const assert = require("node:assert/strict");';
-      await fs.writeFile(filename, `${prelude}\n(${checkRoot.toString()})(engine, assert);`);
+      await fs.writeFile(filename, `${prelude}\n(${checkRoot.toString()})(engine, assert);\n(${checkSnapshot.toString()})(engine, assert);`);
       run(process.execPath, [filename], directory);
     }
     const require = createRequire(join(directory, "package.json"));

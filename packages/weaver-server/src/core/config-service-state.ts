@@ -1,9 +1,9 @@
-import { deepMerge } from "@weaver-conf/config-engine";
 import type {
   ConfigurationStorageProvider,
   ScopeInstance,
 } from "@weaver-conf/config-types";
 import { hasScopedLayerIo } from "./config-service-internal";
+import { resolveOrderedEntries } from "./ordered-config-resolution";
 import {
   isSameScopeLayer,
   isScopedLayer,
@@ -34,29 +34,29 @@ async function warmScopeLayers(
 }
 
 function baseEntries(state: StateContext): Record<string, unknown> {
-  let merged: Record<string, unknown> = {};
+  const entries: Record<string, unknown>[] = [];
   for (const provider of state.providers) {
     if (isScopedLayer(provider.layer)) continue;
-    merged = deepMerge(merged, state.layerData.get(provider.id) ?? {});
+    entries.push(state.layerData.get(provider.id) ?? {});
   }
-  return merged;
+  return resolveOrderedEntries(entries);
 }
 
 function scopeState(
   state: StateContext,
   scopePath: ScopeInstance[],
 ): Record<string, unknown> {
-  let merged: Record<string, unknown> = {};
+  const entries: Record<string, unknown>[] = [];
   for (const scope of scopePath) {
     const scopedLayer = `${scope.scopeId}:${scope.value}`;
     for (const provider of state.providers) {
       if (!isSameScopeLayer(provider.layer, scopedLayer)) continue;
-      merged = deepMerge(merged, state.layerData.get(provider.id) ?? {});
+      entries.push(state.layerData.get(provider.id) ?? {});
     }
     const dynamic = state.dynamicScopeEntries.get(scopedLayer);
-    if (dynamic) merged = deepMerge(merged, dynamic);
+    if (dynamic) entries.push(dynamic);
   }
-  return merged;
+  return resolveOrderedEntries(entries);
 }
 
 function allScopes(
@@ -88,7 +88,9 @@ export function createConfigStateReader(
     getAllScopes: () => allScopes(state),
     getMergedState: (path?: ScopeInstance[]) => {
       const base = baseEntries(state);
-      return path?.length ? deepMerge(base, scopeState(state, path)) : base;
+      return path?.length
+        ? resolveOrderedEntries([base, scopeState(state, path)])
+        : base;
     },
     getRevisionState: () => ({
       base: baseEntries(state),
