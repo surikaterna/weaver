@@ -16,6 +16,47 @@ These tools compose with `@weaver-conf/config-auth` — the policy engine accept
 
 ## Usage
 
+### Browser entry versus Node root
+
+Browser consumers must use `@weaver-conf/config-policy/browser`, available as
+ESM, CommonJS, and strict TypeScript declarations. It exports exactly
+`createInMemoryOverrideTracker`, `evaluateChangePolicy`, `validateChangePolicies`,
+`DEFAULT_PLUGIN_MANAGEMENT_RATCHET_RULES`, and `validateOneWayRatchet`, plus the
+existing tracker, policy decision/context/violation, and ratchet types.
+It does not export filesystem tracking, promotion contracts, or server APIs.
+Canonical emergency override records and promotion schemas remain owned by
+`@weaver-conf/config-types`.
+
+```typescript
+import {
+  evaluateChangePolicy,
+  createInMemoryOverrideTracker,
+} from "@weaver-conf/config-policy/browser";
+
+const decision = evaluateChangePolicy(
+  { type: "string", "x-weaver": { changePolicy: "staging-gate" } },
+  { userId: "ops", roles: [] },
+  "app",
+  () => true, // Supply your actual base write authorization here.
+);
+const tracker = createInMemoryOverrideTracker({ followUpDeadlineMs: 86_400_000 });
+await tracker.create({
+  id: "override-1", key: "app.security.maxRetries", actor: "ops@example.com",
+  reason: "Incident mitigation", layer: "app", createdAt: new Date().toISOString(),
+});
+```
+
+The original `@weaver-conf/config-policy` root remains Node-only and retains all
+existing exports, including `createFileSystemOverrideTracker(filePath, options?)`:
+
+```typescript
+import { createFileSystemOverrideTracker } from "@weaver-conf/config-policy";
+const tracker = createFileSystemOverrideTracker("./state/overrides.json");
+```
+
+The browser entry reuses the same policy logic; a promotion decision is not a
+promotion executor, and in-memory records do not survive a page reload.
+
 ### Evaluating change policies
 
 ```typescript
