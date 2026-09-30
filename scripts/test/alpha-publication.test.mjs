@@ -214,6 +214,64 @@ function executionAdapters(overrides = {}) {
     read: async () => published ? { integrity, tags: { latest: '0.1.2', alpha: version } } : structuredClone(item.status),
     publish: async () => { calls.publish++; calls.auth++; published = true; }, ...overrides } };
 }
+const invalidRegistryRecords = [
+  null, false, 0, '', true, 1, 'record', [], [{ name, version, dist: { integrity } }], {},
+  { name: 'wrong', version, dist: { integrity } }, { name, version: 'wrong', dist: { integrity } },
+  { name, version }, ...[null, false, 0, '', [], 'dist', {}].map((dist) => ({ name, version, dist })),
+  ...[null, false, 0, '', [], [integrity], 'sha1-invalid', 'sha512-short', `${integrity.slice(0, -3)}B==`]
+    .map((value) => ({ name, version, dist: { integrity: value } })),
+];
+function metadataReader(versions, requestedVersion = version, tags = item.status.tags) {
+  const read = registryReader(async () => new Response(JSON.stringify({ name, versions, 'dist-tags': tags })));
+  return () => read(name, requestedVersion);
+}
+test('present malformed registry versions deny reader and early/late execution before any auth/upload', async () => {
+  for (const record of invalidRegistryRecords) {
+    const read = metadataReader({ [version]: record });
+    await assert.rejects(read(), /registry/i);
+    for (const failureRead of [1, 2]) {
+      let reads = 0;
+      const { calls, adapters } = executionAdapters({ read: () => ++reads === failureRead ? read() : metadataReader({})() });
+      const result = await executePlan({ packages: [item] }, adapters);
+      assert.equal(result.success, false); assert.equal(result.results[0].outcome, 'not-attempted');
+      assert.equal(reads, failureRead); assert.equal(calls.auth, 0); assert.equal(calls.publish, 0);
+    }
+  }
+});
+test('valid missing own version/definitive404 remain absent; prototype versions do not count as records', async () => {
+  assert.equal((await metadataReader({})()).integrity, null);
+  assert.equal((await metadataReader({ other: null })()).integrity, null);
+  assert.equal((await registryReader(async () => new Response('', { status: 404 }))(name, version)).integrity, null);
+  for (const inherited of ['toString', 'constructor', '__proto__']) {
+    assert.equal((await metadataReader({}, inherited)()).integrity, null);
+  }
+  assert.equal(Object.hasOwn(Object.prototype, version), false);
+  Object.defineProperty(Object.prototype, version, { value: { name, version, dist: { integrity } }, configurable: true });
+  try {
+    assert.equal((await metadataReader({})()).integrity, null);
+  } finally { delete Object.prototype[version]; }
+  const read = metadataReader({ [version]: { name, version, dist: { integrity } } });
+  assert.equal((await read()).integrity, integrity);
+  const existing = { ...item, status: { integrity, tags: item.status.tags } };
+  const { calls, adapters } = executionAdapters({ read });
+  assert.equal((await executePlan({ packages: [existing] }, adapters)).results[0].outcome, 'verified-existing');
+  assert.equal(calls.auth, 0); assert.equal(calls.publish, 0);
+});
+test('valid registry metadata with late tag drift still blocks upload and post-upload baseline drift fails', async () => {
+  for (const tag of ['latest', 'next', 'alpha']) {
+    let reads = 0;
+    const changed = metadataReader({}, version, { ...item.status.tags, [tag]: 'changed' });
+    const { calls, adapters } = executionAdapters({ read: () => ++reads === 2 ? changed() : metadataReader({})() });
+    const result = await executePlan({ packages: [item] }, adapters);
+    assert.equal(result.success, false); assert.match(result.error, /Registry drift/);
+    assert.equal(calls.auth, 0); assert.equal(calls.publish, 0);
+  }
+  for (const tag of ['latest', 'next']) {
+    const changed = metadataReader({ [version]: { name, version, dist: { integrity } } }, version,
+      { ...item.status.tags, alpha: version, [tag]: 'changed' });
+    await assert.rejects(observeUpload(changed, item), /latest\/next changed/);
+  }
+});
 test('mock new uploads/no-history/stable/alpha histories, existing matching skips without retag', async () => {
   for (const tags of [{}, { latest: '0.1.2' }, { alpha: '0.1.3-alpha.0' }]) {
     let uploaded = false;
