@@ -1,5 +1,5 @@
 ---
-"@weaver-conf/weaver-client": major
+"@weaver-conf/weaver-client": minor
 ---
 
 Register canonical JSON Schema requests directly, resolve environment-specific server schemas for client validation and metadata, replace Zod-backed namespace authority with compile-time generic path access, validate registered HTTP contracts at runtime, and prevent mutation replay while preserving caller cancellation through safe retries.

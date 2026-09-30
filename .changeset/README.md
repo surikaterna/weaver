@@ -14,3 +14,27 @@ information:
 - A summary of the changes made
 
 Learn more about [creating a changeset](https://github.com/changesets/changesets/blob/main/docs/adding-a-changeset.md).
+
+## Greenfield pre-1 alpha policy
+
+While Weaver is in greenfield 0.x development, breaking changes use **minor**,
+additive changes use **minor**, and backward-compatible fixes use **patch**.
+Keep breaking-change summaries and migration guidance explicit: a minor bump
+does not promise compatibility during this phase. Changesets aggregates the
+highest bump once per package across pending changesets, not once per file.
+Prerelease mode does not remap major declarations automatically.
+
+Enter alpha with `pnpm changeset pre enter alpha`; commit the CLI-generated
+`.changeset/pre.json`. Versioning belongs to the generated release PR, not
+hand-edited source manifests or changelogs. The CLI retains processed changesets
+in prerelease mode and records their IDs; do not delete them or reset/re-enter
+prerelease mode to force another release.
+
+Stable 1.0 requires a separate readiness review and explicit human approval;
+alpha is not a stable or RC readiness claim. Future authorized publication must
+use the **alpha** dist-tag, never **latest** or **next**, and exclude private apps.
+Installed Changesets 2.30.0 can select latest for only-prerelease history and
+rejects `publish --tag alpha` in active prerelease mode. Neither Changesets
+publish nor the root legacy release script is an approved alpha publisher.
+See [publishing safety](../docs/guides/publishing.md); executable publication is
+separate work under weaver-hifc.
