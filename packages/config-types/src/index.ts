@@ -275,6 +275,23 @@ export {
   schemaValidationPathSegmentSchema,
   schemaValidationResultSchema,
 } from "./schemas-schema-validation";
+export {
+  configurationEffectiveChangeSchema,
+  configurationInspectionValueSchema,
+  configurationLayerContributionSchema,
+  configurationServiceIdentitySchema,
+  configurationServiceWriteOptionsSchema,
+  configurationServiceWriteResultSchema,
+  hydratedConfigurationInspectionSchema,
+  hydratedConfigurationReaderSchema,
+  hydratedConfigurationServiceSchema,
+  hydratedScopedConfigurationServiceSchema,
+  hydratedServiceConfigurationServiceSchema,
+} from "./schemas-service-capabilities";
+export {
+  canonicalConfigurationPathSchema,
+  relativeConfigurationPathSchema,
+} from "./schemas-service-paths";
 // schemas-session.ts — Zod schemas for session types
 export {
   godModeSessionSchema,
@@ -291,7 +308,6 @@ export {
   configDeltaSchema,
   configSnapshotSchema,
 } from "./schemas-transport";
-// service.ts — Service interfaces
 export type {
   ConfigurationInspection,
   ConfigurationService,
@@ -300,6 +316,24 @@ export type {
   ServiceConfigurationService,
   ViewConfigurationService,
 } from "./service";
+// service.ts — Service interfaces
+export type {
+  ConfigurationEffectiveChange,
+  ConfigurationInspectionValue,
+  ConfigurationLayerContribution,
+  ConfigurationServiceIdentity,
+  ConfigurationServiceWriteOptions,
+  ConfigurationServiceWriteResult,
+  HydratedConfigurationInspection,
+  HydratedConfigurationReader,
+  HydratedConfigurationService,
+  HydratedScopedConfigurationService,
+  HydratedServiceConfigurationService,
+} from "./service-capabilities";
+export type {
+  CanonicalConfigurationPath,
+  RelativeConfigurationPath,
+} from "./service-paths";
 // session.ts — Session layer types
 export type {
   GodModeSession,
