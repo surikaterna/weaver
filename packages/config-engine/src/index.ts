@@ -5,6 +5,7 @@ export type {
   ContractMetadata,
   PackageJsonInput,
 } from "./contract-derivation";
+export { deriveContractFromPackageJson } from "./contract-derivation";
 // deep.ts — Deep object path utilities
 export { deepGet, deepRemove, deepSet } from "./deep";
 export { deepEqual } from "./deep-equal";
@@ -14,11 +15,14 @@ export type {
   JsonSchemaDocument,
   JsonSchemaProperty,
 } from "./json-schema-generator";
+export { generateJsonSchema } from "./json-schema-generator";
 // layers.ts — Layer resolution engine
 export type { ResolvedConfiguration } from "./layers";
+export { inspectKey, resolveConfiguration } from "./layers";
 // merge.ts — Deep merge utility
 export { deepMerge } from "./merge";
 // namespace.ts — Namespace utilities
+export { deriveNamespace, qualifyKey, validateKeyFormat } from "./namespace";
 // path.ts — Bracket-aware path parsing
 export { assertSafePathSegment, buildPath, parsePath } from "./path";
 export { clearRegexCache, getCachedRegex, isSafePattern } from "./regex-cache";
@@ -59,7 +63,10 @@ export type {
   SchemaCompositionError,
   UnregisterSchemaResult,
 } from "./schema-registry";
-export { createSchemaRegistry } from "./schema-registry";
+export {
+  composeConfigurationSchemas,
+  createSchemaRegistry,
+} from "./schema-registry";
 export type {
   SchemaValidationError,
   SchemaValidationErrorCode,
@@ -87,3 +94,4 @@ export type { LogFields, WeaverLogger } from "./utils/logger";
 export { consoleLogger } from "./utils/logger";
 export { safeParseConfigEntries } from "./utils/validation";
 export { readonlyGuard } from "./utils/write-utils";
+export { generateZodSchemaSource } from "./zod-schema-generator";

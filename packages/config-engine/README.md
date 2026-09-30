@@ -10,9 +10,9 @@ pnpm add @weaver-conf/config-engine
 
 ## Overview
 
-`@weaver-conf/config-engine` is the resolution core of the Weaver configuration system. It takes a stack of configuration layers and produces a single resolved output via deep merge, with full provenance tracking (which layer set each key).
+`@weaver-conf/config-engine` is the resolution core of the Weaver configuration system. It takes a stack of configuration layers and produces a single resolved output via deep merge. Provenance records the last layer supplying each top-level entry, not the origin of each nested leaf.
 
-The package also provides namespace utilities for the `{namespace}.{category}.{setting}` key format, a scope chain builder for dynamic tenant hierarchies, a schema registry for aggregating property declarations across modules, and codegen utilities for generating JSON Schema and Zod source from property schemas.
+The package root also provides contract metadata derivation, bracket-aware namespace/key utilities, a schema registry for aggregating property declarations across modules, and codegen utilities for generating JSON Schema and Zod source from composed property schemas.
 
 ### Schema composition validation
 
@@ -61,6 +61,8 @@ inspection.effectiveLayer; // "tenant"
 inspection.layerValues;    // { core: "light", tenant: "dark" }
 ```
 
+`inspectKey` performs a direct lookup of a **flat entry key** in each layer. It does not traverse nested objects or compute deep-merged object values: the last layer containing that exact key wins, even if its value is `undefined`. `resolveConfiguration` deep merges entries and skips `undefined` for provenance. Neither public helper enforces schema override ceilings or provides governed service inspection; ceiling enforcement is separate work.
+
 ### Schema registry
 
 ```typescript
@@ -85,8 +87,32 @@ import { qualifyKey, validateKeyFormat, deriveNamespace } from "@weaver-conf/con
 
 qualifyKey("app.vesselView", "map.defaultZoom"); // "app.vesselView.map.defaultZoom"
 validateKeyFormat("app.vesselView.map.defaultZoom"); // { valid: true }
-deriveNamespace("@weaver-conf/vessel-view-plugin"); // "weaver.vesselView"
+deriveNamespace("@weaver-conf/vessel-view-plugin"); // "weaverConf.vesselView"
 ```
+
+### Contract metadata and flat schema generation
+
+```typescript
+import {
+  deriveContractFromPackageJson, composeConfigurationSchemas,
+  generateJsonSchema, generateZodSchemaSource,
+} from "@weaver-conf/config-engine";
+
+const contract = deriveContractFromPackageJson({ name: "@ghost/panel-plugin" });
+// namespace: "ghost.panel", version: "0.0.0", description: ""
+// weaver.configNamespace can explicitly override the derived namespace.
+const composed = composeConfigurationSchemas([{
+  ownerId: contract.pluginId,
+  namespace: contract.namespace,
+  properties: { "display.limit": { type: "integer", minimum: 1, default: 25 } },
+}]);
+if (composed.errors.length === 0) {
+  const jsonSchema = generateJsonSchema(composed.schemas, { title: "Ghost panel" });
+  const zodSource = generateZodSchemaSource(composed.schemas);
+}
+```
+
+Generators take a `Map<string, ComposedSchemaEntry>`, not raw property schemas. JSON Schema retains flat fully-qualified property names rather than constructing nested namespace objects. Zod generation returns TypeScript source with sanitized named schemas and a flat `configSchemas` lookup; it is not a complete JSON Schema compiler (for example, union types use the first type and composition keywords are not translated). Use the canonical validators for authoritative admission.
 
 ## API Reference
 
@@ -94,14 +120,15 @@ deriveNamespace("@weaver-conf/vessel-view-plugin"); // "weaver.vesselView"
 |---|---|
 | `deepMerge(base, override)` | Deep merge two config objects |
 | `resolveConfiguration(stack)` | Resolve a layer stack into merged entries + provenance |
-| `inspectKey(stack, key)` | Inspect a key's value across all layers |
+| `inspectKey(stack, key)` | Inspect an exact flat entry key across layers |
 | `createSchemaRegistry()` | Create an incremental schema registry |
 | `composeConfigurationSchemas(declarations)` | One-shot schema composition |
 | `qualifyKey(namespace, relativeKey)` | Join namespace + key with dot separator |
-| `validateKeyFormat(key)` | Validate 3-5 segment camelCase key format |
+| `validateKeyFormat(key)` | Validate one or more bracket-aware alphanumeric segments starting with a letter |
 | `deriveNamespace(pluginId)` | Derive namespace from package/plugin ID |
-| `extractNamespace(fqKey)` | Extract first two segments as namespace |
-| `generateJsonSchema(schemas)` | Generate a JSON Schema document from property schemas |
+| `deriveContractFromPackageJson(pkg)` | Derive package identity, namespace, version, and description |
+| `generateJsonSchema(schemas, options?)` | Generate flat JSON Schema from composed entries |
+| `generateZodSchemaSource(schemas)` | Generate TypeScript Zod source from composed entries |
 
 ## License
 
