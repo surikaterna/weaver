@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,7 +30,7 @@ async function packClosure(directory, packDirectory, seen = new Set()) {
 }
 
 export async function withConsumer(callback) {
-  const temporary = await mkdtemp("/tmp/opencode/policy-packed-");
+  const temporary = await mkdtemp(join(tmpdir(), "policy-packed-"));
   try {
     const tarballs = await packClosure(packageDir, temporary);
     // Pin unpublished runtime closure to packed artifacts, never workspace sources.
