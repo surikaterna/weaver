@@ -25,13 +25,11 @@ export function run(command, args, cwd) {
   });
 }
 
-export async function installConsumer() {
-  await mkdir("/tmp/opencode", { recursive: true });
-  const directory = await mkdtemp("/tmp/opencode/weaver-browser-packed-");
+async function prepareConsumer(directory, execute) {
   const dependencies = {};
   for (const name of packages) {
     const source = join(root, "packages", name);
-    run("pnpm", ["pack", "--pack-destination", directory], source);
+    execute("pnpm", ["pack", "--pack-destination", directory], source);
     const manifest = JSON.parse(await readFile(join(source, "package.json"), "utf8"));
     dependencies[manifest.name] = `file:${join(directory, `weaver-conf-${name}-${manifest.version}.tgz`)}`;
   }
@@ -42,12 +40,7 @@ export async function installConsumer() {
   await writeFile(join(directory, "pnpm-workspace.yaml"),
     `packages: []\nlinkWorkspacePackages: false\noverrides:\n${Object.entries(dependencies)
       .map(([name, tarball]) => `  ${JSON.stringify(name)}: ${JSON.stringify(tarball)}`).join("\n")}\n`);
-  try {
-    run("pnpm", ["install", "--ignore-scripts", "--config.confirmModulesPurge=false"], directory);
-  } catch (error) {
-    await rm(directory, { recursive: true, force: true });
-    throw error;
-  }
+  execute("pnpm", ["install", "--ignore-scripts", "--config.confirmModulesPurge=false"], directory);
   const consumerRequire = createRequire(join(directory, "package.json"));
   for (const name of packages) {
     const resolved = await realpath(consumerRequire.resolve(`@weaver-conf/${name}`));
@@ -55,7 +48,22 @@ export async function installConsumer() {
     assert.ok(resolved.includes("/dist/"), resolved);
     console.log(`packed resolution: ${name} -> ${resolved}`);
   }
-  return directory;
+}
+
+export async function installConsumer({ parent = "/tmp/opencode", execute = run } = {}) {
+  await mkdir(parent, { recursive: true });
+  const directory = await mkdtemp(join(parent, "weaver-browser-packed-"));
+  try {
+    await prepareConsumer(directory, execute);
+    return directory;
+  } catch (error) {
+    // Setup owns cleanup until successful return; never replace the setup error.
+    try {
+      await rm(directory, { recursive: true, force: true });
+    } finally {
+      throw error;
+    }
+  }
 }
 
 export async function fixture(directory, name, text) {

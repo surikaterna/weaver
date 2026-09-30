@@ -25,15 +25,35 @@ async function boot() {
 void boot; void nodePersistence; void createHttpTransport({ baseUrl: "https://example.invalid" });
 `;
 
+async function assertBrowserResolution(directory, filename, options, program, mode) {
+  const specifier = "@weaver-conf/weaver-client/browser";
+  const resolutionMode = mode === "cjs" ? ts.ModuleKind.CommonJS : ts.ModuleKind.ESNext;
+  const expected = await realpath(join(directory, "node_modules", specifier.replace("/browser", ""),
+    "dist", mode === "cjs" ? "browser.d.cts" : "browser.d.ts"));
+  const resolved = ts.resolveModuleName(specifier, filename, options, ts.sys,
+    undefined, undefined, resolutionMode).resolvedModule;
+  assert.ok(resolved, `${mode}: browser subpath must resolve`);
+  assert.equal(await realpath(resolved.resolvedFileName), expected);
+  const source = program.getSourceFile(filename);
+  const imported = source.statements.find(statement => ts.isImportDeclaration(statement)
+    && statement.moduleSpecifier.text === specifier);
+  const symbol = program.getTypeChecker().getSymbolAtLocation(imported.moduleSpecifier);
+  assert.ok(symbol?.declarations?.length, `${mode}: actual program import must resolve`);
+  assert.equal(await realpath(symbol.declarations[0].fileName), expected);
+  console.log(`exact ${mode} resolver (${resolutionMode === ts.ModuleKind.CommonJS ? "CommonJS" : "ESNext"}): ${expected}`);
+}
+
 async function checkProgram(directory, mode) {
   const filename = await fixture(directory, `types-${mode}.${mode === "cjs" ? "cts" : "mts"}`, declarationFixture);
   const bundler = mode === "bundler";
-  const program = ts.createProgram([filename], {
+  const options = {
     strict: true, skipLibCheck: false, noEmit: true, types: [],
     target: ts.ScriptTarget.ES2022,
     module: bundler ? ts.ModuleKind.ESNext : ts.ModuleKind.NodeNext,
     moduleResolution: bundler ? ts.ModuleResolutionKind.Bundler : ts.ModuleResolutionKind.NodeNext,
-  });
+  };
+  const program = ts.createProgram([filename], options);
+  await assertBrowserResolution(directory, filename, options, program, mode);
   for (const source of program.getSourceFiles()) {
     assert.ok(!source.fileName.includes("@types/node"), source.fileName);
     if (!source.fileName.includes("@weaver-conf")) continue;
