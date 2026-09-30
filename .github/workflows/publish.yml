@@ -8,7 +8,6 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 permissions:
   contents: write
   pull-requests: write
-  id-token: write
 
 jobs:
   publish:
@@ -40,13 +39,3 @@ jobs:
           commit: "chore: version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish to npm via Trusted Publishing
-        if: steps.changesets.outputs.hasChangesets == 'false'
-        run: |
-          echo "registry=https://registry.npmjs.org/" > "$NPM_CONFIG_USERCONFIG"
-          unset NODE_AUTH_TOKEN
-          pnpm changeset publish
-        env:
-          NODE_AUTH_TOKEN: ""
-          NPM_CONFIG_PROVENANCE: "true"
