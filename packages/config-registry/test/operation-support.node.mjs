@@ -12,10 +12,16 @@ const object = { type: "object", properties: { enabled: leaf } };
 const support = (schema, path, value = true, candidate = { enabled: true }, previous = {}) =>
   schemaWriteSupport(schema, path, value, candidate, previous);
 
-test("entire frozen server helper moves unchanged; admission retains its single delegated import", async () => {
+test("frozen helper provenance survives the explicit guard-format correction; admission delegates", async () => {
   const moved = await readFile(new URL("../src/schema-write-support.ts", import.meta.url), "utf8");
+  const guard = "    object\n  )\n    return { ...unsupported, ambiguous: true };\n";
+  assert.ok(moved.includes(guard));
+  const direct = moved.slice(moved.indexOf("function directSupport("), moved.indexOf("function traverseMembers(")).trimEnd();
+  assert.equal(direct.split("\n").length, 49);
+  // Restore only the documented braced guard to compare against the ORIGINAL frozen bytes.
   const original = moved.replace('import { z } from "zod";\n', "")
-    .replace(/\nexport const structuralSupportSchema = z\.object\(\{[\s\S]*?satisfies z\.ZodType<StructuralSupport>;\n/, "");
+    .replace(/\nexport const structuralSupportSchema = z\.object\(\{[\s\S]*?satisfies z\.ZodType<StructuralSupport>;\n/, "")
+    .replace(guard, "    object\n  ) {\n    return { ...unsupported, ambiguous: true };\n  }\n");
   // Frozen .11 tip 7bd29dd: original complete 234-line helper, not a copied validator fixture.
   assert.equal(createHash("sha256").update(original).digest("hex"),
     "c9402d5735c58a5e18bdafe7b28c9e55de7c2c553285e36eb0f44e8311e0158e");

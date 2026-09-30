@@ -98,9 +98,8 @@ function directSupport(
     !isRecord(previous) &&
     !Array.isArray(previous) &&
     object
-  ) {
+  )
     return { ...unsupported, ambiguous: true };
-  }
   const arrayIndex = Array.isArray(previous) || (array && !object);
   if (arrayIndex && numeric && path.length > 0) {
     const members = arrayMembers(schema, key);
