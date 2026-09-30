@@ -42,3 +42,13 @@ if (nested.effectiveValue !== 1 || nested.effectiveLayer !== "core"
   || inspectResolvedPath(snapshot, ["cfg"]).effectiveLayer !== undefined) {
   throw new Error("Canonical snapshot fixture failed");
 }
+
+const ownReserved: Record<string, unknown> = {};
+Object.defineProperty(ownReserved, "__proto__", { value: { data: 1 }, enumerable: true });
+const reservedSnapshot: ConfigurationSnapshot = resolveConfigurationSnapshot({
+  configuredRanks: [0], ceilings: [],
+  layers: [{ layer: "__proto__", providerId: "constructor", rank: 0, entries: { cfg: ownReserved } }],
+});
+const reservedInspection: ResolvedPathInspection = inspectResolvedPath(reservedSnapshot, ["cfg"]);
+if (typeof reservedInspection.effectiveValue !== "object" || reservedInspection.effectiveValue === null
+  || !Object.hasOwn(reservedInspection.effectiveValue, "__proto__")) throw new Error("Reserved data fixture failed");

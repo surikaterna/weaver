@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { deepMerge, inspectKey, resolveConfiguration, resolveConfigurationSnapshot, inspectResolvedPath } from "../dist/index.js";
 import { resolveConfigurationWithCeiling } from "../dist/layers.js";
+import * as engine from "../dist/index.js";
 
 const layer = (entries, rank = 0, extra = {}) => ({ layer: ["core", "user", "session"][rank], providerId: `p${rank}`, rank, entries, ...extra });
 const resolve = (layers, ceilings = []) => resolveConfigurationSnapshot({ layers, ceilings, configuredRanks: [0, 1, 2] });
@@ -18,6 +19,93 @@ test("nested winners derive from operations, not equality or highest object writ
   const providers = resolve([layer({ cfg: { a: 1 } }), layer({ cfg: { b: 2 } }, 0, { providerId: "other" })]);
   assert.equal(inspect(providers, "cfg").effectiveLayer, undefined);
   assert.equal(inspect(providers, "cfg", "b").effectiveProviderId, "other");
+});
+
+test("reserved own data survives merging and every data schema without becoming path authority", () => {
+  const first = JSON.parse('{"__proto__":{"low":1},"constructor":{"prototype":{"low":1}},"prototype":1,"cfg":{"__proto__":{"low":1},"constructor":{"prototype":1},"prototype":1,"retained":2}}');
+  const second = JSON.parse('{"__proto__":{"high":2},"constructor":{"prototype":{"high":2}},"prototype":2,"cfg":{"__proto__":{"high":2},"prototype":2}}');
+  const before = JSON.stringify([first, second]);
+  const input = { configuredRanks: [0, 1], ceilings: [], layers: [layer(first, 0, { layer: "__proto__", providerId: "constructor" }), layer(second, 1, { layer: "prototype", providerId: "__proto__" })] };
+  const snapshot = resolveConfigurationSnapshot(input);
+  const merged = deepMerge(first, second);
+  assert.deepEqual(snapshot.entries, merged);
+  assert.equal(Object.getPrototypeOf(merged), Object.prototype);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(merged, "__proto__"), { value: { low: 1, high: 2 }, writable: true, configurable: true, enumerable: true });
+  assert.equal(Object.hasOwn(Object.prototype, "high"), false);
+  assert.equal(Object.hasOwn(Object.prototype, "low"), false);
+  assert.equal(JSON.stringify([first, second]), before);
+  assert.equal(Object.isFrozen(first), false);
+  const parent = inspect(snapshot, "cfg");
+  assert.equal(parent.effectiveValue, snapshot.entries.cfg, "issued inspection shares one immutable generation");
+  assert.equal(parent.effectiveLayer, undefined);
+  assert.equal(Object.hasOwn(parent.effectiveValue, "__proto__"), true);
+  assert.notEqual(parent.contributions[0].value, first.cfg);
+  assert.throws(() => { parent.contributions[0].value.prototype = 9; }, TypeError);
+  const reservedTrace = snapshot.trace.find(({ path }) => JSON.stringify(path) === '["cfg","__proto__","high"]');
+  assert.equal(reservedTrace.origin.providerId, "__proto__");
+  const parsedInput = engine.resolutionSnapshotInputSchema.parse(input);
+  const parsedLayer = engine.resolutionLayerSchema.parse(input.layers[0]);
+  const parsedSnapshot = engine.configurationSnapshotSchema.parse(snapshot);
+  const parsedContribution = engine.resolutionContributionSchema.parse(parent.contributions[0]);
+  const parsedInspection = engine.resolvedPathInspectionSchema.parse(parent);
+  for (const record of [parsedInput.layers[0].entries, parsedLayer.entries, parsedSnapshot.entries, parsedContribution.value, parsedInspection.effectiveValue]) {
+    assert.equal(Object.hasOwn(record, "__proto__"), true);
+    assert.equal(Object.hasOwn(record, "constructor"), true);
+    assert.equal(Object.hasOwn(record, "prototype"), true);
+  }
+  assert.deepEqual(engine.resolutionTraceSchema.parse(reservedTrace), reservedTrace);
+  assert.deepEqual(engine.resolutionOriginSchema.parse(reservedTrace.origin), reservedTrace.origin);
+  assert.deepEqual(engine.resolutionPathSchema.parse(reservedTrace.path), reservedTrace.path);
+  assert.deepEqual(engine.resolvedPathInspectionSchema.parse({ ...parent, path: ["__proto__"] }).path, ["__proto__"]);
+  const roundtrip = JSON.parse(JSON.stringify(parsedSnapshot));
+  assert.deepEqual(engine.configurationSnapshotSchema.parse(roundtrip).entries, snapshot.entries);
+  for (const segment of ["__proto__", "constructor", "prototype"]) {
+    assert.throws(() => inspect(snapshot, "cfg", segment), code("VALIDATION_ERROR"));
+    assert.throws(() => resolve([layer(first)], [{ path: ["cfg", segment], maxRank: 0 }]), code("VALIDATION_ERROR"));
+    assert.equal(engine.resolutionCeilingSchema.safeParse({ path: [segment], maxRank: 0 }).success, false);
+  }
+  assert.equal(inspect(snapshot).effectiveValue, snapshot.entries);
+});
+
+test("inherited traps are never read or assigned, including absent contributions and sparse arrays", () => {
+  let getters = 0, setters = 0;
+  const trap = "snapshotInheritedTrap";
+  for (const key of [trap, "700"]) Object.defineProperty(Object.prototype, key, { configurable: true, get() { getters++; return "inherited"; }, set() { setters++; } });
+  try {
+    const own = {}; Object.defineProperty(own, trap, { value: 3, enumerable: true });
+    const sparse = []; sparse.length = 701;
+    const snapshot = resolve([layer({ own, sparse }), layer({ own: { kept: 1 } }, 1)]);
+    assert.equal(inspect(snapshot, "own", trap).effectiveValue, 3);
+    assert.equal(inspect(snapshot, trap).present, false);
+    assert.equal(inspect(snapshot, trap).contributions.every(({ present }) => !present), true);
+    assert.equal(inspect(snapshot, "sparse", "700").present, false);
+    assert.equal(Object.hasOwn(snapshot.entries.sparse, "700"), false);
+    const sparsePath = []; sparsePath.length = 701;
+    assert.throws(() => inspectResolvedPath(snapshot, sparsePath), code("VALIDATION_ERROR"));
+    assert.throws(() => inspectResolvedPath({ ...snapshot, trace: sparsePath }, ["own"]), code("VALIDATION_ERROR"));
+    assert.equal(getters, 0);
+    assert.equal(setters, 0);
+  } finally {
+    for (const key of [trap, "700"]) delete Object.prototype[key];
+  }
+});
+
+test("forged snapshots and public schemas preflight hidden accessors, symbols and reflection failures", () => {
+  let calls = 0;
+  const snapshot = resolve([layer({ cfg: 1 })]);
+  for (const root of [snapshot, { ...snapshot, entries: { cfg: {} } }]) {
+    const forged = { ...root };
+    Object.defineProperty(forged, "hidden", { get() { calls++; return 1; } });
+    assert.throws(() => inspect(forged, "cfg"), code("VALIDATION_ERROR"));
+    assert.throws(() => engine.configurationSnapshotSchema.parse(forged), code("VALIDATION_ERROR"));
+  }
+  const getter = {}; Object.defineProperty(getter, "__proto__", { enumerable: true, get() { calls++; return {}; } });
+  const setter = {}; Object.defineProperty(setter, "constructor", { set() { calls++; } });
+  for (const entries of [getter, setter, { child: getter }, { child: Symbol("value") }]) assert.throws(() => resolve([layer(entries)]), code("VALIDATION_ERROR"));
+  const forgedEntries = { ...snapshot, entries: { get cfg() { calls++; return 1; } } };
+  assert.throws(() => inspect(forgedEntries, "cfg"), code("VALIDATION_ERROR"));
+  assert.equal(calls, 0);
+  assert.throws(() => resolve([layer(new Proxy({}, { ownKeys() { throw new Error("reflection"); } }))]), code("VALIDATION_ERROR"));
 });
 
 test("default semantics match legacy including inserted undefined and atomic resets", () => {
@@ -83,7 +171,8 @@ test("descriptor-first snapshots reject hazards without executing getters or cal
   const cyclic = {}; cyclic.self = cyclic;
   const prototype = Object.create({ evil: 1 });
   const symbol = { [Symbol("secret")]: 1 };
-  for (const entries of [cyclic, prototype, symbol, { nested: new Date() }, JSON.parse('{"__proto__":1}')]) {
+  const customArray = []; Object.setPrototypeOf(customArray, Object.create(Array.prototype));
+  for (const entries of [cyclic, prototype, symbol, { nested: new Date() }, { nested: customArray }]) {
     assert.throws(() => resolve([layer(entries)]), code("VALIDATION_ERROR"));
   }
   assert.throws(() => resolve([layer({ x: 1 }, 0, { merge: () => { calls++; } })]), code("UNSUPPORTED_OPERATION"));
@@ -121,8 +210,16 @@ test("legacy callbacks retain exact argument identity, execution order/count and
   assert.equal(resolved.provenance.get("n"), "session");
   assert.equal(inspectKey({ layers: [{ layer: "core", entries: { cfg: { a: 1 } } }] }, "cfg.a").effectiveValue, undefined);
   events.length = 0;
-  assert.equal(resolveConfigurationWithCeiling(stack, new Map(), false, () => 0).entries.n, 2);
-  assert.equal(events.length, 0, "private legacy helper remains unchanged; it drops custom callbacks");
+  assert.equal(resolveConfigurationWithCeiling(stack, new Map(), false, () => 0).entries.n, 3);
+  assert.equal(events.length, 2, "private helper retains original custom callbacks");
+  assert.deepEqual(events.map(([, override]) => override), [first, second]);
+  events.length = 0;
   assert.equal(resolveConfigurationWithCeiling(stack, new Map(), true, () => 0).entries.n, 3);
   assert.equal(events.length, 2);
+  assert.equal(events[0][1], first);
+  assert.equal(events[1][1], second);
+  events.length = 0;
+  const ceilings = new Map([["n", { "x-weaver": { maxOverrideLayer: "core" } }]]);
+  assert.equal(resolveConfigurationWithCeiling(stack, ceilings, false, (name) => name === "core" ? 0 : 1).entries.n, 1);
+  assert.equal(events.length, 1, "filtered empty entries do not execute a callback");
 });

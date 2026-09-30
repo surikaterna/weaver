@@ -1,4 +1,7 @@
-import { createWeaverError } from "@weaver-conf/config-types";
+import {
+  createWeaverError,
+  WeaverErrorInstance,
+} from "@weaver-conf/config-types";
 import { isPlainObject } from "./merge-traversal";
 
 interface CopyTask {
@@ -9,6 +12,7 @@ interface CopyTask {
 interface CopyContext {
   readonly active: WeakSet<object>;
   readonly tasks: (() => void)[];
+  readonly nullPrototype: boolean;
 }
 
 function invalid(message: string): never {
@@ -20,10 +24,9 @@ function dataDescriptors(value: object): [string, PropertyDescriptor][] {
   if (Object.getOwnPropertySymbols(value).length)
     invalid("Symbols are not snapshot data");
   const entries = Object.entries(descriptors);
-  for (const [key, descriptor] of entries) {
-    if (!("value" in descriptor)) invalid("Accessors are not snapshot data");
-    if (["__proto__", "constructor", "prototype"].includes(key))
-      invalid("Unsafe snapshot key");
+  for (const [, descriptor] of entries) {
+    if (!Object.hasOwn(descriptor, "value"))
+      invalid("Accessors are not snapshot data");
   }
   return entries;
 }
@@ -45,11 +48,15 @@ function visit({ value, assign }: CopyTask, context: CopyContext): void {
   }
   if (!Array.isArray(value) && !isPlainObject(value))
     invalid("Snapshot requires plain data");
+  if (Array.isArray(value) && Object.getPrototypeOf(value) !== Array.prototype)
+    invalid("Snapshot requires standard array prototypes");
   if (active.has(value)) invalid("Cyclic snapshot data");
   const descriptors = dataDescriptors(value);
   const target: Record<string, unknown> | unknown[] = Array.isArray(value)
     ? []
-    : {};
+    : context.nullPrototype
+      ? Object.create(null)
+      : {};
   active.add(value);
   assign(target);
   tasks.push(() => {
@@ -78,16 +85,28 @@ function schedule(context: CopyContext, task: CopyTask): void {
   context.tasks.push(() => visit(task, context));
 }
 
-export function copySnapshotData(input: unknown): unknown {
+export function copySnapshotData(
+  input: unknown,
+  nullPrototype = false,
+): unknown {
   let result: unknown;
-  const context: CopyContext = { active: new WeakSet(), tasks: [] };
+  const context: CopyContext = {
+    active: new WeakSet(),
+    tasks: [],
+    nullPrototype,
+  };
   schedule(context, {
     value: input,
     assign: (value) => {
       result = value;
     },
   });
-  while (context.tasks.length) context.tasks.pop()?.();
+  try {
+    while (context.tasks.length) context.tasks.pop()?.();
+  } catch (error) {
+    if (error instanceof WeaverErrorInstance) throw error;
+    invalid("Snapshot reflection failed");
+  }
   return result;
 }
 

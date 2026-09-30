@@ -1,3 +1,5 @@
+import { defineOwnData, ownDataValue } from "./own-data";
+
 export function isPlainObject(
   value: unknown,
 ): value is Record<string, unknown> {
@@ -21,18 +23,24 @@ export function mergeRecords(
   insertion = false,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-  for (const key of Object.keys(base)) result[key] = base[key];
+  for (const key of Object.keys(base))
+    defineOwnData(result, key, ownDataValue(base, key));
   for (const key of Object.keys(override)) {
-    const value = override[key];
+    const value = ownDataValue(override, key);
     if (value === undefined && !insertion) continue;
     const childPath = [...path, key];
-    if (observer && !observer.allow(childPath, value, result[key])) continue;
+    const baseValue = ownDataValue(result, key);
+    if (observer && !observer.allow(childPath, value, baseValue)) continue;
     if (value === null) {
       observer?.replace(childPath, value);
-      result[key] = null;
+      defineOwnData(result, key, null);
       continue;
     }
-    result[key] = mergeValue(result[key], value, observer, childPath);
+    defineOwnData(
+      result,
+      key,
+      mergeValue(baseValue, value, observer, childPath),
+    );
   }
   if (
     observer &&

@@ -5,8 +5,11 @@ import {
   type MergeObserver,
   mergeRecords,
 } from "./merge-traversal";
+import { ownDataValue } from "./own-data";
+import { assertSafePathSegment } from "./path";
 import {
   type ConfigurationSnapshot,
+  configurationSnapshotSchema,
   type ResolutionCeiling,
   type ResolutionLayer,
   type ResolutionOrigin,
@@ -16,6 +19,8 @@ import {
   resolutionPathSchema,
   resolutionSnapshotInputSchema,
 } from "./snapshot-contracts";
+
+const issuedSnapshots = new WeakSet<object>();
 
 function isPrefix(prefix: readonly string[], path: readonly string[]): boolean {
   return (
@@ -115,11 +120,13 @@ export function resolveConfigurationSnapshot(
       observerFor(layer, parsed.data.ceilings, trace),
     );
   }
-  return freezeSnapshotData({
+  const snapshot = freezeSnapshotData({
     entries,
     layers: parsed.data.layers,
     trace: [...trace.values()],
   });
+  issuedSnapshots.add(snapshot);
+  return snapshot;
 }
 
 function lookup(
@@ -134,8 +141,7 @@ function lookup(
     ) {
       return { present: false, value: undefined };
     }
-    const descriptor = Object.getOwnPropertyDescriptor(value, segment);
-    value = descriptor?.value;
+    value = ownDataValue(value, segment);
   }
   return { present: true, value };
 }
@@ -164,11 +170,13 @@ export function inspectResolvedPath(
   const parsed = resolutionPathSchema.safeParse(copySnapshotData(path));
   if (!parsed.success)
     throw createWeaverError("VALIDATION_ERROR", "Invalid resolution path");
-  const effective = lookup(snapshot.entries, parsed.data);
+  for (const segment of parsed.data) assertSafePathSegment(segment);
+  const safeSnapshot = validatedSnapshot(snapshot);
+  const effective = lookup(safeSnapshot.entries, parsed.data);
   const origin = effective.present
-    ? winningOrigin(snapshot, parsed.data)
+    ? winningOrigin(safeSnapshot, parsed.data)
     : undefined;
-  const contributions = snapshot.layers.map((layer) => ({
+  const contributions = safeSnapshot.layers.map((layer) => ({
     origin: originOf(layer),
     ...lookup(layer.entries, parsed.data),
   }));
@@ -180,4 +188,14 @@ export function inspectResolvedPath(
     effectiveProviderId: origin?.providerId,
     contributions,
   });
+}
+
+function validatedSnapshot(
+  snapshot: ConfigurationSnapshot,
+): ConfigurationSnapshot {
+  if (issuedSnapshots.has(snapshot)) return snapshot;
+  const parsed = configurationSnapshotSchema.safeParse(snapshot);
+  if (!parsed.success)
+    throw createWeaverError("VALIDATION_ERROR", "Invalid resolution snapshot");
+  return freezeSnapshotData(parsed.data);
 }

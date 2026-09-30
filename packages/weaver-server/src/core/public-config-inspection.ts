@@ -1,5 +1,4 @@
 import {
-  deepGet,
   deepMerge,
   inspectResolvedPath,
   parsePath,
@@ -10,7 +9,7 @@ import type {
   ConfigMount,
   ConfigurationInspection,
 } from "@weaver-conf/config-types";
-import { isConfigMount } from "@weaver-conf/config-types";
+import { createWeaverError } from "@weaver-conf/config-types";
 import {
   filterProtectedConfigEntries,
   isProtectedConfigPath,
@@ -58,8 +57,9 @@ function createMountTaintClassifier(
       local.add(current);
       visited.push(current);
       const target = safeDeepGet(state, current);
-      if (!isConfigMount(target)) break;
-      current = target.source;
+      const mount = ownMount(target);
+      if (!mount) break;
+      current = mount.source;
     }
     for (const path of visited) memo.set(path, terminal);
     return terminal;
@@ -74,20 +74,17 @@ function projectPublicEntries(
 ): Record<string, unknown> {
   return projectRecord(
     filterProtectedConfigEntries(entries),
-    "",
     createMountTaintClassifier(state),
   );
 }
 
 function projectRecord(
   value: Record<string, unknown>,
-  prefix: string,
   classifier: MountTaintClassifier,
 ): Record<string, unknown> {
   const projected: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value)) {
-    const path = prefix ? `${prefix}.${key}` : key;
-    const publicChild = projectValue(child, path, classifier);
+  for (const key of Object.keys(value)) {
+    const publicChild = projectValue(ownData(value, key), classifier);
     if (publicChild !== omitted) defineOwnData(projected, key, publicChild);
   }
   return projected;
@@ -95,19 +92,24 @@ function projectRecord(
 
 function projectValue(
   value: unknown,
-  path: string,
   classifier: MountTaintClassifier,
 ): unknown | typeof omitted {
-  if (isConfigMount(value)) {
-    return classifier.isTainted(value) ? omitted : value;
+  const mount = ownMount(value);
+  if (mount) {
+    return classifier.isTainted(mount) ? omitted : value;
   }
   if (Array.isArray(value)) {
-    return value.map((child, index) => {
-      const projected = projectValue(child, `${path}.${index}`, classifier);
-      return projected === omitted ? undefined : projected;
-    });
+    const result: unknown[] = [];
+    Object.defineProperty(result, "length", { value: value.length });
+    for (let index = 0; index < value.length; index++) {
+      const key = String(index);
+      if (!Object.hasOwn(value, key)) continue;
+      const projected = projectValue(ownData(value, key), classifier);
+      defineOwnData(result, key, projected === omitted ? undefined : projected);
+    }
+    return result;
   }
-  return isRecord(value) ? projectRecord(value, path, classifier) : value;
+  return isRecord(value) ? projectRecord(value, classifier) : value;
 }
 
 type ResolveEntries = (
@@ -140,11 +142,7 @@ function projectPublicDelta(
 ): ConfigDelta | null {
   if (isProtectedConfigPath(delta.key)) return null;
   if (delta.action === "remove") return delta;
-  const value = projectValue(
-    delta.value,
-    delta.key,
-    createMountTaintClassifier(state),
-  );
+  const value = projectValue(delta.value, createMountTaintClassifier(state));
   return { ...delta, value: value === omitted ? undefined : value };
 }
 
@@ -158,13 +156,12 @@ export function inspectPublicConfig(
   const state = snapshot.entries;
   const classifier = createMountTaintClassifier(state);
   const layerValues: Record<string, unknown> = {};
-  for (const layer of layers) {
+  for (const layer of snapshot.layers) {
     const entries = projectRecord(
       filterProtectedConfigEntries(layer.entries),
-      "",
       classifier,
     );
-    const value = deepGet(entries, key);
+    const value = safeDeepGet(entries, key);
     if (value === undefined) continue;
     defineOwnData(layerValues, layer.layer, value);
   }
@@ -183,16 +180,27 @@ export function inspectPublicConfig(
 }
 
 function resolutionSnapshot(layers: readonly ConfigInspectionLayer[]) {
+  const ordered = Array.from({ length: layers.length }, (_, rank) =>
+    inspectionLayer(ownData(layers, String(rank)), rank),
+  );
   return resolveConfigurationSnapshot({
-    configuredRanks: layers.length ? layers.map((_, rank) => rank) : [0],
+    configuredRanks: ordered.length ? ordered.map((_, rank) => rank) : [0],
     ceilings: [],
-    layers: layers.map((layer, rank) => ({
-      layer: layer.layer,
-      providerId: `inspection:${rank}`,
-      rank,
-      entries: layer.entries,
-    })),
+    layers: ordered,
   });
+}
+
+function inspectionLayer(value: unknown, rank: number) {
+  if (!isRecord(value))
+    throw createWeaverError("VALIDATION_ERROR", "Invalid inspection layer");
+  const layer = ownData(value, "layer");
+  const entries = ownData(value, "entries");
+  if (typeof layer !== "string" || !isRecord(entries))
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Invalid inspection layer data",
+    );
+  return { layer, entries, rank, providerId: `inspection:${rank}` };
 }
 
 function emptyInspection(key: string): ConfigurationInspection<unknown> {
@@ -206,7 +214,12 @@ function emptyInspection(key: string): ConfigurationInspection<unknown> {
 
 function safeDeepGet(state: Record<string, unknown>, path: string): unknown {
   try {
-    return deepGet(state, path);
+    let value: unknown = state;
+    for (const segment of parsePath(path)) {
+      if (value === null || typeof value !== "object") return undefined;
+      value = ownData(value, segment);
+    }
+    return value;
   } catch {
     return undefined;
   }
@@ -216,15 +229,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function defineOwnData(
-  target: Record<string, unknown>,
-  key: string,
-  value: unknown,
-): void {
+function defineOwnData(target: object, key: string, value: unknown): void {
   Reflect.defineProperty(target, key, {
     value,
     enumerable: true,
     configurable: true,
     writable: true,
   });
+}
+
+function ownData(value: object, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (!descriptor) return undefined;
+  if (!Object.hasOwn(descriptor, "value"))
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Accessors are not public configuration data",
+    );
+  const data: unknown = descriptor.value;
+  return data;
+}
+
+function ownMount(value: unknown): ConfigMount | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  if (ownData(value, "_weaver") !== "mount") return undefined;
+  const source = ownData(value, "source");
+  return typeof source === "string" ? { _weaver: "mount", source } : undefined;
 }
