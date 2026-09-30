@@ -1,5 +1,31 @@
 # @weaver-conf/weaver-client
 
+## 0.2.0-alpha.0
+
+### Minor Changes
+
+- [#155](https://github.com/surikaterna/weaver/pull/155) [`4081689`](https://github.com/surikaterna/weaver/commit/4081689aaa06236e354cf62ec56ef7ccaede370f) Thanks [@spralle](https://github.com/spralle)! - Introduce canonical JSON Schema service and fragment registration contracts, address registry entries by canonical paths, and preserve schema requests directly across transport and server boundaries. Remove namespace-derived registration and its Zod-to-JSON-Schema conversion so the canonical request and response are the only registration transport contracts.
+
+- [#177](https://github.com/surikaterna/weaver/pull/177) [`4a80a03`](https://github.com/surikaterna/weaver/commit/4a80a03bba972f30b930c855ba4ca090334834cc) Thanks [@spralle](https://github.com/spralle)! - Server-mode writes now return the server's decision rather than preflight against cached schemas. Generic HTTP writes dispatch once, do not queue or optimistically commit, and distinguish proven unsent requests from uncertain outcomes after dispatch. Local-only transports remain explicitly non-server-authoritative.
+
+- [#172](https://github.com/surikaterna/weaver/pull/172) [`fcf5f23`](https://github.com/surikaterna/weaver/commit/fcf5f23ab9dfe601bf9b0ad1599e2cfe1da35436) Thanks [@spralle](https://github.com/spralle)! - Add exact registered-schema identity listing and on-demand detail contracts for authenticated HTTP and trusted SCOMP peers. Keep bulk fetching available as deprecated compatibility for opted-in boot validation.
+
+- [#159](https://github.com/surikaterna/weaver/pull/159) [`4aa13f0`](https://github.com/surikaterna/weaver/commit/4aa13f0f0192378d8c380cab43eccdd11cefcb86) Thanks [@spralle](https://github.com/spralle)! - Register canonical JSON Schema requests directly, resolve environment-specific server schemas for client validation and metadata, replace Zod-backed namespace authority with compile-time generic path access, validate registered HTTP contracts at runtime, and prevent mutation replay while preserving caller cancellation through safe retries.
+
+- [#174](https://github.com/surikaterna/weaver/pull/174) [`52f3786`](https://github.com/surikaterna/weaver/commit/52f3786b6e8ffa8e0cb2ad46ce726cb9a38b73b5) Thanks [@spralle](https://github.com/spralle)! - Add opt-in bounded-count schema identity pages with configurable server maximum and local-revision cursors without changing legacy bulk/list APIs.
+
+### Patch Changes
+
+- [`dc99c56`](https://github.com/surikaterna/weaver/commit/dc99c56222bdd67ebe7f3409ad5057db3926a9ff) Thanks [@kennyek](https://github.com/kennyek)! - Update development types to Node.js 26.
+
+- [#156](https://github.com/surikaterna/weaver/pull/156) [`b894b26`](https://github.com/surikaterna/weaver/commit/b894b26bada468e3ca74ae91e8ac3459d209d2e2) Thanks [@spralle](https://github.com/spralle)! - Reject unsafe persisted paths and environments plus non-object schema roots before mutation, and expose an enforced runtime schema for lexically stable canonical path round trips.
+
+- Updated dependencies [[`c092133`](https://github.com/surikaterna/weaver/commit/c0921332fdb46a25e4c6395ca658b4776b3a6c40), [`de46525`](https://github.com/surikaterna/weaver/commit/de465259b1581903ddf02e82c05192e01218c1fd), [`139b311`](https://github.com/surikaterna/weaver/commit/139b3113436f7b7ccaa0513563f04ac2f7e27de1), [`4081689`](https://github.com/surikaterna/weaver/commit/4081689aaa06236e354cf62ec56ef7ccaede370f), [`fcf5f23`](https://github.com/surikaterna/weaver/commit/fcf5f23ab9dfe601bf9b0ad1599e2cfe1da35436), [`a16d5a6`](https://github.com/surikaterna/weaver/commit/a16d5a62915663a361001ca1f70bb2b4fd2fccc4), [`dc99c56`](https://github.com/surikaterna/weaver/commit/dc99c56222bdd67ebe7f3409ad5057db3926a9ff), [`efb7660`](https://github.com/surikaterna/weaver/commit/efb766065b9a95fff271984030e79dbec90e8f60), [`c95cc74`](https://github.com/surikaterna/weaver/commit/c95cc74934cb172da7bfe04de4bcaa7c02d02b49), [`33ce80b`](https://github.com/surikaterna/weaver/commit/33ce80b5f7f0405075a72e6cdc4c3b83b1163ce7), [`b894b26`](https://github.com/surikaterna/weaver/commit/b894b26bada468e3ca74ae91e8ac3459d209d2e2), [`9501058`](https://github.com/surikaterna/weaver/commit/9501058744b84db85669e73dabe54125f20b00a8), [`52f3786`](https://github.com/surikaterna/weaver/commit/52f3786b6e8ffa8e0cb2ad46ce726cb9a38b73b5)]:
+  - @weaver-conf/config-engine@0.2.0-alpha.0
+  - @weaver-conf/config-types@0.2.0-alpha.0
+  - @weaver-conf/config-runtime@0.1.3-alpha.0
+  - @weaver-conf/config-sync@0.1.3-alpha.0
+
 ## 0.1.2
 
 ### Patch Changes
