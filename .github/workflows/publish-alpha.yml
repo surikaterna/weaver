@@ -1,0 +1,118 @@
+name: Manual alpha publication
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [plan, publish]
+        default: plan
+        required: true
+      source_sha:
+        description: Exact current main/workflow SHA (40 lowercase hex)
+        type: string
+        required: true
+      packages:
+        description: Explicit JSON array of public package names with full runtime closure
+        type: string
+        required: true
+      plan_run_id:
+        type: string
+      plan_hash:
+        type: string
+      confirmation:
+        description: PUBLISH ALPHA <source_sha> <plan_hash>
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: surikaterna-weaver-npm-alpha
+  cancel-in-progress: false
+env:
+  ALPHA_INPUTS: ${{ toJSON(inputs) }}
+jobs:
+  plan:
+    if: github.repository == 'surikaterna/weaver' && github.ref == 'refs/heads/main' && inputs.mode == 'plan'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '26'
+          package-manager-cache: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.13.0
+          run_install: false
+      - run: node scripts/alpha-publication-driver.mjs prepare
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build --force
+      - run: pnpm run typecheck --force
+      - run: pnpm run lint --force
+      - run: pnpm run test --force
+      - id: plan
+        run: node scripts/alpha-publication-driver.mjs plan
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: alpha-plan
+          path: |
+            ${{ steps.plan.outputs.artifact_path }}/plan.json
+            ${{ steps.plan.outputs.artifact_path }}/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+  review:
+    if: github.repository == 'surikaterna/weaver' && github.ref == 'refs/heads/main' && inputs.mode == 'publish'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '26'
+          package-manager-cache: false
+      - run: node scripts/alpha-publication-driver.mjs review
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+          ADMIN_EVIDENCE: ${{ vars.ALPHA_ADMIN_EVIDENCE }}
+  publish:
+    needs: review
+    if: github.repository == 'surikaterna/weaver' && github.ref == 'refs/heads/main' && inputs.mode == 'publish'
+    runs-on: ubuntu-24.04
+    environment: npm-alpha
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '26'
+          package-manager-cache: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.13.0
+          run_install: false
+      - run: node scripts/alpha-publication-driver.mjs publish
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+          ADMIN_EVIDENCE: ${{ vars.ALPHA_ADMIN_EVIDENCE }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: alpha-result
+          path: ${{ runner.temp }}/alpha-${{ github.run_id }}-${{ github.run_attempt }}/result.json
+          if-no-files-found: warn

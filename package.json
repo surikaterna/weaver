@@ -22,7 +22,7 @@
     "docs:build": "turbo build && typedoc && cp -r apps/demo/dist/* docs-dist/",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "turbo build && changeset publish",
+    "release": "node scripts/alpha-publication-driver.mjs refuse",
     "playground": "turbo run start --filter=@weaver-conf/playground"
   },
   "devDependencies": {
