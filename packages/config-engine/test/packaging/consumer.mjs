@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,7 +15,7 @@ export function run(command, args, cwd) {
 }
 
 export async function withConsumer(callback) {
-  const consumer = await mkdtemp("/tmp/opencode/engine-packed-");
+  const consumer = await mkdtemp(join(tmpdir(), "engine-packed-"));
   try {
     const tarballs = {};
     for (const name of ["config-types", "config-engine"]) {
