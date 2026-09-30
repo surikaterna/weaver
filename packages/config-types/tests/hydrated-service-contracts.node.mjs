@@ -121,6 +121,6 @@ test("executable schemas check shape only without invocation or leaked root", ()
 });
 
 test("public emitted declarations enforce confined capabilities under strict TypeScript", () => {
-  const checked = spawnSync("pnpm", ["exec", "tsc", "--noEmit", "--strict", "--skipLibCheck", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--target", "ES2022", "tests/fixtures/hydrated-service-contracts.ts"], { encoding: "utf8" });
+  const checked = spawnSync("pnpm", ["exec", "tsc", "--noEmit", "--strict", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--target", "ES2022", "tests/fixtures/hydrated-service-contracts.ts"], { encoding: "utf8" });
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
 });
