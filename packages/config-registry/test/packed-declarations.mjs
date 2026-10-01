@@ -5,12 +5,20 @@ import { fixture, requireTool } from "./packed-consumer-helper.mjs";
 
 const ts = requireTool("typescript");
 const text = `
-import { createCanonicalSchemaRegistry, schemaWriteSupport, structuralSupportSchema,
+import { createCanonicalSchemaRegistry, createRegisteredReadProjection, registeredReadProjectionContextSchema,
+  registeredReadProjectionSchema, type RegisteredReadProjection, schemaWriteSupport, structuralSupportSchema,
   type StructuralSupport, type CanonicalSchemaRegistryReader } from '@weaver-conf/config-registry';
 import { createRegistryAdapter } from '@weaver-conf/config-registry/internal/server-adapter';
-import { validateEffectiveConfiguration, validatePartialConfiguration } from '@weaver-conf/config-engine';
+import { resolveConfigurationSnapshot, validateEffectiveConfiguration, validatePartialConfiguration } from '@weaver-conf/config-engine';
+import { canonicalConfigurationPathSchema, hydratedConfigurationInspectionSchema } from '@weaver-conf/config-types';
 const registry: CanonicalSchemaRegistryReader = createCanonicalSchemaRegistry({ defaultEnvironment: 'dev' });
 const adapter = createRegistryAdapter({ defaultEnvironment: 'dev' });
+const context = registeredReadProjectionContextSchema.parse({ identity: { environment: 'dev', scopePath: [] }, revision: 'r' });
+const projection: RegisteredReadProjection = createRegisteredReadProjection(registry,
+  resolveConfigurationSnapshot({ configuredRanks: [0], layers: [], ceilings: [] }), context);
+const path = canonicalConfigurationPathSchema.parse('/example');
+projection.entries(); projection.getNamespace(path); projection.get(path); projection.getAtLayer('base', path);
+hydratedConfigurationInspectionSchema.parse(projection.inspect(path)); registeredReadProjectionSchema.parse(projection);
 const result: StructuralSupport = schemaWriteSupport({ type: 'boolean' }, [], true, true, false);
 structuralSupportSchema.parse(result);
 const tupleSupport: StructuralSupport = schemaWriteSupport(

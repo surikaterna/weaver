@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,7 @@ import { browserGraphs } from "./packed-browser.mjs";
 import { fixture, installConsumer, run, withConsumer } from "./packed-consumer-helper.mjs";
 import { strictDeclarations } from "./packed-declarations.mjs";
 import { exercise, internalExports, rootExports } from "./operation-support-fixture.mjs";
+import { readProjectionExercise } from "./read-projection-fixture.mjs";
 
 async function removeOwnedParent(parent, failed) {
   try { await rm(parent, { recursive: true, force: true }); }
@@ -17,6 +19,11 @@ async function removeOwnedParent(parent, failed) {
 }
 
 async function nodeConsumers(directory) {
+  for (const name of await readdir(directory)) {
+    if (!name.endsWith(".tgz")) continue;
+    const bytes = await readFile(join(directory, name));
+    console.log(`packed artifact sha256 ${name}: ${createHash("sha256").update(bytes).digest("hex")}`);
+  }
   const { ownDataExercise } = await import("./structural-witness-own-data-helper.mjs");
   for (const cjs of [false, true]) {
     const filename = await fixture(directory, `runtime.${cjs ? "cjs" : "mjs"}`,
@@ -27,6 +34,7 @@ async function nodeConsumers(directory) {
       assert.deepEqual(Object.keys(internalApi).sort(), ${JSON.stringify(internalExports)});
       for (const api of [support, internalApi]) { ${exercise} }
       ${ownDataExercise}
+      ${readProjectionExercise}
       console.log('packed runtime real registrations/reads/pages/validators passed');`);
     console.log(run(process.execPath, [filename], directory));
   }

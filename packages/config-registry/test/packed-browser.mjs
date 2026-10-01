@@ -7,6 +7,7 @@ import { createContext, runInContext } from "node:vm";
 import { exercise, internalExports, rootExports } from "./operation-support-fixture.mjs";
 import { fixture, requireTool } from "./packed-consumer-helper.mjs";
 import { ownDataExercise } from "./structural-witness-own-data-helper.mjs";
+import { readProjectionExercise } from "./read-projection-fixture.mjs";
 
 const { build } = requireTool("esbuild");
 
@@ -40,7 +41,8 @@ export async function browserGraphs(directory) {
       runInContext(`const { api, support, engine } = packed;
         if (typeof process !== 'undefined' || typeof Buffer !== 'undefined' || typeof require !== 'undefined') throw Error('Node globals');
          ${exercise}
-         ${ownDataExercise}`, context);
+          ${ownDataExercise}
+          ${readProjectionExercise}`, context);
       const keys = JSON.parse(runInContext("JSON.stringify(Object.keys(api).sort())", context));
       assert.deepEqual(keys, boundary === "root" ? rootExports : internalExports);
       console.log(`packed ${boundary} ${mode}: ${inputs.length} full inputs, zero externals, real WebCrypto/engine`);

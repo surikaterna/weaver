@@ -1,4 +1,5 @@
-export const rootExports = ["canonicalSchemaRegistryOptionsSchema", "createCanonicalSchemaRegistry",
+export const rootExports = ["canonicalSchemaRegistryOptionsSchema", "createCanonicalSchemaRegistry", "createRegisteredReadProjection",
+  "registeredReadProjectionContextSchema", "registeredReadProjectionSchema",
   "registeredSchemaAnchorSchema", "schemaRegistrationAuditMetadataSchema", "schemaRegistrationContextSchema",
   "schemaRegistrationRequestSchema", "schemaRegistrationResultSchema", "schemaWriteSupport", "structuralSupportSchema"].sort();
 export const internalExports = ["SchemaIdentityPages", "buildIdentityIndex", "cloneState", "createEmptyState",

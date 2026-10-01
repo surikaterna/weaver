@@ -40,7 +40,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function allows(schema: Schema, type: "object" | "array"): boolean {
+export function allows(schema: Schema, type: "object" | "array"): boolean {
   const declaredType = ownField(schema, "type");
   return Array.isArray(declaredType)
     ? someOwn(declaredType, (member) => member === type)
@@ -52,11 +52,11 @@ function child(value: unknown, key: string): unknown {
   return isRecord(value) ? ownValue(value, key) : undefined;
 }
 
-function validBranch(schema: Schema, candidate: unknown): boolean {
+export function validBranch(schema: Schema, candidate: unknown): boolean {
   return validateEffectiveConfiguration(schema, candidate).valid;
 }
 
-function objectMembers(schema: Schema, key: string): Schema[] {
+export function objectMembers(schema: Schema, key: string): Schema[] {
   const members: Schema[] = [];
   const properties = ownField(schema, "properties");
   if (properties && Object.hasOwn(properties, key)) {
@@ -83,7 +83,7 @@ function matchesPattern(pattern: string, key: string): boolean {
   }
 }
 
-function arrayMembers(schema: Schema, key: string): Schema[] {
+export function arrayMembers(schema: Schema, key: string): Schema[] {
   if (!/^(?:0|[1-9][0-9]*)$/.test(key)) return [];
   const index = Number(key);
   if (!Number.isSafeInteger(index) || index > 4_294_967_294) return [];

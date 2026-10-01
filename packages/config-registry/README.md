@@ -100,3 +100,50 @@ A repeated version invocation without new changesets does not bump again. A
 dependent server may advance its existing alpha train; this is not a global reset.
 Source prerelease state and evidence-only publication allowlists remain unchanged.
 Actual release/publication requires separate approval and release-boundary review.
+## Registered public reads
+
+`createRegisteredReadProjection(reader, snapshot, context)` composes the same
+canonical registry reader with an **exact engine-issued** resolution snapshot.
+The snapshot is authenticated through `inspectResolvedPath(snapshot, [])` before
+any supplied snapshot fields are read. Clones and DTO-parsed copies are not
+inspection handles. The context carries an environment, ordered scope tuple, and
+revision; the returned interface exposes no raw snapshot or registry capability.
+
+The interface provides `get`, `getAtLayer`, `getNamespace`, `inspect`, and `entries`.
+Unknown direct paths throw `SCHEMA_NOT_REGISTERED`. Declared non-public or
+sensitive paths throw `FORBIDDEN`; inspection represents denial as `redacted`
+without a value field. Declared absent values are ordinary missing values.
+Defaults belong to callers and must only substitute after a successful missing
+read, never after catching a policy error.
+
+Public reads require absent/public `x-weaver.visibility` and `sensitive !== true`.
+Ancestor restrictions and eligible composition branches cannot be declassified
+by a child. Unknown or denied aggregate children are pruned while public siblings
+remain. Arrays preserve positions. Secret references and unresolved mount
+references are never emitted or dereferenced. Pre-resolved aliases require source
+proof from both raw and effective graphs. Each raw contributor is classified
+independently, so a public override cannot expose a lower-layer reference.
+
+Output graphs and inspection DTOs are detached and frozen. Inspection uses the
+existing configuration-service discriminants and engine provenance, including
+undefined winners for composite objects. Serializing a DTO does not authenticate
+a reader, context, or snapshot. Legacy server reads retain their existing policy;
+this API does not introduce a global registered-read gate into them.
+
+### Structural reuse ledger
+
+The read walker privately imports `allows`, `objectMembers`, `arrayMembers`, and
+`validBranch` from the corrected structural-write witness. Their bodies are
+unchanged and they are not public root exports. Read traversal is iterative and
+uses the real engine branch validator; it does not invoke recursive
+`schemaWriteSupport` or copy a member resolver. The provenance test reverses only
+the four explicitly counted private export prefixes, then applies the retained
+safety reversals and historical digest check. Original-body mutations and
+missing/duplicate/unexpected export anchors remain negative cases.
+
+An operation-local anchor routing trie captures one detached schema per canonical
+anchor/environment through the supplied reader. Contexts intern structural policy,
+ancestor restriction, candidate, and raw source boundaries; shared values never
+grant access merely because another path allowed the same object. The registry
+still owns registration and longest-anchor authority. No host grants, mutation
+admission, persistence, mount evaluator, or secret backend is added here.
