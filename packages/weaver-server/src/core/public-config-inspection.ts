@@ -1,7 +1,9 @@
 import {
+  createMountSourceClassifier,
   deepMerge,
   inspectResolvedPath,
   parsePath,
+  projectConfigurationData,
   resolutionLayerSchema,
   resolveConfigurationSnapshot,
 } from "@weaver-conf/config-engine";
@@ -37,34 +39,11 @@ interface MountTaintClassifier {
 function createMountTaintClassifier(
   state: Record<string, unknown>,
 ): MountTaintClassifier {
-  const memo = new Map<string, boolean>();
-
-  function sourceIsTainted(source: string): boolean {
-    const local = new Set<string>();
-    let current = source;
-    let terminal = false;
-    while (true) {
-      if (isProtectedConfigPath(current)) {
-        terminal = true;
-        break;
-      }
-      const cached = memo.get(current);
-      if (cached !== undefined) {
-        terminal = cached;
-        break;
-      }
-      if (local.has(current)) break;
-      local.add(current);
-      const target = safeDeepGet(state, current);
-      const mount = ownMount(target);
-      if (!mount) break;
-      current = mount.source;
-    }
-    for (const path of local) memo.set(path, terminal);
-    return terminal;
-  }
-
-  return { isTainted: (mount) => sourceIsTainted(mount.source) };
+  return createMountSourceClassifier(
+    state,
+    (segments) => segments[0] === "_weaver",
+    false,
+  );
 }
 
 function projectPublicEntries(
@@ -107,64 +86,21 @@ function projectValue(
   value: unknown,
   classifier: MountTaintClassifier,
 ): unknown | typeof omitted {
-  let result: unknown;
-  const memo = new WeakMap<object, object>();
-  const tasks: (() => void)[] = [];
-  const schedule = (child: unknown, assign: (output: unknown) => void) =>
-    pushTask(tasks, () => projectChild(child, assign, memo, tasks, classifier));
-  schedule(value, (output) => {
-    result = output;
-  });
-  while (tasks.length) tasks.pop()?.();
-  return result;
-}
-
-function projectChild(
-  value: unknown,
-  assign: (output: unknown) => void,
-  memo: WeakMap<object, object>,
-  tasks: (() => void)[],
-  classifier: MountTaintClassifier,
-): void {
   const mount = ownMount(value);
-  if (mount) {
-    assign(classifier.isTainted(mount) ? omitted : value);
-    return;
-  }
-  if (!isRecord(value) && !Array.isArray(value)) {
-    assign(value);
-    return;
-  }
-  const existing = memo.get(value);
-  if (existing) {
-    assign(existing);
-    return;
-  }
-  const result: object = Array.isArray(value) ? [] : {};
-  memo.set(value, result);
-  assign(result);
-  if (Array.isArray(value))
-    Object.defineProperty(result, "length", { value: value.length });
-  for (const key of Object.keys(value).reverse()) {
-    if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key)) continue;
-    const child = ownData(value, key);
-    pushTask(tasks, () =>
-      projectChild(
-        child,
-        (output) => {
-          if (output !== omitted || Array.isArray(value))
-            defineOwnData(result, key, output === omitted ? undefined : output);
-        },
-        memo,
-        tasks,
-        classifier,
-      ),
-    );
-  }
-}
-
-function pushTask(tasks: (() => void)[], task: () => void): void {
-  defineOwnData(tasks, String(tasks.length), task);
+  if (mount && classifier.isTainted(mount)) return omitted;
+  return projectConfigurationData(value, classifier, {
+    decide: (child, policy) => {
+      const nested = ownMount(child);
+      return nested
+        ? policy.isTainted(nested)
+          ? "omit"
+          : "retain"
+        : "descend";
+    },
+    child: (policy) => policy,
+    preserveUndefinedArraySlots: true,
+    mutableContainers: true,
+  });
 }
 
 type ResolveEntries = (

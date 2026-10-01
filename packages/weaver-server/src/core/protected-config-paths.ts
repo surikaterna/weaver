@@ -1,7 +1,7 @@
-import { parsePath } from "@weaver-conf/config-engine";
+import { isProtectedConfigPath } from "@weaver-conf/config-engine";
 import type { WriteResult } from "@weaver-conf/config-types";
 
-const protectedRoot = "_weaver";
+export { isProtectedConfigPath } from "@weaver-conf/config-engine";
 
 export function protectedConfigMutationError(key: string): WriteResult | null {
   if (!isProtectedConfigPath(key)) return null;
@@ -12,12 +12,6 @@ export function protectedConfigMutationError(key: string): WriteResult | null {
       message: `Path "${key}" is reserved for Weaver internal metadata`,
     },
   };
-}
-
-export function isProtectedConfigPath(key: string): boolean {
-  if (getLexicalFirstRoot(key) === protectedRoot) return true;
-  const firstSegment = getFirstLogicalPathSegment(key);
-  return firstSegment === protectedRoot;
 }
 
 export function filterProtectedConfigEntries(
@@ -37,28 +31,4 @@ export function filterProtectedConfigScopes(
       filterProtectedConfigEntries(entries),
     ]),
   );
-}
-
-function getFirstLogicalPathSegment(key: string): string | null {
-  const normalized = key.startsWith("/") ? key.slice(1) : key;
-  const path = normalized.replaceAll("/", ".");
-
-  try {
-    return parsePath(path)[0] ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function getLexicalFirstRoot(key: string): string {
-  const normalized = key.startsWith("/") ? key.slice(1) : key;
-  if (normalized.startsWith("[")) {
-    const closingBracket = normalized.indexOf("]");
-    return closingBracket < 0
-      ? normalized.slice(1)
-      : normalized.slice(1, closingBracket);
-  }
-
-  const delimiter = normalized.search(/[./[\]]/u);
-  return delimiter < 0 ? normalized : normalized.slice(0, delimiter);
 }

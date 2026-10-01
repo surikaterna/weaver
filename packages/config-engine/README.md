@@ -170,3 +170,37 @@ Generators take a `Map<string, ComposedSchemaEntry>`, not raw property schemas. 
 ## License
 
 MIT
+## Contextual public-data projection
+
+`projectConfigurationData(value, context, visitor)` preflights and detaches plain
+data before invoking trusted library callbacks. `decide` returns `retain`, `omit`,
+or `descend`; `child` supplies a structural-policy context for each own field.
+Traversal is iterative, with memoization by **object and context**, not object
+identity alone. Returned graphs are frozen. Omitted array positions remain holes
+without shifting indices; JSON encodes those holes as neutral `null` values.
+The optional `preserveUndefinedArraySlots` callback setting exists only to retain
+the legacy server representation of omitted positions as own `undefined` slots.
+`mutableContainers` preserves its mutable descended containers; retained terminal
+data remains detached and guarded. Neither compatibility setting grants access,
+and registered reads use neither setting.
+
+`createMountSourceClassifier(state, sourceIsForbidden, cycleIsForbidden)` follows
+own mount-source chains using the existing storage-path codec. The state must
+already be preflighted by its adapter. It never evaluates mounts or resolves
+secrets. Registered adapters fail closed on cycles; compatibility adapters may
+retain the historical cycle outcome. `isProtectedConfigPath` preserves the
+historical lexical/logical protected-root checks; it is not a canonical registry
+path validator or a sensitivity policy.
+
+The visitor and classifier are executable composition interfaces, not permissions
+or serializable capabilities. `configurationProjectionActionSchema` validates
+the serializable action vocabulary; parsing data does not authenticate callbacks.
+
+### Extraction ownership
+
+The server's former value projection now delegates to `public-data-projection`.
+Its mount-chain loop delegates to `mount-source-classification`, whose private
+`projection-data` module owns descriptor-only source lookup and marker reads.
+Protected lexical/logical checks live in `protected-config-paths`; mutation error
+formatting, scope/delta handling, and inspection assembly stay in server adapters.
+The resolution, merge, and provenance implementations are unchanged.

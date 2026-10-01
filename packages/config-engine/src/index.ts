@@ -21,10 +21,21 @@ export type { ResolvedConfiguration } from "./layers";
 export { inspectKey, resolveConfiguration } from "./layers";
 // merge.ts — Deep merge utility
 export { deepMerge } from "./merge";
+export {
+  createMountSourceClassifier,
+  type MountSourceClassifier,
+} from "./mount-source-classification";
 // namespace.ts — Namespace utilities
 export { deriveNamespace, qualifyKey, validateKeyFormat } from "./namespace";
 // path.ts — Bracket-aware path parsing
 export { assertSafePathSegment, buildPath, parsePath } from "./path";
+export {
+  type ConfigurationProjectionAction,
+  type ConfigurationProjectionVisitor,
+  configurationProjectionActionSchema,
+} from "./projection-contracts";
+export { isProtectedConfigPath } from "./protected-config-paths";
+export { projectConfigurationData } from "./public-data-projection";
 export { clearRegexCache, getCachedRegex, isSafePattern } from "./regex-cache";
 export type {
   CanonicalConfigPath,
