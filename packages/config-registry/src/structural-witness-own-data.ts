@@ -143,6 +143,17 @@ function denseArray(value: readonly unknown[]): void {
   }
 }
 
+function stringPath(path: readonly string[]): void {
+  if (!Array.isArray(path)) invalidData();
+  const length = ownLength(path);
+  for (let index = 0; index < length; index++) {
+    const descriptor = dataDescriptor(path, index);
+    if (!descriptor || !Object.hasOwn(descriptor, "value")) invalidData();
+    const segment: unknown = descriptor.value;
+    if (typeof segment !== "string") invalidData();
+  }
+}
+
 function plainContainer(value: object): void {
   const prototype: unknown = Object.getPrototypeOf(value);
   if (Array.isArray(value)) {
@@ -241,8 +252,8 @@ export function preflightWitness(
   previous: unknown,
 ): void {
   try {
+    stringPath(path);
     preflightGraph([schema, path, incoming, candidate, previous]);
-    denseArray(path);
     preflightSchemas(schema);
   } catch {
     invalidData();

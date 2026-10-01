@@ -242,4 +242,79 @@ export function exerciseOwnData(support, engine) {
   return { cases: cases.length * 6, inheritedFields: inheritedFields.length, getterCalls };
 }
 
-export const ownDataExercise = `console.log('structural witness own-data matrix', (${exerciseOwnData.toString()})(support, engine));`;
+export function exercisePathBoundary(support) {
+  const leaf = { type: "boolean" };
+  const schema = { type: "object", properties: { enabled: leaf } };
+  const nested = { type: "object", properties: { enabled: schema } };
+  const expectedMessage = "Invalid structural witness data";
+  let getters = 0;
+  let callbacks = 0;
+  let rejectedCases = 0;
+  function rejected(path, label) {
+    let failure;
+    try { support.schemaWriteSupport(nested, path, true, { enabled: { enabled: true } }, {}); }
+    catch (error) { failure = error; }
+    if (failure?.code !== "VALIDATION_ERROR" || failure.message !== expectedMessage) throw Error(`${label}: expected typed payload-free failure`);
+    if (getters !== 0 || callbacks !== 0) throw Error(`${label}: coercion executed`);
+    rejectedCases++;
+  }
+  const slots = [{}, [], 1, true, null, undefined, Symbol("private marker"), () => "private marker"];
+  const paths = [];
+  for (const slot of slots) {
+    paths.push([slot], ["enabled", slot], ["enabled", "enabled", slot]);
+  }
+  const hole = new Array(2); hole[0] = "enabled";
+  paths.push(hole);
+  const accessorPath = ["enabled"];
+  Object.defineProperty(accessorPath, "0", { get() { getters++; return "enabled"; } });
+  paths.push(accessorPath);
+  for (const key of [Symbol.toPrimitive, "toString", "valueOf"]) {
+    const ownAccessor = {};
+    Object.defineProperty(ownAccessor, key, { get() { getters++; return () => { callbacks++; return "enabled"; }; } });
+    paths.push([ownAccessor]);
+    paths.push([{ [key]() { callbacks++; return "enabled"; } }]);
+  }
+  for (const target of [Object.prototype, Array.prototype]) {
+    for (const key of [Symbol.toPrimitive, "toString", "valueOf"]) {
+      const original = Object.getOwnPropertyDescriptor(target, key);
+      try {
+        Object.defineProperty(target, key, { configurable: true,
+          get() { getters++; return () => { callbacks++; return "enabled"; }; } });
+        for (let index = 0; index < paths.length; index++) rejected(paths[index], "malformed own path slot");
+        let failure;
+        try { support.schemaWriteSupport(schema, [{}], true, { enabled: true }, {}); }
+        catch (error) { failure = error; }
+        if (failure?.code !== "VALIDATION_ERROR" || failure.message !== expectedMessage) throw Error("public coercion reproduction admitted");
+        if (getters !== 0 || callbacks !== 0) throw Error("public coercion reproduction executed");
+        rejectedCases++;
+      } finally {
+        if (original) Object.defineProperty(target, key, original);
+        else delete target[key];
+      }
+    }
+  }
+  const plainSchema = { type: "object", properties: { "雪.é": leaf, "0": leaf, "700": leaf, "01": leaf } };
+  const snapshot = Object.getOwnPropertyDescriptors(plainSchema);
+  for (const segment of ["雪.é", "0", "700", "01"]) {
+    const result = support.schemaWriteSupport(plainSchema, [segment], true, {}, {});
+    if (!result.declared || result.arrayIndex || result.ambiguous) throw Error("ordinary string path changed");
+  }
+  if (Object.keys(snapshot).length !== Object.keys(plainSchema).length || !support.schemaWriteSupport(schema, [], true, true, {}).declared) throw Error("ordinary root changed");
+  // A positive trap control prevents a broken probe from certifying zero callbacks.
+  const original = Object.getOwnPropertyDescriptor(Object.prototype, Symbol.toPrimitive);
+  let controlGetters = 0;
+  let controlCallbacks = 0;
+  try {
+    Object.defineProperty(Object.prototype, Symbol.toPrimitive, { configurable: true,
+      get() { controlGetters++; return () => { controlCallbacks++; return "enabled"; }; } });
+    if (String({}) !== "enabled") throw Error("coercion control failed");
+  } finally {
+    if (original) Object.defineProperty(Object.prototype, Symbol.toPrimitive, original);
+    else delete Object.prototype[Symbol.toPrimitive];
+  }
+  if (controlGetters !== 1 || controlCallbacks !== 1) throw Error("coercion control counters");
+  return { rejectedCases, coercionGetters: getters, coercionCallbacks: callbacks, positiveControls: 1 };
+}
+
+export const pathBoundaryExercise = `console.log('structural witness string-path boundary', (${exercisePathBoundary.toString()})(support));`;
+export const ownDataExercise = `console.log('structural witness own-data matrix', (${exerciseOwnData.toString()})(support, engine)); ${pathBoundaryExercise}`;

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { ownDataExercise } from "./structural-witness-own-data-helper.mjs";
+import { ownDataExercise, pathBoundaryExercise } from "./structural-witness-own-data-helper.mjs";
 
 test("W1-W9 isolated own-data matrix: numeric scratch, missing slots, inherited fields, real branches and accessor preflight", () => {
   const registry = new URL("../dist/index.js", import.meta.url).href;
@@ -11,6 +11,15 @@ test("W1-W9 isolated own-data matrix: numeric scratch, missing slots, inherited 
     import * as engine from ${JSON.stringify(engine)}; ${ownDataExercise}`;
   const output = execFileSync(process.execPath, ["--input-type=module", "--eval", source], { encoding: "utf8" });
   assert.match(output, /getterCalls: 0/);
+  console.log(output);
+});
+
+test("every own path slot must be a string before inherited or own coercion", () => {
+  const registry = new URL("../dist/index.js", import.meta.url).href;
+  const source = `import * as support from ${JSON.stringify(registry)}; ${pathBoundaryExercise}`;
+  const output = execFileSync(process.execPath, ["--input-type=module", "--eval", source], { encoding: "utf8" });
+  assert.match(output, /coercionGetters: 0/);
+  assert.match(output, /coercionCallbacks: 0/);
   console.log(output);
 });
 
