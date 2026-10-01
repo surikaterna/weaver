@@ -4,6 +4,12 @@ import { buildSchemaPatch } from "../../src/core/config-service-schema-patches.t
 import { prepareRegisteredPatchWrite } from "../../src/core/config-service-schema-writes.ts";
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { createSchemaRegistry } from "../../src/core/schema-registry.ts";
+import {
+  accessorError, awaitedMutation, branchAccessorSchema, candidateError,
+  expectPreparationNoEffects, payloadMutationAccessor, plainCompositionSchema,
+  plainPatchSchema, preparationContext, preparationEffects, schemaMutationAccessor,
+  stringBranch,
+} from "./schema-write-pipeline-fixtures.mjs";
 
 function createTestProvider(id, layer, entries = {}) {
   const provider = createInMemoryStorageProvider({
@@ -300,62 +306,57 @@ describe("schema-registered config writes", () => {
     unsubscribe();
   });
 
-  test("patch sessions validate leaf, existing value, and every candidate branch in order", async () => {
+  test("rejects own branch accessors before existing retrieval", async () => {
     const branchReads = [0, 0];
-    const branch = (index, kind, valueType) => {
-      const kindSchema = { type: "string" };
-      Object.defineProperty(kindSchema, "const", {
-        configurable: true,
-        enumerable: true,
-        get() {
-          branchReads[index] += 1;
-          return kind;
-        },
-      });
-      return {
-        type: "object",
-        properties: { kind: kindSchema, value: { type: valueType } },
-        additionalProperties: true,
-      };
-    };
-    const schema = {
-      type: "object",
-      properties: {
-        kind: { type: "string" },
-        value: { type: ["string", "number"] },
-      },
-      additionalProperties: false,
-      anyOf: [branch(0, "text", "string"), branch(1, "count", "number")],
-    };
-    const anchor = {
-      kind: "service",
-      path: "/billing",
-      schema,
-      environment: "test",
-      metadata: {},
-    };
+    const schema = branchAccessorSchema(branchReads);
+    const descriptors = schema.anyOf.map((branch) => Object.getOwnPropertyDescriptors(branch.properties.kind));
+    const prototype = Object.getPrototypeOf(schema);
+    const context = preparationContext(schema);
+    const effects = await preparationEffects(createTestProvider, createWeaverConfigService, { kind: "text", value: "old" });
     const events = [];
     const result = await prepareRegisteredPatchWrite(
-      "/billing/value",
-      1,
-      { schemaRegistry: { resolveAnchor: async () => anchor } },
-      "test",
-      async () => {
-        events.push("existing");
-        return { kind: "text", value: "old" };
-      },
+      "/billing/value", 1, context.options, "test",
+      async (key) => { events.push(key); return (await effects.provider.load()).entries.billing; },
     );
+    expect(result).toEqual({ success: false, result: schemaFailure("/billing/value", "/billing", accessorError("schema")) });
+    expect(events).toEqual([]);
+    expect(branchReads).toEqual([0, 0]);
+    expect(context.resolutions).toEqual([["/billing/value", "test"]]);
+    expect(Object.getPrototypeOf(schema)).toBe(prototype);
+    expect(schema.anyOf.map((branch) => Object.getOwnPropertyDescriptors(branch.properties.kind))).toEqual(descriptors);
+    await expectPreparationNoEffects(effects, expectNoEffects, expect);
+  });
 
+  test("plain const branches reject a leaf-valid full candidate after one retrieval", async () => {
+    const schema = plainCompositionSchema();
+    const context = preparationContext(schema);
+    const effects = await preparationEffects(createTestProvider, createWeaverConfigService, { kind: "text", value: "old" });
+    const events = [], keys = [];
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/value", 1, context.options, "test",
+      async (key) => { keys.push(key); events.push("existing"); return (await effects.provider.load()).entries.billing; },
+    );
+    expect(result).toEqual({ success: false, result: schemaFailure("/billing/value", "/billing", candidateError()) });
     expect(events).toEqual(["existing"]);
-    expect(branchReads).toEqual([7, 7]);
-    expect(result.result.error.details.errors).toEqual([
-      {
-        code: "invalid-value",
-        path: "$.billing",
-        segments: ["billing"],
-        message: "Value must match at least one anyOf branch",
-      },
-    ]);
+    expect(keys).toEqual(["billing"]);
+    expect(context.resolutions).toEqual([["/billing/value", "test"]]);
+    expect(validatePartialConfiguration(schema, { kind: "text", value: "old" }).valid).toBe(true);
+    await expectPreparationNoEffects(effects, expectNoEffects, expect);
+  });
+
+  test("plain const branches prepare a compatible string without committing provider effects", async () => {
+    const schema = plainCompositionSchema();
+    const context = preparationContext(schema);
+    const effects = await preparationEffects(createTestProvider, createWeaverConfigService, { kind: "text", value: "old" });
+    const keys = [];
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/value", "new", context.options, "test",
+      async (key) => { keys.push(key); return (await effects.provider.load()).entries.billing; },
+    );
+    expect(result).toEqual({ success: true, key: "billing", value: { kind: "text", value: "new" } });
+    expect(keys).toEqual(["billing"]);
+    expect(context.resolutions).toEqual([["/billing/value", "test"]]);
+    await expectPreparationNoEffects(effects, expectNoEffects, expect);
   });
 
   test("invalid patch leaves stop before existing-value retrieval", async () => {
@@ -387,65 +388,72 @@ describe("schema-registered config writes", () => {
     });
   });
 
-  test("refreshes after a schema getter introduces composition during leaf preparation", async () => {
-    const schema = {
-      type: "object",
-      properties: { value: { type: ["string", "number"] } },
-      additionalProperties: false,
-    };
-    let introduced = false;
-    Object.defineProperty(schema, "maxProperties", {
-      configurable: true,
-      enumerable: true,
-      get() {
-        if (!introduced) {
-          introduced = true;
-          schema.anyOf = [{
-            type: "object",
-            properties: { value: { type: "string" } },
-            additionalProperties: true,
-          }];
-        }
-        return undefined;
-      },
-    });
-    const provider = createTestProvider("p1", "platform", {
-      billing: { value: "old" },
-    });
-    const service = await createWeaverConfigService({
-      providers: [provider],
-      environment: "test",
-    });
-    const anchor = {
-      kind: "service",
-      path: "/billing",
-      schema,
-      environment: "test",
-      metadata: {},
-    };
-    const registry = { resolveAnchor: async () => anchor };
-    const initialRevision = service.revision;
+  test("rejects own schema mutation getters before leaf preparation or retrieval", async () => {
+    const { schema, counter } = schemaMutationAccessor();
+    const descriptor = Object.getOwnPropertyDescriptor(schema, "maxProperties");
+    const context = preparationContext(schema);
+    const effects = await preparationEffects(createTestProvider, createWeaverConfigService);
     const schemaPrototype = Object.getPrototypeOf(schema);
-    let notifications = 0;
-    const unsubscribe = service.onDelta(() => notifications++);
-
+    const keys = [];
     const result = await prepareRegisteredPatchWrite(
-      "/billing/value", 1, { schemaRegistry: registry }, "test",
-      async () => (await provider.load()).entries.billing,
+      "/billing/value", 1, context.options, "test",
+      async (key) => { keys.push(key); return (await effects.provider.load()).entries.billing; },
     );
-    const fresh = validatePartialConfiguration(schema, { value: 1 }, {
-      path: ["billing"],
-    });
-
-    expect(result.result.error.details.errors).toEqual(fresh.errors);
-    expect(provider.writes).toEqual([]);
-    expect(notifications).toBe(0);
-    expect(service.revision).toBe(initialRevision);
-    expect(await providerEntries(provider)).toEqual({
-      billing: { value: "old" },
-    });
+    expect(result).toEqual({ success: false, result: schemaFailure("/billing/value", "/billing", accessorError("schema")) });
+    expect(counter).toEqual({ reads: 0, introduced: false });
+    expect(Object.hasOwn(schema, "anyOf")).toBe(false);
+    expect(keys).toEqual([]);
+    expect(context.resolutions).toEqual([["/billing/value", "test"]]);
+    expect(Object.getOwnPropertyDescriptor(schema, "maxProperties")).toEqual(descriptor);
     expect(Object.getPrototypeOf(schema)).toBe(schemaPrototype);
-    unsubscribe();
+    await expectPreparationNoEffects(effects, expectNoEffects, expect);
+  });
+
+  test("refreshes own composition at the awaited retrieval seam before full candidate validation", async () => {
+    const schema = plainPatchSchema(), branch = stringBranch();
+    const context = preparationContext(schema);
+    const effects = await preparationEffects(createTestProvider, createWeaverConfigService);
+    const events = [], keys = [];
+    expect(validatePartialConfiguration(schema, { value: 1 }).valid).toBe(true);
+    const result = await prepareRegisteredPatchWrite(
+      "/billing/value", 1, context.options, "test",
+      awaitedMutation(schema, branch, effects, events, keys),
+    );
+    expect(result).toEqual({ success: false, result: schemaFailure("/billing/value", "/billing", candidateError()) });
+    expect(context.anchor.schema).toBe(schema);
+    expect(Object.hasOwn(schema, "anyOf")).toBe(true);
+    expect(schema.anyOf[0]).toBe(branch);
+    expect(keys).toEqual(["billing"]);
+    expect(events).toEqual(["layer-read", "schema-mutated"]);
+    expect(context.resolutions).toEqual([["/billing/value", "test"]]);
+    const fresh = validatePartialConfiguration(schema, { value: 1 }, { path: ["billing"] });
+    expect(fresh).toEqual({ valid: false, errors: [candidateError()] });
+    expect(validatePartialConfiguration(schema, { value: "old" }).valid).toBe(true);
+    await expectPreparationNoEffects(effects, expectNoEffects, expect);
+  });
+
+  test("compatible awaited mutation and later branch replacement use current own data without commits", async () => {
+    const schema = plainPatchSchema(), branch = stringBranch();
+    const context = preparationContext(schema);
+    const effects = await preparationEffects(createTestProvider, createWeaverConfigService);
+    const events = [], keys = [];
+    const first = await prepareRegisteredPatchWrite(
+      "/billing/value", "new", context.options, "test",
+      awaitedMutation(schema, branch, effects, events, keys),
+    );
+    expect(first).toEqual({ success: true, key: "billing", value: { value: "new" } });
+    expect(events).toEqual(["layer-read", "schema-mutated"]);
+    schema.anyOf[0] = { ...branch, properties: { value: { type: ["string", "number"] } } };
+    const second = await prepareRegisteredPatchWrite(
+      "/billing/value", 1, context.options, "test",
+      async (key) => { keys.push(key); events.push("existing"); return (await effects.provider.load()).entries.billing; },
+    );
+    expect(second).toEqual({ success: true, key: "billing", value: { value: 1 } });
+    expect(keys).toEqual(["billing", "billing"]);
+    expect(events).toEqual(["layer-read", "schema-mutated", "existing"]);
+    expect(context.resolutions).toEqual([["/billing/value", "test"], ["/billing/value", "test"]]);
+    expect(validatePartialConfiguration(schema, second.value)).toEqual({ valid: true, errors: [] });
+    await expectPreparationNoEffects(effects, expectNoEffects, expect);
   });
 
   test("refreshes after awaited layer retrieval mutates composition", async () => {
@@ -491,94 +499,50 @@ describe("schema-registered config writes", () => {
     expect(result.result.error.details.errors).toEqual(fresh.errors);
   });
 
-  test("refreshes candidate preparation after existing-value mutation", async () => {
-    const schema = {
-      type: "object",
-      properties: { value: { type: ["string", "number"] } },
-      additionalProperties: false,
-    };
-    const anchor = {
-      kind: "service",
-      path: "/billing",
-      schema,
-      environment: "test",
-      metadata: {},
-    };
-    const existing = {};
-    Object.defineProperty(existing, "value", {
-      configurable: true,
-      enumerable: true,
-      get() {
-        schema.anyOf = [{
-          type: "object",
-          properties: { value: { type: "string" } },
-          additionalProperties: true,
-        }];
-        return "old";
-      },
-    });
-
+  test("rejects existing-value mutation accessors after exactly one retrieval", async () => {
+    const schema = plainPatchSchema();
+    const { existing, counter } = payloadMutationAccessor(schema);
+    const descriptor = Object.getOwnPropertyDescriptor(existing, "value");
+    const prototype = Object.getPrototypeOf(existing);
+    const context = preparationContext(schema);
+    const effects = await preparationEffects(createTestProvider, createWeaverConfigService);
+    const keys = [];
     const result = await prepareRegisteredPatchWrite(
-      "/billing/value",
-      1,
-      { schemaRegistry: { resolveAnchor: async () => anchor } },
-      "test",
-      async () => existing,
+      "/billing/value", 1, context.options, "test",
+      async (key) => { keys.push(key); return existing; },
     );
-    const fresh = validatePartialConfiguration(schema, { value: 1 }, {
-      path: ["billing"],
-    });
-
-    expect(result.success).toBe(false);
-    expect(result.result.error.details.errors).toEqual(fresh.errors);
-    expect(Object.getPrototypeOf(existing)).toBe(Object.prototype);
+    expect(result).toEqual({ success: false, result: schemaFailure("/billing/value", "/billing", accessorError("value")) });
+    expect(counter.reads).toBe(0);
+    expect(keys).toEqual(["billing"]);
+    expect(context.resolutions).toEqual([["/billing/value", "test"]]);
+    expect(Object.hasOwn(schema, "anyOf")).toBe(false);
+    expect(Object.getOwnPropertyDescriptor(existing, "value")).toEqual(descriptor);
+    expect(Object.getPrototypeOf(existing)).toBe(prototype);
+    expect(validatePartialConfiguration(schema, { value: 1 }, { path: ["billing"] })).toEqual({ valid: true, errors: [] });
+    await expectPreparationNoEffects(effects, expectNoEffects, expect);
   });
 
-  test("refreshes candidate preparation after patch cloning mutation", async () => {
-    const schema = {
-      type: "object",
-      properties: { value: { type: ["string", "number"] } },
-      additionalProperties: false,
-    };
-    const anchor = {
-      kind: "service",
-      path: "/billing",
-      schema,
-      environment: "test",
-      metadata: {},
-    };
-    const existing = {};
-    let reads = 0;
-    Object.defineProperty(existing, "value", {
-      configurable: true,
-      enumerable: true,
-      get() {
-        reads += 1;
-        if (reads === 3) {
-          schema.anyOf = [{
-            type: "object",
-            properties: { value: { type: "string" } },
-            additionalProperties: true,
-          }];
-        }
-        return "old";
-      },
-    });
-
+  test("rejects third-read cloning accessors before executing or mutating them", async () => {
+    const schema = plainPatchSchema();
+    const { existing, counter } = payloadMutationAccessor(schema, true);
+    const descriptor = Object.getOwnPropertyDescriptor(existing, "value");
+    const prototype = Object.getPrototypeOf(existing);
+    const context = preparationContext(schema);
+    const effects = await preparationEffects(createTestProvider, createWeaverConfigService);
+    const keys = [];
     const result = await prepareRegisteredPatchWrite(
-      "/billing/value",
-      1,
-      { schemaRegistry: { resolveAnchor: async () => anchor } },
-      "test",
-      async () => existing,
+      "/billing/value", 1, context.options, "test",
+      async (key) => { keys.push(key); return existing; },
     );
-    const fresh = validatePartialConfiguration(schema, { value: 1 }, {
-      path: ["billing"],
-    });
-
-    expect(reads).toBe(3);
-    expect(result.success).toBe(false);
-    expect(result.result.error.details.errors).toEqual(fresh.errors);
+    expect(result).toEqual({ success: false, result: schemaFailure("/billing/value", "/billing", accessorError("value")) });
+    expect(counter.reads).toBe(0);
+    expect(keys).toEqual(["billing"]);
+    expect(context.resolutions).toEqual([["/billing/value", "test"]]);
+    expect(Object.hasOwn(schema, "anyOf")).toBe(false);
+    expect(Object.getOwnPropertyDescriptor(existing, "value")).toEqual(descriptor);
+    expect(Object.getPrototypeOf(existing)).toBe(prototype);
+    expect(validatePartialConfiguration(schema, { value: 1 }, { path: ["billing"] })).toEqual({ valid: true, errors: [] });
+    await expectPreparationNoEffects(effects, expectNoEffects, expect);
   });
 
   test("oneOf ambiguity and contextual not rejection have zero effects", async () => {
