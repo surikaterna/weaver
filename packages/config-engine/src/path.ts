@@ -4,9 +4,7 @@ import {
   createWeaverError,
   isReservedPathSegment,
 } from "@weaver-conf/config-types";
-import { pushOwn } from "./own-data";
-import { inspectValidationData } from "./schema-validation-input-guard";
-import { ownField } from "./schema-validation-own-data";
+import { ownDataValue } from "./own-data";
 
 export function assertSafePathSegment(segment: string): void {
   if (isReservedPathSegment(segment)) {
@@ -30,6 +28,8 @@ interface PathParserState {
  * Brackets protect dots from being treated as separators.
  */
 export function parsePath(path: string): readonly string[] {
+  if (typeof path !== "string")
+    throw createWeaverError("VALIDATION_ERROR", "Path must be a string");
   if (path.length === 0) {
     throw createWeaverError("VALIDATION_ERROR", "Path must not be empty");
   }
@@ -123,7 +123,7 @@ function closePlainSegment(state: PathParserState): void {
 }
 
 function pushCurrentSegment(state: PathParserState): void {
-  pushOwn(state.segments, state.current);
+  state.segments.push(state.current);
   state.current = "";
 }
 
@@ -163,14 +163,14 @@ function invalidAt(state: PathParserState, reason: string): never {
  */
 export function buildPath(segments: readonly string[]): string {
   let result = "";
-  if (!Array.isArray(segments) || !inspectValidationData(segments).safe) {
+  if (!Array.isArray(segments)) {
     throw createWeaverError(
       "VALIDATION_ERROR",
       "Path segments must be own plain data",
     );
   }
   for (let i = 0; i < segments.length; i++) {
-    const seg = ownField(segments, i);
+    const seg = ownDataValue(segments, i);
     if (typeof seg !== "string") {
       throw createWeaverError(
         "VALIDATION_ERROR",

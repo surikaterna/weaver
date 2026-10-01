@@ -1,6 +1,5 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 import { validationOptionsPath } from "./schema-validation-error-paths";
-import { ownField } from "./schema-validation-own-data";
 import { createConfigurationValidationSession } from "./schema-validation-session";
 import {
   type SchemaValidationOptions,
@@ -45,10 +44,10 @@ export function validateConfigurationPatch(
   options?: SchemaValidationOptions,
 ): SchemaValidationResult {
   const basePath = validationOptionsPath(options);
-  const baseError = ownField(basePath, "error");
+  const baseError = basePath.error;
   if (baseError !== undefined) return invalidPathResult(baseError);
   const patchPath = toPathSegmentsResult(path, basePath.segments);
-  const patchError = ownField(patchPath, "error");
+  const patchError = patchPath.error;
   if (patchError !== undefined) return invalidPathResult(patchError);
   return createConfigurationValidationSession(schema, {
     path: basePath.segments,

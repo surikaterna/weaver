@@ -1,6 +1,3 @@
-import { pushOwn } from "./own-data";
-import { inspectValidationData } from "./schema-validation-input-guard";
-import { ownEntries } from "./schema-validation-own-data";
 import {
   addContextError,
   appendValidationPath,
@@ -9,7 +6,7 @@ import {
   type ValidationPath,
 } from "./schema-validation-support";
 
-type ValueCycleFrame =
+type ValueFrame =
   | {
       readonly kind: "enter";
       readonly value: unknown;
@@ -17,89 +14,113 @@ type ValueCycleFrame =
     }
   | { readonly kind: "exit"; readonly value: object };
 
+interface ValueTraversal {
+  readonly active: WeakSet<object>;
+  readonly completed: WeakSet<object>;
+  readonly pending: ValueFrame[];
+}
+
+// One descriptor/cycle pass admits caller values before semantic validation reads them.
 export function validateValueGraph(
   value: unknown,
   path: ValidationPath,
   context: ValidationContext,
 ): boolean {
-  const inspection = inspectValidationData(value);
-  if (!inspection.safe) {
+  const traversal: ValueTraversal = {
+    active: new WeakSet(),
+    completed: new WeakSet(),
+    pending: [{ kind: "enter", value, path }],
+  };
+  try {
+    while (traversal.pending.length) {
+      const frame = traversal.pending.pop();
+      if (!frame) continue;
+      if (frame.kind === "exit") {
+        traversal.active.delete(frame.value);
+        traversal.completed.add(frame.value);
+        continue;
+      }
+      if (enterValue(frame, traversal, context)) continue;
+      return false;
+    }
+    return true;
+  } catch {
+    return invalidValue(context, path);
+  }
+}
+
+function enterValue(
+  frame: Extract<ValueFrame, { kind: "enter" }>,
+  traversal: ValueTraversal,
+  context: ValidationContext,
+): boolean {
+  const { value, path } = frame;
+  if (value === null || typeof value !== "object") {
+    return ["undefined", "string", "number", "boolean"].includes(
+      typeof value,
+    ) || value === null
+      ? true
+      : invalidValue(context, path);
+  }
+  if (!plainContainer(value)) return invalidValue(context, path);
+  if (traversal.active.has(value)) {
     addContextError(context, "invalid-value", path, {
-      message: "Configuration values must contain only own plain data",
+      message: "Configuration values must not contain cycles",
     });
     return false;
   }
-  const cyclePath = findValueCycle(value, path);
-  if (cyclePath === undefined && !inspection.cyclic) return true;
-  addContextError(context, "invalid-value", cyclePath ?? path, {
-    message: "Configuration values must not contain cycles",
-  });
-  return false;
+  if (traversal.completed.has(value)) return true;
+  traversal.active.add(value);
+  traversal.pending.push({ kind: "exit", value });
+  return (
+    queueDescriptors(value, path, traversal.pending) ||
+    invalidValue(context, path)
+  );
 }
 
-function findValueCycle(
-  value: unknown,
+function queueDescriptors(
+  value: object,
   path: ValidationPath,
-): ValidationPath | undefined {
-  if (!isObjectValue(value)) return undefined;
-  const entries = ownEntries(value);
-  if (!entries.some((entry) => isObjectValue(entry[1]))) return undefined;
-  const active = new WeakSet<object>([value]);
-  const completed = new WeakSet<object>();
-  const pending: ValueCycleFrame[] = [{ kind: "exit", value }];
-  pushValueEntries(value, path, entries, pending);
-  while (pending.length > 0) {
-    const frame = pending.pop();
-    if (frame === undefined) continue;
-    if (frame.kind === "exit") {
-      active.delete(frame.value);
-      completed.add(frame.value);
-      continue;
+  pending: ValueFrame[],
+): boolean {
+  for (const key of Reflect.ownKeys(value).reverse()) {
+    if (typeof key !== "string") return false;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !Object.hasOwn(descriptor, "value")) return false;
+    if (Array.isArray(value)) {
+      if (key === "length") continue;
+      if (!/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= value.length)
+        return false;
     }
-    if (!isObjectValue(frame.value)) continue;
-    if (active.has(frame.value)) return frame.path;
-    if (completed.has(frame.value)) continue;
-    active.add(frame.value);
-    pushOwn(pending, { kind: "exit", value: frame.value });
-    pushValueChildren(frame.value, frame.path, pending);
-  }
-  return undefined;
-}
-
-function pushValueChildren(
-  value: object,
-  path: ValidationPath,
-  pending: ValueCycleFrame[],
-): void {
-  pushValueEntries(value, path, ownEntries(value), pending);
-}
-
-function pushValueEntries(
-  value: object,
-  path: ValidationPath,
-  entries: [string, unknown][],
-  pending: ValueCycleFrame[],
-): void {
-  for (let index = entries.length - 1; index >= 0; index--) {
-    const entry = entries[index];
-    if (entry === undefined) continue;
-    pushOwn(pending, {
+    const child: unknown = descriptor.value;
+    pending.push({
       kind: "enter",
-      value: entry[1],
-      path: appendValidationPath(path, valuePathSegment(value, entry[0])),
+      value: child,
+      path: appendValidationPath(path, valuePathSegment(value, key)),
     });
   }
+  return true;
+}
+
+function plainContainer(value: object): boolean {
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return Array.isArray(value)
+    ? prototype === Array.prototype
+    : prototype === Object.prototype || prototype === null;
+}
+
+function invalidValue(context: ValidationContext, path: ValidationPath): false {
+  addContextError(context, "invalid-value", path, {
+    message: "Configuration values must contain only own plain data",
+  });
+  return false;
 }
 
 function valuePathSegment(
   parent: object,
   key: string,
 ): SchemaValidationPathSegment {
-  if (!Array.isArray(parent) || !/^(?:0|[1-9][0-9]*)$/.test(key)) return key;
+  if (!Array.isArray(parent) || !/^(0|[1-9][0-9]*)$/.test(key)) return key;
   const index = Number(key);
   return Number.isSafeInteger(index) && index <= 4_294_967_294 ? index : key;
-}
-
-function isObjectValue(value: unknown): value is object {
-  return typeof value === "object" && value !== null;
 }

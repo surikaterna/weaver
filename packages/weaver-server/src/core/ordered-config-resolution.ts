@@ -4,15 +4,6 @@ import {
   createWeaverError,
 } from "@weaver-conf/config-types";
 
-export function appendOrderedValue<T>(values: T[], value: T): void {
-  Object.defineProperty(values, String(values.length), {
-    value,
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
-}
-
 function ownOrderedEntry(
   entries: readonly Record<string, unknown>[],
   index: number,
@@ -42,7 +33,7 @@ export function resolveOrderedEntries(
 ): Record<string, unknown> {
   const layers: ConfigurationLayerEntry[] = [];
   for (let index = 0; index < entries.length; index++) {
-    appendOrderedValue(layers, {
+    layers.push({
       layer: "core",
       entries: ownOrderedEntry(entries, index),
     });

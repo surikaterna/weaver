@@ -1,4 +1,3 @@
-import { pushOwn } from "./own-data";
 import type { OriginNode } from "./resolution-origins";
 
 type Metric =
@@ -47,7 +46,7 @@ export function observeOriginGraph(root: OriginNode): void {
     if (node.kind !== "record") continue;
     for (const child of node.children.values()) {
       observeResolution("retainedOriginEdges");
-      pushOwn(pending, child);
+      pending.push(child);
     }
   }
 }

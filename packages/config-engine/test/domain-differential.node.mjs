@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { relative, join } from "node:path";
+import { relative, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { build } from "esbuild";
@@ -12,13 +12,17 @@ async function pinned(entry) {
   const result = await build({ entryPoints: [join(root, entry)], bundle: true, write: false, format: "esm", platform: "node",
     plugins: [{ name: "actual-pinned-source", setup(builder) {
       builder.onResolve({ filter: /^@weaver-conf\/config-types$/ }, () => ({ path: join(root, "packages/config-types/src/index.ts") }));
+      builder.onResolve({ filter: /^\.\.?\// }, args => {
+        if (!/packages\/config-(?:types|engine)\/src(?:\/|$)/.test(args.resolveDir)) return;
+        return { path: resolve(args.resolveDir, args.path.endsWith(".ts") ? args.path : `${args.path}.ts`) };
+      });
       builder.onLoad({ filter: /packages\/config-(?:types|engine)\/src\/.*\.ts$/ }, args => ({
-        contents: execFileSync("git", ["show", `443ab01efb4c8f8226ab797e56655ba85e255593:${relative(root, args.path)}`], { cwd: root, encoding: "utf8" }), loader: "ts" }));
+        contents: execFileSync("git", ["show", `0d8005330532811b06dff1039438af11696c55c5:${relative(root, args.path)}`], { cwd: root, encoding: "utf8" }), loader: "ts" }));
     } }] });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString("base64")}`);
 }
 
-test("ordinary path/identity/DTO corpus matches actual443ab01 authority without fixture recapture", async () => {
+test("ordinary path/identity/DTO corpus matches actual cleanup base without fixture recapture", async () => {
   const before = await pinned("packages/config-types/src/index.ts");
   const oldEngine = await pinned("packages/config-engine/src/registration-paths.ts");
   const paths = ["", "/", "/example", "/example/", "/example/literal.dot", "/example/😀", "/example/é", "/example/e\u0301",
@@ -42,5 +46,5 @@ test("ordinary path/identity/DTO corpus matches actual443ab01 authority without 
     if (after.success) assert.deepEqual(after.data, old.data);
     comparisons++;
   }
-  console.log(`actual pinned ordinary corpus: ${comparisons} exact acceptance/output comparisons`);
+   console.log(`actual0d800533 ordinary corpus: ${comparisons} exact acceptance/output comparisons`);
 });

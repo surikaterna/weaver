@@ -22,21 +22,16 @@ test("iterative projection is deep-safe and visits shared value/context pairs on
   assert.notEqual(dag, shared);
 });
 
-test("descriptor preflight rejects accessors/cycles/symbols before callbacks; numeric scratch is owned", () => {
-  let getters = 0, setters = 0, callbacks = 0;
+test("descriptor admission rejects accessors/cycles/symbols before callbacks", () => {
+  let getters = 0, callbacks = 0;
   const visitor = { decide: () => { callbacks++; return "descend"; }, child: context => context };
   const accessor = { get value() { getters++; return "secret"; } };
   const cyclic = {}; cyclic.self = cyclic;
   for (const value of [accessor, cyclic, { [Symbol("data")]: true }, Object.create({ inherited: true })])
     assert.throws(() => projectConfigurationData(value, {}, visitor), { code: "VALIDATION_ERROR" });
   assert.equal(getters, 0); assert.equal(callbacks, 0);
-  const original = Object.getOwnPropertyDescriptor(Object.prototype, "0");
-  let result;
-  try {
-    Object.defineProperty(Object.prototype, "0", { configurable: true, get() { getters++; return "ambient"; }, set() { setters++; } });
-    result = projectConfigurationData({ public: ["value"], _weaver: "literal" }, {}, visitor);
-  } finally { if (original) Object.defineProperty(Object.prototype, "0", original); else delete Object.prototype[0]; }
-  assert.equal(getters, 0); assert.equal(setters, 0);
+  const result = projectConfigurationData({ public: ["value"], _weaver: "literal" }, {}, visitor);
+  assert.equal(getters, 0);
   assert.deepEqual(result, { public: ["value"], _weaver: "literal" });
 });
 

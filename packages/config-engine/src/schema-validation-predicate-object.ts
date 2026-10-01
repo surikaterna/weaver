@@ -1,5 +1,4 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { defineOwnData } from "./own-data";
 import { ownEntries, ownField } from "./schema-validation-own-data";
 
 import { hasOwn, type ValidationState } from "./schema-validation-support";
@@ -14,7 +13,7 @@ export function queuePredicateObjectFrames(
   value: Record<string, unknown>,
   pending: PredicateFrameSink,
 ): boolean {
-  if (ownField(state.context, "predicateOnly") !== true) return false;
+  if (state.context.predicateOnly !== true) return false;
   const patterns = ownField(state.schema, "patternProperties");
   if (patterns !== undefined) return false;
   const entries = ownEntries(value);
@@ -47,7 +46,7 @@ function queueMember(
   const additional = ownField(state.schema, "additionalProperties");
   if (additional === true) return;
   if (additional === undefined || additional === false) {
-    defineOwnData(state.context, "failed", true);
+    state.context.failed = true;
     return;
   }
   pending({
@@ -76,7 +75,7 @@ function queueRequired(
         state: { ...state, schema: propertySchema, value: undefined },
       });
     } else {
-      defineOwnData(state.context, "failed", true);
+      state.context.failed = true;
     }
   }
 }

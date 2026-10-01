@@ -1,5 +1,4 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { pushOwn } from "./own-data";
 
 import {
   hasComposition,
@@ -261,7 +260,7 @@ function inspectSchemaNode(
   if (!validateInspectedSchema(schema, composed, runtime)) return false;
   visits.set(schema, "active");
   collectConstraintRoots(schema, inspection.constraintRoots);
-  pushOwn(pending, { kind: "exit", value: schema });
+  pending.push({ kind: "exit", value: schema });
   inspection.predicateScalars ??= new WeakSet();
   if (hasOnlyTypeLeafChildren(schema, inspection.predicateScalars)) {
     if (

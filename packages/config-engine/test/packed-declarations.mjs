@@ -16,9 +16,14 @@ const validationSession = createConfigurationValidationSession(validationSchema)
 if (!validationPositive.valid || validationNegative.valid || !validationPatch.valid || !validationSession.validatePartial(true).valid) throw new Error("Typed real validator fixture failed");
 Object.setPrototypeOf(validationSchema, { get anyOf() { throw new Error("Inherited schema getter"); } });
 if (!validatePartialConfiguration(validationSchema, true).valid) throw new Error("Typed schema role fixture failed");
-Object.defineProperty(validationSchema, "default", { get() { throw new Error("Own schema getter"); } });
+let trustedSchemaReads = 0;
+Object.defineProperty(validationSchema, "default", { get() { trustedSchemaReads++; return true; } });
 const validationAccessor: SchemaValidationResult = validatePartialConfiguration(validationSchema, true);
-if (validationAccessor.valid || validationAccessor.errors[0]?.code !== "invalid-schema") throw new Error("Typed accessor boundary failed");
+if (!validationAccessor.valid || trustedSchemaReads === 0) throw new Error("Typed trusted schema execution failed");
+let callerValueReads = 0;
+const callerValue = { get flag() { callerValueReads++; return true; } };
+const validationCaller: SchemaValidationResult = validatePartialConfiguration({ type: "object" }, callerValue);
+if (validationCaller.valid || validationCaller.errors[0]?.code !== "invalid-value" || callerValueReads !== 0) throw new Error("Typed caller value admission failed");
 `;
 export async function checkDeclarations(directory, mode) {
   const text = await readFile(new URL("./root-consumer.mts", import.meta.url), "utf8");

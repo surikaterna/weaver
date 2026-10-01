@@ -30,7 +30,6 @@ import {
   recordValue,
 } from "./registered-read-policy";
 import type { CanonicalSchemaRegistryReader } from "./registry-contracts";
-import { appendOwn, mapOwn, ownValues } from "./structural-witness-own-data";
 
 type Contexts = ReturnType<typeof createReadContexts>;
 type Policy = ReturnType<typeof createReadPolicy>;
@@ -79,14 +78,14 @@ function createRevision(
   context: RegisteredReadProjectionContext,
 ): ReadRevision {
   const anchors = captureReadAnchors(reader, context.identity.environment);
-  const sources = mapOwn(ownValues(snapshot.layers), (layer) => layer.entries);
+  const sources = snapshot.layers.map((layer) => layer.entries);
   const effective = createReadContexts(anchors, snapshot.entries, sources);
   // Source proof is a separate iterative graph, never a recursive read-policy lookup.
   const sourceEffective = createReadContexts(anchors, snapshot.entries);
-  const rawContexts = mapOwn(ownValues(snapshot.layers), (layer) =>
+  const rawContexts = snapshot.layers.map((layer) =>
     createReadContexts(anchors, layer.entries),
   );
-  const aliases = mapOwn(ownValues(rawContexts), (contexts) =>
+  const aliases = rawContexts.map((contexts) =>
     createReadSourceClassifier(contexts, recordValue(contexts.root.candidate)),
   );
   function view(entries: Readonly<Record<string, unknown>>): LayerView {
@@ -105,8 +104,7 @@ function createRevision(
     };
   }
   const raws = new Map<object, LayerView>();
-  for (const layer of ownValues(snapshot.layers))
-    raws.set(layer, view(layer.entries));
+  for (const layer of snapshot.layers) raws.set(layer, view(layer.entries));
   return Object.freeze({
     snapshot,
     context,
@@ -143,7 +141,7 @@ function contributions(
   revision: ReadRevision,
 ): readonly ConfigurationLayerContribution[] {
   const result: ConfigurationLayerContribution[] = [];
-  for (const layer of ownValues(revision.snapshot.layers)) {
+  for (const layer of revision.snapshot.layers) {
     const view = revision.raws.get(layer);
     if (!view)
       throw createWeaverError(
@@ -151,8 +149,7 @@ function contributions(
         "Missing registered layer context",
       );
     const value = inspectionValue(view.contexts.at(segments), view.policy);
-    appendOwn(
-      result,
+    result.push(
       Object.freeze({
         layer: layer.layer,
         providerId: layer.providerId,
@@ -202,9 +199,9 @@ function readLayer(
     throw createWeaverError("VALIDATION_ERROR", "Invalid layer name");
   const layers: ConfigurationSnapshot["layers"][number][] = [];
   const ranks = new Set<number>();
-  for (const candidate of ownValues(revision.snapshot.layers)) {
+  for (const candidate of revision.snapshot.layers) {
     if (candidate.layer === layer) {
-      appendOwn(layers, candidate);
+      layers.push(candidate);
       ranks.add(candidate.rank);
     }
   }
@@ -212,7 +209,7 @@ function readLayer(
   // Multiple providers at a logical layer still merge through the same engine.
   const raw = resolveConfigurationSnapshot({
     layers,
-    configuredRanks: mapOwn(ranks, (rank) => rank),
+    configuredRanks: [...ranks],
     ceilings: [],
   });
   const local = revision.view(raw.entries);

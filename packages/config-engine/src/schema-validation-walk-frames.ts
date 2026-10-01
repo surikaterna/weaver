@@ -1,5 +1,4 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { pushOwn } from "./own-data";
 import {
   validateArraySize,
   validateObjectSize,
@@ -63,15 +62,13 @@ export function queueObjectFrames(
   pending: WalkFrame[],
 ): void {
   validateObjectSize(state.schema, value, state.path, state.context);
-  if (
-    queuePredicateObjectFrames(state, value, (frame) => pushOwn(pending, frame))
-  )
+  if (queuePredicateObjectFrames(state, value, (frame) => pending.push(frame)))
     return;
   const entries = ownEntries(value);
   for (let index = entries.length - 1; index >= 0; index--) {
     const entry = entries[index];
     if (entry !== undefined)
-      pushOwn(pending, {
+      pending.push({
         kind: "member",
         state,
         key: entry[0],
@@ -82,7 +79,7 @@ export function queueObjectFrames(
   const required = ownField(state.schema, "required") ?? [];
   for (let index = required.length - 1; index >= 0; index--) {
     const key = ownField(required, index);
-    if (key !== undefined) pushOwn(pending, { kind: "required", state, key });
+    if (key !== undefined) pending.push({ kind: "required", state, key });
   }
 }
 
@@ -104,7 +101,7 @@ export function processRequiredFrame(
     propertySchema !== undefined &&
     ownField(propertySchema, "default") !== undefined
   ) {
-    pushOwn(pending, {
+    pending.push({
       kind: "value",
       state: { ...frame.state, schema: propertySchema, value: undefined, path },
     });
@@ -129,7 +126,7 @@ export function processMemberFrame(
   for (let index = schemas.length - 1; index >= 0; index--) {
     const memberSchema = schemas[index];
     if (memberSchema !== undefined) {
-      pushOwn(pending, {
+      pending.push({
         kind: "value",
         state: {
           schema: memberSchema,
@@ -155,7 +152,7 @@ function queueAdditionalProperty(
     });
     return;
   }
-  pushOwn(pending, {
+  pending.push({
     kind: "value",
     state: { ...frame.state, schema: additional, value: frame.value, path },
   });
@@ -169,7 +166,7 @@ export function queueArrayFrames(
   validateArraySize(state.schema, value, state.path, state.context);
   validateUniqueItems(state.schema, value, state.path, state.context);
   for (let index = value.length - 1; index >= 0; index--) {
-    pushOwn(pending, { kind: "array-item", state, value, index });
+    pending.push({ kind: "array-item", state, value, index });
   }
 }
 
@@ -190,7 +187,7 @@ export function processArrayItemFrame(
   }
   const schema = itemSchema(frame.state.schema, frame.index);
   if (schema === undefined) return;
-  pushOwn(pending, {
+  pending.push({
     kind: "value",
     state: {
       ...frame.state,

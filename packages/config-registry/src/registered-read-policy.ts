@@ -9,7 +9,7 @@ import {
   isReadReference,
   type ReadContext,
 } from "./registered-read-contexts";
-import { appendOwn, ownField, ownValue } from "./structural-witness-own-data";
+import { ownValue } from "./structural-witness-own-data";
 
 type Contexts = ReturnType<typeof createReadContexts>;
 
@@ -44,7 +44,7 @@ function sourceForbidden(context: ReadContext, contexts: Contexts): boolean {
     }
     if (next.candidate === null || typeof next.candidate !== "object") continue;
     for (const key of Object.keys(next.candidate))
-      appendOwn(pending, contexts.child(next, key));
+      pending.push(contexts.child(next, key));
   }
   return false;
 }
@@ -128,7 +128,7 @@ function aliasForbidden(
   effective: MountSourceClassifier,
 ): boolean {
   for (let index = 0; index < sources.length; index++) {
-    const value = ownField(sources, index);
+    const value = sources[index];
     if (
       marker(value) !== "mount" ||
       value === null ||
@@ -138,10 +138,7 @@ function aliasForbidden(
     const source = ownValue(value, "source");
     if (typeof source !== "string") return true;
     const mount = { _weaver: "mount" as const, source };
-    if (
-      effective.isTainted(mount) ||
-      ownField(aliases, index)?.isTainted(mount)
-    )
+    if (effective.isTainted(mount) || aliases[index]?.isTainted(mount))
       return true;
   }
   return false;

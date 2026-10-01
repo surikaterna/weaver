@@ -5,7 +5,7 @@ import { assertInstalled, toolRequire } from "./packed-consumer-helper.mjs";
 import { runInNewContext } from "node:vm";
 import { checkSnapshot } from "./snapshot-behavior.mjs";
 import { compactFixtureSource } from "./compact-behavior.mjs";
-import { validatorFixtureSource } from "./validator-own-data-helper.mjs";
+import { validationFixtureSource } from "./validation-regressions.mjs";
 
 const esbuild = createRequire(toolRequire.resolve("tsup"))("esbuild");
 
@@ -33,7 +33,7 @@ export async function checkRuntimeClosure(directory) {
     const text = await browserClosure(entry, directory, "engine");
     const session = await browserClosure(sessionEntry, directory, "validationSession");
     const sandbox = { assert };
-    const cases = runInNewContext(`${text}\n${session}\n(${checkSnapshot.toString()})(engine, assert);\n${compactFixtureSource}\ncheckCompactSnapshots(engine, assert);\n${validatorFixtureSource}\ncheckValidatorOwnData(engine, validationSession.createConfigurationValidationSession, assert);`, sandbox);
-    console.log(`real browser validator ${entry}: ${cases} cases x Object/Array x 0/1/700 plus cached mutation checks`);
+    const cases = runInNewContext(`${text}\n${session}\n(${checkSnapshot.toString()})(engine, assert);\n${compactFixtureSource}\ncheckCompactSnapshots(engine, assert);\n${validationFixtureSource}\nexerciseValidationCache(engine, validationSession.createConfigurationValidationSession);\nexerciseValidation(engine);`, sandbox);
+    console.log(`real browser validation ${entry}:`, cases, "and explicit cached mutations");
   }
 }

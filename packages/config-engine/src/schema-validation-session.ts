@@ -1,8 +1,6 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 import { validationOptionsPath } from "./schema-validation-error-paths";
 import { validateSchemaGraph } from "./schema-validation-graph";
-import { inspectValidationData } from "./schema-validation-input-guard";
-import { ownField } from "./schema-validation-own-data";
 import { resolveMemberSchemas } from "./schema-validation-paths";
 import {
   captureSchemaStability,
@@ -11,7 +9,6 @@ import {
 } from "./schema-validation-schema-stability";
 import {
   createValidationPath,
-  makeError,
   type PathSegmentsResult,
   type SchemaValidationOptions,
   type SchemaValidationPathSegment,
@@ -59,13 +56,9 @@ export function createConfigurationValidationSession(
   const basePath = validationOptionsPath(options);
   let state: PreparationState | undefined;
   const currentPreparation = (): ValidationPreparation => {
-    const pathError = ownField(basePath, "error");
+    const pathError = basePath.error;
     if (pathError !== undefined) return { error: invalidPathResult(pathError) };
-    const data = inspectValidationData(schema, "schema");
-    if (!data.safe) return { error: unsafeSchemaResult(basePath.segments) };
     if (state !== undefined && schemaStabilityMatches(state.stability)) {
-      if (data.cyclic && Object.hasOwn(state.preparation, "prepared"))
-        return { error: unsafeSchemaResult(basePath.segments) };
       return state.preparation;
     }
     state = createPreparationState(schema, basePath);
@@ -96,34 +89,16 @@ function prepareValidation(
   schema: ConfigurationPropertySchema,
   parsedPath: PathSegmentsResult,
 ): ValidationPreparation {
-  const pathError = ownField(parsedPath, "error");
+  const pathError = parsedPath.error;
   if (pathError !== undefined) {
     return { error: invalidPathResult(pathError) };
   }
   const context: ValidationContext = { mode: "partial", errors: [] };
   const path = createValidationPath(parsedPath.segments);
-  const data = inspectValidationData(schema, "schema");
-  if (!data.safe) return { error: unsafeSchemaResult(parsedPath.segments) };
   const plan = validateSchemaGraph(schema, path, context);
   if (plan === undefined) return { error: result(context) };
-  if (data.cyclic) return { error: unsafeSchemaResult(parsedPath.segments) };
   return {
     prepared: { baseSegments: parsedPath.segments, path, plan, schema },
-  };
-}
-
-function unsafeSchemaResult(
-  segments: readonly SchemaValidationPathSegment[],
-): SchemaValidationResult {
-  return {
-    valid: false,
-    errors: [
-      makeError(
-        "invalid-schema",
-        segments,
-        "Schema must contain only acyclic own plain data",
-      ),
-    ],
   };
 }
 
@@ -148,7 +123,7 @@ function validatePreparedPatch(
   if (isFailedPreparation(preparation)) return copyResult(preparation.error);
   const { baseSegments, plan, schema } = preparation.prepared;
   const patchPath = toPathSegmentsResult(path, baseSegments);
-  const pathError = ownField(patchPath, "error");
+  const pathError = patchPath.error;
   if (pathError !== undefined) return invalidPathResult(pathError);
   const target = resolveMemberSchemas(schema, patchPath.segments, baseSegments);
   if (target.errors.length > 0) return { valid: false, errors: target.errors };

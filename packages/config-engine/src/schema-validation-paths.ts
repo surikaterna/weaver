@@ -1,6 +1,5 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { pushOwn } from "./own-data";
-import { appendOwn, ownEntries, ownField } from "./schema-validation-own-data";
+import { ownEntries, ownField } from "./schema-validation-own-data";
 
 import {
   allowsType,
@@ -32,7 +31,7 @@ export function resolveMemberSchemas(
     );
     if (errors.length > 0) return { schemas: [], errors };
     candidates = next;
-    pushOwn(prefix, segment);
+    prefix.push(segment);
   }
 
   return { schemas: candidates, errors };
@@ -50,7 +49,7 @@ export function collectMemberSchemas(
     properties !== undefined && Object.hasOwn(properties, key)
       ? ownField(properties, key)
       : undefined;
-  if (declared !== undefined) pushOwn(schemas, declared);
+  if (declared !== undefined) schemas.push(declared);
   const patterns = ownField(schema, "patternProperties");
   if (patterns !== undefined) {
     collectPatternSchemas(patterns, key, path, context, schemas);
@@ -75,7 +74,8 @@ function resolveNextSchemas(
 ): ConfigurationPropertySchema[] {
   const resolved: ConfigurationPropertySchema[] = [];
   for (const projected of directAndAllOfSchemas(schema)) {
-    appendOwn(resolved, resolveDirectSchema(projected, segment, path, errors));
+    for (const member of resolveDirectSchema(projected, segment, path, errors))
+      resolved.push(member);
     if (errors.length > 0) return [];
   }
   return resolved;
@@ -93,8 +93,7 @@ function resolveDirectSchema(
   if (allowsType(schema, "array")) {
     return resolveArrayMemberSchema(schema, segment, path, errors);
   }
-  pushOwn(
-    errors,
+  errors.push(
     makeError(
       "invalid-path",
       [...path, segment],
@@ -115,12 +114,12 @@ function directAndAllOfSchemas(
     if (current === undefined) continue;
     if (completed.has(current)) continue;
     completed.add(current);
-    pushOwn(projected, current);
+    projected.push(current);
     const branches = ownField(current, "allOf");
     if (!Array.isArray(branches)) continue;
     for (let index = branches.length - 1; index >= 0; index--) {
       const branch = ownField(branches, index);
-      if (branch !== undefined) pushOwn(pending, branch);
+      if (branch !== undefined) pending.push(branch);
     }
   }
   return projected;
@@ -138,8 +137,7 @@ function resolveObjectMemberSchema(
   const additional = ownField(schema, "additionalProperties");
   if (additional === true) return [];
   if (additional === undefined || additional === false) {
-    pushOwn(
-      errors,
+    errors.push(
       makeError(
         "unknown-property",
         [...path, key],
@@ -159,8 +157,7 @@ function resolveArrayMemberSchema(
 ): ConfigurationPropertySchema[] {
   const index = getArrayIndex(segment);
   if (index === undefined) {
-    pushOwn(
-      errors,
+    errors.push(
       makeError(
         "invalid-path",
         [...path, segment],
@@ -185,6 +182,6 @@ function collectPatternSchemas(
 ): void {
   for (const [pattern, nestedSchema] of ownEntries(patterns)) {
     const regex = compileSchemaPattern(pattern, path, context);
-    if (regex?.test(key) === true) pushOwn(schemas, nestedSchema);
+    if (regex?.test(key) === true) schemas.push(nestedSchema);
   }
 }

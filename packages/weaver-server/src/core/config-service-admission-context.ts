@@ -9,10 +9,7 @@ import {
 } from "./config-service-internal";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
 import { type Mutation, prepareConfigMutation } from "./config-write-admission";
-import {
-  appendOrderedValue,
-  resolveOrderedEntries,
-} from "./ordered-config-resolution";
+import { resolveOrderedEntries } from "./ordered-config-resolution";
 import {
   isSameScopeLayer,
   isScopedLayer,
@@ -46,12 +43,11 @@ function projectedState(
     (scope) =>
       scope.scopeId !== scoped?.scopeId || scope.value !== scoped.value,
   );
-  if (scoped) appendOrderedValue(scopes, scoped);
+  if (scoped) scopes.push(scoped);
   const ordered: Record<string, unknown>[] = [];
   for (const provider of deps.providers) {
     if (isScopedLayer(provider.layer)) continue;
-    appendOrderedValue(
-      ordered,
+    ordered.push(
       provider === target && !dynamicWrite
         ? candidate
         : (deps.layerData.get(provider.id) ?? {}),
@@ -65,13 +61,13 @@ function projectedState(
         provider === target && !dynamicWrite
           ? candidate
           : (deps.layerData.get(provider.id) ?? {});
-      appendOrderedValue(ordered, entries);
+      ordered.push(entries);
     }
     const dynamic =
       dynamicWrite && isSameScopeLayer(layer, scopedLayer)
         ? candidate
         : deps.dynamicScopeEntries.get(scopedLayer);
-    if (dynamic) appendOrderedValue(ordered, dynamic);
+    if (dynamic) ordered.push(dynamic);
   }
   return resolveOrderedEntries(ordered);
 }

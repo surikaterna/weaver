@@ -1,6 +1,4 @@
-import { defineOwnData } from "./own-data";
 import { validateValueConstraints } from "./schema-validation-constraints";
-import { ownField } from "./schema-validation-own-data";
 import {
   allowsType,
   appendValidationPath,
@@ -31,14 +29,14 @@ export function appendContextPath(
   path: ValidationPath,
   segment: SchemaValidationPathSegment,
 ): ValidationPath {
-  return ownField(context, "predicateOnly") === true
+  return context.predicateOnly === true
     ? path
     : appendValidationPath(path, segment);
 }
 
 export function rejectPredicate(context: ValidationContext): boolean {
-  if (ownField(context, "predicateOnly") !== true) return false;
-  defineOwnData(context, "failed", true);
+  if (context.predicateOnly !== true) return false;
+  context.failed = true;
   return true;
 }
 
@@ -46,8 +44,7 @@ export function validateScalarPredicate(
   state: ValidationState,
   predicateScalar: boolean,
 ): boolean {
-  if (ownField(state.context, "predicateOnly") !== true || !predicateScalar)
-    return false;
+  if (state.context.predicateOnly !== true || !predicateScalar) return false;
   if (allowsType(state.schema, "object") || allowsType(state.schema, "array")) {
     return false;
   }
@@ -57,7 +54,7 @@ export function validateScalarPredicate(
     state.context.mode,
   );
   if (value === undefined || !matchesAnyType(value, state.schema)) {
-    defineOwnData(state.context, "failed", true);
+    state.context.failed = true;
     return true;
   }
   validateValueConstraints(value === state.value ? state : { ...state, value });

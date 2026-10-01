@@ -1,5 +1,5 @@
 import { createWeaverError } from "@weaver-conf/config-types";
-import { isPlainObject, pushOwn } from "./own-data";
+import { isPlainObject } from "./own-data";
 import { observeResolution } from "./resolution-observation";
 import type { ResolutionCeiling } from "./snapshot-contracts";
 
@@ -94,10 +94,10 @@ function compilePlan(
     inherited: number,
     assign: (value: PolicyContext) => void,
   ) => {
-    pushOwn(tasks, () => {
+    tasks.push(() => {
       const limit = Math.min(inherited, node.limit);
       const children = new Map<string, PolicyContext>();
-      pushOwn(tasks, () => assign(intern(limit, children)));
+      tasks.push(() => assign(intern(limit, children)));
       for (const [key, child] of node.children)
         schedule(child, limit, (compiled) => {
           children.set(key, compiled);

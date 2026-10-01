@@ -8,7 +8,7 @@ export function isPlainObject(
   return proto === Object.prototype || proto === null;
 }
 
-export function ownDataValue(value: object, key: string): unknown {
+export function ownDataValue(value: object, key: PropertyKey): unknown {
   const descriptor = Object.getOwnPropertyDescriptor(value, key);
   if (!descriptor) return undefined;
   if (!Object.hasOwn(descriptor, "value")) {
@@ -32,8 +32,4 @@ export function defineOwnData(
     configurable: true,
     writable: true,
   });
-}
-
-export function pushOwn<T>(values: T[], value: T): void {
-  defineOwnData(values, String(values.length), value);
 }

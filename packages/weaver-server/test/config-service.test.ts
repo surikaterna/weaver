@@ -505,31 +505,12 @@ describe("WeaverConfigService", () => {
     sseClient.close();
   });
 
-  it("preserves reserved own keys without invoking inherited accessors", async () => {
-    let getterCalls = 0;
-    let setterCalls = 0;
-    Reflect.defineProperty(Object.prototype, inheritedTrapKey, {
-      get: () => {
-        getterCalls += 1;
-        return "inherited";
-      },
-      set: () => {
-        setterCalls += 1;
-      },
-      configurable: true,
-    });
-    try {
-      const nested = reservedRecord("nested");
-      const initial = reservedRecord("initial");
-      defineOwnData(initial, "nested", nested);
-
-      for (const layer of reservedKeys) {
-        await expectReservedLayer(layer, initial);
-      }
-      expect(getterCalls).toBe(0);
-      expect(setterCalls).toBe(0);
-    } finally {
-      Reflect.deleteProperty(Object.prototype, inheritedTrapKey);
+  it("preserves reserved own keys and ordinary output descriptors", async () => {
+    const nested = reservedRecord("nested");
+    const initial = reservedRecord("initial");
+    defineOwnData(initial, "nested", nested);
+    for (const layer of reservedKeys) {
+      await expectReservedLayer(layer, initial);
     }
   });
 

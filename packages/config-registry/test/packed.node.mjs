@@ -26,7 +26,7 @@ async function nodeConsumers(directory) {
     const bytes = await readFile(join(directory, name));
     console.log(`packed artifact sha256 ${name}: ${createHash("sha256").update(bytes).digest("hex")}`);
   }
-  const { ownDataExercise } = await import("./structural-witness-own-data-helper.mjs");
+  const { witnessExercise } = await import("./structural-witness-regressions.mjs");
   for (const cjs of [false, true]) {
     const filename = await fixture(directory, `runtime.${cjs ? "cjs" : "mjs"}`,
       `${cjs ? "const assert = require('node:assert/strict');" : "import assert from 'node:assert/strict';"}
@@ -35,7 +35,7 @@ async function nodeConsumers(directory) {
       assert.deepEqual(Object.keys(support).sort(), ${JSON.stringify(rootExports)});
       assert.deepEqual(Object.keys(internalApi).sort(), ${JSON.stringify(internalExports)});
       for (const api of [support, internalApi]) { ${exercise} }
-      ${ownDataExercise}
+      ${witnessExercise}
       ${readProjectionExercise}
       ${ancestorProjectionExercise}
       ${cjs ? "const types = require('@weaver-conf/config-types');" : "import * as types from '@weaver-conf/config-types';"}

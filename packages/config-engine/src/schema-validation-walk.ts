@@ -1,5 +1,4 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { pushOwn } from "./own-data";
 import {
   addCompositionResult,
   COMPOSITION_KEYWORDS,
@@ -49,7 +48,7 @@ export function validateValuesIteratively(
   const runtime: WalkRuntime = { plan, memo: undefined };
   for (let index = states.length - 1; index >= 0; index--) {
     const state = states[index];
-    if (state !== undefined) pushOwn(pending, { kind: "value", state });
+    if (state !== undefined) pending.push({ kind: "value", state });
   }
   while (pending.length > 0) {
     const frame = pending.pop();
@@ -63,18 +62,25 @@ function processWalkFrame(
   pending: WalkFrame[],
   runtime: WalkRuntime,
 ): void {
-  if (frame.kind === "required") {
-    processRequiredFrame(frame, pending);
-  } else if (frame.kind === "member") {
-    processMemberFrame(frame, pending);
-  } else if (frame.kind === "array-item") {
-    processArrayItemFrame(frame, pending);
-  } else if (frame.kind === "composition") {
-    processCompositionFrame(frame, pending, runtime);
-  } else if (frame.kind === "ordinary") {
-    processOrdinaryFrame(frame.state, pending);
-  } else {
-    processValueFrame(frame.state, pending, runtime);
+  switch (frame.kind) {
+    case "required":
+      processRequiredFrame(frame, pending);
+      break;
+    case "member":
+      processMemberFrame(frame, pending);
+      break;
+    case "array-item":
+      processArrayItemFrame(frame, pending);
+      break;
+    case "composition":
+      processCompositionFrame(frame, pending, runtime);
+      break;
+    case "ordinary":
+      processOrdinaryFrame(frame.state, pending);
+      break;
+    case "value":
+      processValueFrame(frame.state, pending, runtime);
+      break;
   }
 }
 
@@ -84,7 +90,7 @@ function processValueFrame(
   runtime: WalkRuntime,
 ): void {
   const predicateScalar =
-    ownField(runtime.plan, "predicateScalars")?.has(state.schema) === true;
+    runtime.plan.predicateScalars?.has(state.schema) === true;
   if (validateScalarPredicate(state, predicateScalar)) return;
   const value = getEffectiveValue(
     state.schema,
@@ -92,11 +98,11 @@ function processValueFrame(
     state.context.mode,
   );
   const effectiveState = value === state.value ? state : { ...state, value };
-  if (ownField(runtime.plan, "composed")?.has(state.schema) !== true) {
+  if (runtime.plan.composed?.has(state.schema) !== true) {
     processOrdinaryFrame(effectiveState, pending);
     return;
   }
-  pushOwn(pending, { kind: "ordinary", state: effectiveState });
+  pending.push({ kind: "ordinary", state: effectiveState });
   queueCompositionFrames(effectiveState, pending);
 }
 
@@ -109,7 +115,7 @@ function queueCompositionFrames(
     if (keyword === undefined || !Object.hasOwn(state.schema, keyword))
       continue;
     const branches = getCompositionBranches(state.schema, keyword);
-    pushOwn(pending, {
+    pending.push({
       kind: "composition",
       state,
       keyword,
@@ -162,7 +168,7 @@ function processCompositionFrame(
   const branch = ownField(frame.branches, frame.index);
   frame.index++;
   if (branch === undefined) {
-    pushOwn(pending, frame);
+    pending.push(frame);
     return;
   }
   queueCompositionBranch(frame, branch, pending, runtime);
@@ -175,24 +181,23 @@ function queueCompositionBranch(
   runtime: WalkRuntime,
 ): void {
   const { mode } = frame.state.context;
-  const memoEligible =
-    ownField(runtime.plan, "memoEligible")?.has(schema) === true;
-  const memo = ownField(runtime, "memo");
+  const memoEligible = runtime.plan.memoEligible?.has(schema) === true;
+  const memo = runtime.memo;
   const cached =
     memoEligible && memo !== undefined
       ? getMemoizedCompositionMatch(memo, schema, frame.state.value, mode)
       : undefined;
   if (cached !== undefined) {
     if (cached) frame.matched++;
-    pushOwn(pending, frame);
+    pending.push(frame);
     return;
   }
   const context = createPredicateContext(mode);
   const state = { ...frame.state, schema, context };
   frame.branchSchema = schema;
   frame.branchContext = context;
-  pushOwn(pending, frame);
-  pushOwn(pending, { kind: "value", state });
+  pending.push(frame);
+  pending.push({ kind: "value", state });
 }
 
 function completeCompositionBranch(
@@ -202,8 +207,8 @@ function completeCompositionBranch(
   const schema = frame.branchSchema;
   const context = frame.branchContext;
   if (schema === undefined || context === undefined) return;
-  const matches = !ownField(context, "failed");
-  if (ownField(runtime.plan, "memoEligible")?.has(schema) === true) {
+  const matches = !context.failed;
+  if (runtime.plan.memoEligible?.has(schema) === true) {
     runtime.memo ??= createCompositionMemo();
     memoizeCompositionMatch(
       runtime.memo,

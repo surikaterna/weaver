@@ -3,7 +3,6 @@ import type {
   ConfigurationPropertySchema,
 } from "@weaver-conf/config-types";
 
-import { defineOwnData, pushOwn } from "./own-data";
 import { getCachedRegex, isSafePattern } from "./regex-cache";
 import {
   makeError,
@@ -90,8 +89,8 @@ export function addError(
   message: string,
   details?: Pick<SchemaValidationError, "expected" | "actual">,
 ): void {
-  if (ownField(state.context, "predicateOnly") === true) {
-    defineOwnData(state.context, "failed", true);
+  if (state.context.predicateOnly === true) {
+    state.context.failed = true;
     return;
   }
   addContextError(state.context, code, state.path, { message, ...details });
@@ -107,12 +106,11 @@ export function addContextError(
     actual?: string | undefined;
   },
 ): void {
-  if (ownField(context, "predicateOnly") === true) {
-    defineOwnData(context, "failed", true);
+  if (context.predicateOnly === true) {
+    context.failed = true;
     return;
   }
-  pushOwn(
-    context.errors,
+  context.errors.push(
     makeError(code, materializeValidationPath(path), details.message, details),
   );
 }
@@ -143,8 +141,8 @@ export function addBoundedContextError(
   operator: string,
 ): void {
   if (expected === undefined || boundPasses(actual, expected, operator)) return;
-  if (ownField(context, "predicateOnly") === true) {
-    defineOwnData(context, "failed", true);
+  if (context.predicateOnly === true) {
+    context.failed = true;
     return;
   }
   addContextError(context, "invalid-value", path, {
@@ -220,12 +218,7 @@ export function getTypes(
 }
 
 export function describeTypes(schema: ConfigurationPropertySchema): string {
-  const types = getTypes(schema);
-  let result = "";
-  for (let index = 0; index < types.length; index++) {
-    result += `${index === 0 ? "" : " | "}${ownField(types, index) ?? ""}`;
-  }
-  return result;
+  return getTypes(schema).join(" | ");
 }
 
 export function describeValue(value: unknown): string {

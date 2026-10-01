@@ -1,5 +1,4 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { pushOwn } from "./own-data";
 import {
   hasComposition,
   isSupportedSchema,
@@ -126,8 +125,7 @@ function collectTerminalMapChildren(
   const map = ownField(schema, key);
   if (map === undefined) return;
   for (const [name, value] of ownEntries(map)) {
-    pushOwn(
-      children,
+    children.push(
       terminalChild(
         value,
         `${key} entry ${JSON.stringify(name)} must be a schema object with a supported non-empty type`,
@@ -142,8 +140,7 @@ function collectTerminalAdditionalChild(
 ): void {
   const additional = ownField(schema, "additionalProperties");
   if (additional !== undefined && typeof additional !== "boolean") {
-    pushOwn(
-      children,
+    children.push(
       terminalChild(
         additional,
         "additionalProperties must be a boolean or schema object with a supported non-empty type",
@@ -159,8 +156,7 @@ function collectTerminalItemChildren(
   const items = ownField(schema, "items");
   if (items === undefined) return;
   if (!Array.isArray(items)) {
-    pushOwn(
-      children,
+    children.push(
       terminalChild(
         items,
         "items must be a schema object or dense array of schema objects with supported non-empty types",
@@ -170,8 +166,7 @@ function collectTerminalItemChildren(
   }
   for (let index = 0; index < items.length; index++) {
     const value = ownField(items, index);
-    pushOwn(
-      children,
+    children.push(
       terminalChild(
         value,
         `items entry ${String(index)} must be a schema object with a supported non-empty type`,

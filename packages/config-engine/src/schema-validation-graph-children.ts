@@ -1,5 +1,4 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { pushOwn } from "./own-data";
 import {
   COMPOSITION_KEYWORDS,
   getCompositionBranches,
@@ -24,7 +23,7 @@ export function pushSchemaChildren(
   pushItemChildren(schema, pending);
   const additional = ownField(schema, "additionalProperties");
   if (additional !== undefined && typeof additional !== "boolean") {
-    pushOwn(pending, {
+    pending.push({
       kind: "enter",
       value: additional,
       invalidMessage:
@@ -46,7 +45,7 @@ function pushSchemaMapChildren(
   for (let index = names.length - 1; index >= 0; index--) {
     const name = names[index];
     if (name === undefined) continue;
-    pushOwn(pending, {
+    pending.push({
       kind: "enter",
       value: ownField(map, name),
       invalidMessage: `${key} entry ${JSON.stringify(name)} must be a schema object with a supported non-empty type`,
@@ -61,7 +60,7 @@ function pushItemChildren(
   const items = ownField(schema, "items");
   if (items === undefined) return;
   if (!isSchemaArray(items)) {
-    pushOwn(pending, {
+    pending.push({
       kind: "enter",
       value: items,
       invalidMessage:
@@ -70,7 +69,7 @@ function pushItemChildren(
     return;
   }
   for (let index = items.length - 1; index >= 0; index--) {
-    pushOwn(pending, {
+    pending.push({
       kind: "enter",
       value: ownField(items, index),
       invalidMessage: `items entry ${String(index)} must be a schema object with a supported non-empty type`,
@@ -91,7 +90,7 @@ export function pushCompositionChildren(
     if (keyword === undefined || !Object.hasOwn(schema, keyword)) continue;
     const branches = getCompositionBranches(schema, keyword);
     for (let index = branches.length - 1; index >= 0; index--) {
-      pushOwn(pending, {
+      pending.push({
         kind: "enter",
         value: ownField(branches, index),
         invalidMessage:

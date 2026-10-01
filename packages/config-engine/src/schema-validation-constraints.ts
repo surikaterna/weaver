@@ -124,11 +124,11 @@ function toDecimalNumber(value: number): DecimalNumber | undefined {
   if (!Number.isFinite(value)) return undefined;
   const match = DECIMAL_PATTERN.exec(String(value));
   if (match === null) return undefined;
-  const sign = ownField(match, 1) === "-" ? -1n : 1n;
-  const integer = ownField(match, 2);
+  const sign = match[1] === "-" ? -1n : 1n;
+  const integer = match[2];
   if (integer === undefined) return undefined;
-  const fraction = ownField(match, 3) ?? "";
-  const exponent = Number(ownField(match, 4) ?? "0");
+  const fraction = match[3] ?? "";
+  const exponent = Number(match[4] ?? "0");
   let coefficient = sign * BigInt(`${integer}${fraction}`);
   let scale = fraction.length - exponent;
   if (scale < 0) {

@@ -11,12 +11,7 @@ import {
   readMemberSchemas,
 } from "./registered-read-metadata";
 import type { CanonicalSchemaRegistryReader } from "./registry-contracts";
-import {
-  appendOwn,
-  mapOwn,
-  ownValue,
-  ownValues,
-} from "./structural-witness-own-data";
+import { ownValue } from "./structural-witness-own-data";
 
 interface AnchorNode {
   readonly children: Map<string, AnchorNode>;
@@ -39,7 +34,7 @@ export function captureReadAnchors(
 ): AnchorNode {
   const root: AnchorNode = { children: new Map() };
   const identities = reader.listRegisteredSchemaIdentities();
-  for (const identity of ownValues(identities.anchors)) {
+  for (const identity of identities.anchors) {
     if (identity.environment !== environment) continue;
     const captured = reader.resolveAnchor(identity.path, environment);
     if (!captured || captured.path !== identity.path) continue;
@@ -101,10 +96,8 @@ class ReadContexts {
     ancestorDenied: boolean,
   ): ReadContext {
     const evidence = expandReadEvidence(schemas, candidate);
-    const parts: number[] = [];
-    for (const schema of ownValues(evidence.schemas))
-      appendOwn(parts, this.id(schema));
-    const sourceIds = mapOwn(ownValues(sources), (value) => this.id(value));
+    const parts = evidence.schemas.map((schema) => this.id(schema));
+    const sourceIds = sources.map((value) => this.id(value));
     const key = `${inherited || evidence.forbidden}:${ancestorDenied}:${uncertain || evidence.ambiguous}:${anchor ? this.id(anchor) : ""}:${parts.join(",")}:${sourceIds.join(",")}`;
     let values = this.contextKeys.get(key);
     if (!values) {
@@ -134,12 +127,12 @@ class ReadContexts {
       (this.referenceDenial?.(parent) ?? false);
     const anchor = parent.anchor?.children.get(key);
     const schemas = readMemberSchemas(parent.evidence, key, parent.candidate);
-    if (anchor?.schema) appendOwn(schemas, anchor.schema);
+    if (anchor?.schema) schemas.push(anchor.schema);
     const candidate =
       parent.candidate !== null && typeof parent.candidate === "object"
         ? ownValue(parent.candidate, key)
         : undefined;
-    const sources = mapOwn(ownValues(parent.sources), (value) =>
+    const sources = parent.sources.map((value) =>
       value !== null && typeof value === "object"
         ? ownValue(value, key)
         : undefined,
@@ -167,7 +160,7 @@ class ReadContexts {
   }
   at(segments: readonly string[]): ReadContext {
     let context = this.root;
-    for (const key of ownValues(segments)) context = this.child(context, key);
+    for (const key of segments) context = this.child(context, key);
     return context;
   }
 }

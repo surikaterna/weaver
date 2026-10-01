@@ -23,7 +23,6 @@ export function validateSchemaNode(
   )
     return false;
   if (!validateMultipleOfDefinition(schema, path, context)) return false;
-  if (!validateScalarDefinitions(schema, path, context)) return false;
   if (!validatePatternDefinition(schema, path, context)) return false;
   return validatePatternProperties(schema, path, context);
 }
@@ -118,36 +117,4 @@ function hasDenseDataSlots(
       return false;
   }
   return true;
-}
-
-function validateScalarDefinitions(
-  schema: ConfigurationPropertySchema,
-  path: ValidationPath,
-  context: ValidationContext,
-): boolean {
-  for (const key of [
-    "minLength",
-    "maxLength",
-    "minimum",
-    "maximum",
-    "exclusiveMinimum",
-    "exclusiveMaximum",
-    "minItems",
-    "maxItems",
-    "minProperties",
-    "maxProperties",
-  ] as const) {
-    const value = ownField(schema, key);
-    if (value === undefined || typeof value === "number") continue;
-    addContextError(context, "invalid-schema", path, {
-      message: `${key} must be a number`,
-    });
-    return false;
-  }
-  const unique = ownField(schema, "uniqueItems");
-  if (unique === undefined || typeof unique === "boolean") return true;
-  addContextError(context, "invalid-schema", path, {
-    message: "uniqueItems must be a boolean",
-  });
-  return false;
 }

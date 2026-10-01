@@ -6,7 +6,7 @@ import { join, sep } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import { exercise, internalExports, rootExports } from "./operation-support-fixture.mjs";
 import { fixture, requireTool } from "./packed-consumer-helper.mjs";
-import { ownDataExercise } from "./structural-witness-own-data-helper.mjs";
+import { witnessExercise } from "./structural-witness-regressions.mjs";
 import { readProjectionExercise } from "./read-projection-fixture.mjs";
 import { exerciseDomainBoundaries } from "../../config-types/test/domain-boundary-fixture.mjs";
 import { ancestorProjectionExercise } from "./read-projection-ancestor-fixture.mjs";
@@ -43,7 +43,7 @@ export async function browserGraphs(directory) {
        runInContext(`const { api, support, engine, types } = packed;
         if (typeof process !== 'undefined' || typeof Buffer !== 'undefined' || typeof require !== 'undefined') throw Error('Node globals');
          ${exercise}
-          ${ownDataExercise}
+          ${witnessExercise}
           ${readProjectionExercise}
           ${ancestorProjectionExercise}
           (${exerciseDomainBoundaries.toString()})(types, engine, support);`, context);

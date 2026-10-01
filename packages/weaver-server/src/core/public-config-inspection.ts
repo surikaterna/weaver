@@ -182,11 +182,7 @@ export function inspectPublicConfig(
 function resolutionSnapshot(layers: readonly ConfigInspectionLayer[]) {
   const ordered: ReturnType<typeof inspectionLayer>[] = [];
   for (let rank = 0; rank < layers.length; rank++) {
-    defineOwnData(
-      ordered,
-      String(rank),
-      inspectionLayer(ownData(layers, String(rank)), rank),
-    );
+    ordered.push(inspectionLayer(ownData(layers, String(rank)), rank));
   }
   return resolveConfigurationSnapshot({
     configuredRanks: ordered.length ? ordered.map((_, rank) => rank) : [0],

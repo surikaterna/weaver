@@ -1,5 +1,4 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { pushOwn } from "./own-data";
 import { ownEntries, ownField } from "./schema-validation-own-data";
 
 type GraphFrame =
@@ -12,7 +11,7 @@ export function collectConstraintRoots(
 ): void {
   for (const key of ["default", "const", "enum"] as const) {
     const value = ownField(schema, key);
-    if (isObjectValue(value)) pushOwn(roots, value);
+    if (isObjectValue(value)) roots.push(value);
   }
 }
 
@@ -22,7 +21,7 @@ export function hasObjectCycle(roots: readonly unknown[]): boolean {
     const root = roots[index];
     if (isObjectValue(root)) {
       pending ??= [];
-      pushOwn(pending, { kind: "enter", value: root });
+      pending.push({ kind: "enter", value: root });
     }
   }
   if (pending === undefined) return false;
@@ -39,7 +38,7 @@ export function hasObjectCycle(roots: readonly unknown[]): boolean {
     if (active.has(frame.value)) return true;
     if (completed.has(frame.value)) continue;
     active.add(frame.value);
-    pushOwn(pending, { kind: "exit", value: frame.value });
+    pending.push({ kind: "exit", value: frame.value });
     pushObjectChildren(frame.value, pending);
   }
   return false;
@@ -49,7 +48,7 @@ function pushObjectChildren(value: object, pending: GraphFrame[]): void {
   const children = ownEntries(value);
   for (let index = children.length - 1; index >= 0; index--) {
     const child = children[index]?.[1];
-    if (isObjectValue(child)) pushOwn(pending, { kind: "enter", value: child });
+    if (isObjectValue(child)) pending.push({ kind: "enter", value: child });
   }
 }
 

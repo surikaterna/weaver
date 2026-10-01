@@ -3,7 +3,6 @@ import {
   WeaverErrorInstance,
 } from "@weaver-conf/config-types";
 import { isPlainObject } from "./merge-traversal";
-import { pushOwn } from "./own-data";
 import { observeResolution } from "./resolution-observation";
 
 interface CopyTask {
@@ -69,7 +68,7 @@ function visit({ value, assign }: CopyTask, context: CopyContext): void {
   context.copies.set(value, target);
   observeResolution("copyNodes");
   assign(target);
-  pushOwn(tasks, () => {
+  tasks.push(() => {
     active.delete(value);
     Object.freeze(target);
   });
@@ -102,7 +101,7 @@ function scheduleProperties(
 }
 
 function schedule(context: CopyContext, task: CopyTask): void {
-  pushOwn(context.tasks, () => visit(task, context));
+  context.tasks.push(() => visit(task, context));
 }
 
 export function copySnapshotData(
@@ -150,7 +149,7 @@ export function freezeSnapshotData<T>(value: T): T {
       if (!descriptor || !Object.hasOwn(descriptor, "value"))
         invalid("Unsafe freeze descriptor");
       const child: unknown = descriptor.value;
-      pushOwn(pending, child);
+      pending.push(child);
       observeResolution("freezeEdges");
     }
     Object.freeze(current);

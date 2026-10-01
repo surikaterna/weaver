@@ -1,10 +1,5 @@
 import { createWeaverError } from "@weaver-conf/config-types";
-import {
-  defineOwnData,
-  isPlainObject,
-  ownDataValue,
-  pushOwn,
-} from "./own-data";
+import { defineOwnData, isPlainObject, ownDataValue } from "./own-data";
 import { observeResolution } from "./resolution-observation";
 import {
   atomicOrigin,
@@ -225,7 +220,7 @@ function applyKey(
         if (result.origin) frame.children.set(key, result.origin);
       },
     );
-    pushOwn(frames, child);
+    frames.push(child);
     return;
   }
   defineOwnData(frame.result, key, value);

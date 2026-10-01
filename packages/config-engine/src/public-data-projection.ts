@@ -1,5 +1,5 @@
 import { copySnapshotData } from "./descriptor-copy";
-import { defineOwnData, ownDataValue, pushOwn } from "./own-data";
+import { defineOwnData, ownDataValue } from "./own-data";
 import type { ConfigurationProjectionVisitor } from "./projection-contracts";
 
 interface Traversal<C extends object> {
@@ -34,7 +34,7 @@ function schedule<C extends object>(
   assign: (output: unknown) => void,
   traversal: Traversal<C>,
 ): void {
-  pushOwn(traversal.tasks, () => visit(value, context, assign, traversal));
+  traversal.tasks.push(() => visit(value, context, assign, traversal));
 }
 
 function visit<C extends object>(
@@ -70,7 +70,7 @@ function visit<C extends object>(
       value: ownDataValue(value, "length"),
     });
   if (!traversal.visitor.mutableContainers)
-    pushOwn(traversal.tasks, () => {
+    traversal.tasks.push(() => {
       Object.freeze(output);
     });
   scheduleChildren(value, output, context, traversal);

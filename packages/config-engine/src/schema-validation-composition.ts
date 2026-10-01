@@ -1,5 +1,4 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { defineOwnData } from "./own-data";
 import { ownField } from "./schema-validation-own-data";
 
 import {
@@ -84,8 +83,8 @@ export function addCompositionResult(
   context: ValidationContext,
 ): void {
   if (compositionPassed(entry, matched)) return;
-  if (ownField(context, "predicateOnly") === true) {
-    defineOwnData(context, "failed", true);
+  if (context.predicateOnly === true) {
+    context.failed = true;
     return;
   }
   addContextError(context, "invalid-value", path, {
@@ -100,7 +99,7 @@ export function getMemoizedCompositionMatch(
   mode: ValidationMode,
 ): boolean | undefined {
   const modes = memo.get(schema)?.get(value);
-  return modes === undefined ? undefined : ownField(modes, mode);
+  return modes?.[mode];
 }
 
 export function memoizeCompositionMatch(
@@ -116,7 +115,7 @@ export function memoizeCompositionMatch(
     memo.set(schema, values);
   }
   const modes = values.get(value) ?? {};
-  defineOwnData(modes, mode, matches);
+  modes[mode] = matches;
   values.set(value, modes);
 }
 
@@ -155,10 +154,7 @@ function isSupportedType(value: string): boolean {
 }
 
 function ownDataValue(value: object, key: PropertyKey): unknown {
-  const descriptor = Object.getOwnPropertyDescriptor(value, key);
-  return descriptor !== undefined && Object.hasOwn(descriptor, "value")
-    ? descriptor.value
-    : undefined;
+  return Object.hasOwn(value, key) ? Reflect.get(value, key) : undefined;
 }
 
 function validateNotShape(

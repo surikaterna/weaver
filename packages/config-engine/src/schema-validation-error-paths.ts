@@ -1,7 +1,5 @@
-import { pushOwn } from "./own-data";
+import { ownDataValue } from "./own-data";
 import { parsePath } from "./path";
-import { inspectValidationData } from "./schema-validation-input-guard";
-import { ownField } from "./schema-validation-own-data";
 import type {
   PathSegmentsResult,
   SchemaValidationError,
@@ -37,12 +35,12 @@ export function materializeValidationPath(
   if (!isValidationPath(path)) return [];
   const suffix: SchemaValidationPathSegment[] = [];
   let cursor = path;
-  let parent = ownField(cursor, "parent");
+  let parent = cursor.parent;
   while (parent !== undefined) {
-    const segment = ownField(cursor, "segment");
-    if (segment !== undefined) pushOwn(suffix, segment);
+    const segment = cursor.segment;
+    if (segment !== undefined) suffix.push(segment);
     cursor = parent;
-    parent = ownField(cursor, "parent");
+    parent = cursor.parent;
   }
   suffix.reverse();
   return cursor.base.length === 0 ? suffix : [...cursor.base, ...suffix];
@@ -74,7 +72,7 @@ export function validationOptionsPath(
   if (
     options === null ||
     typeof options !== "object" ||
-    !inspectValidationData(options).safe
+    !hasOwnDataDescriptors(options)
   ) {
     return {
       segments: [],
@@ -85,7 +83,13 @@ export function validationOptionsPath(
       ),
     };
   }
-  return toPathSegmentsResult(ownField(options, "path"));
+  const path = ownDataValue(options, "path");
+  if (path === undefined || typeof path === "string" || Array.isArray(path))
+    return toPathSegmentsResult(path);
+  return {
+    segments: [],
+    error: makeError("invalid-path", [], "Invalid path options"),
+  };
 }
 
 export function toPathSegmentsResult(
@@ -114,7 +118,7 @@ function toArrayPathSegmentsResult(
   errorSegments: readonly SchemaValidationPathSegment[],
 ): PathSegmentsResult {
   const segments: SchemaValidationPathSegment[] = [];
-  if (!Array.isArray(path) || !inspectValidationData(path).safe) {
+  if (!Array.isArray(path) || !hasOwnDataDescriptors(path)) {
     return {
       segments,
       error: makeError(
@@ -125,9 +129,9 @@ function toArrayPathSegmentsResult(
     };
   }
   for (let index = 0; index < path.length; index++) {
-    const segment = ownField(path, index);
+    const segment = ownDataValue(path, index);
     if (isValidPathSegment(segment)) {
-      pushOwn(segments, segment);
+      segments.push(segment);
       continue;
     }
     return {
@@ -149,6 +153,31 @@ function isValidPathSegment(
     typeof segment === "string" ||
     (typeof segment === "number" && Number.isFinite(segment))
   );
+}
+
+function hasOwnDataDescriptors(value: object): boolean {
+  try {
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (
+      Array.isArray(value)
+        ? prototype !== Array.prototype
+        : prototype !== Object.prototype && prototype !== null
+    )
+      return false;
+    return Reflect.ownKeys(value).every((key) => {
+      if (typeof key !== "string") return false;
+      if (
+        Array.isArray(value) &&
+        key !== "length" &&
+        !/^(0|[1-9][0-9]*)$/.test(key)
+      )
+        return false;
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      return descriptor !== undefined && Object.hasOwn(descriptor, "value");
+    });
+  } catch {
+    return false;
+  }
 }
 
 function errorMessage(error: unknown): string {

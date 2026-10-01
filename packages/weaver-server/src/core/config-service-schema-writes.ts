@@ -11,7 +11,18 @@ import {
   type ConfigurationValidationSession,
   createConfigurationValidationSession,
 } from "@weaver-conf/config-engine/internal/schema-validation-session";
-import type { ScopeInstance, WriteResult } from "@weaver-conf/config-types";
+import type {
+  ConfigurationPropertySchema,
+  ScopeInstance,
+  WriteResult,
+} from "@weaver-conf/config-types";
+import {
+  admitAnchorSchema,
+  admitWriteSchema,
+  ownAnchorPath,
+  unsafeAnchor,
+  unsafeSchema,
+} from "./config-service-schema-admission";
 import {
   invalidPathValidation,
   normalizeCanonicalPath,
@@ -201,21 +212,23 @@ export async function prepareRegisteredObjectWrite(
 ): Promise<SchemaWritePreparation> {
   const resolved = await resolveWriteAnchor(path, options, defaultEnvironment);
   if (!resolved.success) return resolved;
-  if (resolved.path !== resolved.anchor.path) {
+  const anchorPath = ownAnchorPath(resolved.anchor);
+  if (anchorPath === undefined) return unsafeAnchor(resolved);
+  if (resolved.path !== anchorPath) {
     return writeFailure(
       "Object writes must target a registered schema anchor",
       {
         path: resolved.path,
-        anchorPath: resolved.anchor.path,
+        anchorPath,
         environment: resolved.environment,
       },
     );
   }
-  const validation = validatePartialConfiguration(
-    resolved.anchor.schema,
-    value,
-    { path: resolved.segments },
-  );
+  const admitted = admitWriteSchema(resolved);
+  if (!admitted.success) return admitted;
+  const validation = validatePartialConfiguration(admitted.schema, value, {
+    path: resolved.segments,
+  });
   if (!validation.valid) return validationFailure(validation, resolved);
   return preparedWrite(resolved.anchor, value);
 }
@@ -229,11 +242,15 @@ export async function prepareRegisteredPatchWrite(
 ): Promise<SchemaWritePreparation> {
   const resolved = await resolveWriteAnchor(path, options, defaultEnvironment);
   if (!resolved.success) return resolved;
-  const anchor = parseCanonicalConfigPath(resolved.anchor.path);
+  const anchorPath = ownAnchorPath(resolved.anchor);
+  if (anchorPath === undefined) return unsafeAnchor(resolved);
+  const anchor = parseCanonicalConfigPath(anchorPath);
   const relativeSegments = resolved.segments.slice(anchor.segments.length);
   const targetFailure = validatePatchTarget(resolved, relativeSegments);
   if (targetFailure !== null) return targetFailure;
-  const session = createConfigurationValidationSession(resolved.anchor.schema, {
+  const admitted = admitWriteSchema(resolved);
+  if (!admitted.success) return admitted;
+  const session = createConfigurationValidationSession(admitted.schema, {
     path: anchor.segments,
   });
   const patchValidation = session.validatePatch(relativeSegments, value);
@@ -245,6 +262,7 @@ export async function prepareRegisteredPatchWrite(
     relativeSegments,
     value,
     session,
+    admitted.schema,
     getLayerValue,
   );
 }
@@ -255,21 +273,21 @@ async function preparePatchedValue(
   segments: readonly string[],
   value: unknown,
   session: ConfigurationValidationSession,
+  schema: ConfigurationPropertySchema,
   getLayerValue: (key: string) => Promise<unknown>,
 ): Promise<SchemaWritePreparation> {
   const baseValue = await getLayerValue(anchor.storageKey);
-  const baseValidation = validateExistingLayerValue(
-    baseValue,
-    resolved,
-    session,
-  );
-  if (!baseValidation.success) return baseValidation;
-  const patch = buildSchemaPatch(
-    baseValue,
-    segments,
-    value,
-    resolved.anchor.schema,
-  );
+  const admitted = admitWriteSchema(resolved);
+  if (!admitted.success) return admitted;
+  if (admitted.schema !== schema)
+    session = createConfigurationValidationSession(admitted.schema, {
+      path: anchor.segments,
+    });
+  if (baseValue !== undefined) {
+    const validation = session.validatePartial(baseValue);
+    if (!validation.valid) return validationFailure(validation, resolved);
+  }
+  const patch = buildSchemaPatch(baseValue, segments, value, admitted.schema);
   if (!patch.success) return patchFailure(patch, resolved);
   const validation = session.validatePartial(patch.value);
   if (!validation.valid) return validationFailure(validation, resolved);
@@ -301,14 +319,21 @@ export async function validateRegisteredEffectiveConfiguration(
     normalized.value.path,
     environment,
   );
-  if (anchor === null || anchor.path !== normalized.value.path) {
+  const anchorPath = anchor === null ? undefined : ownAnchorPath(anchor);
+  if (anchor !== null && anchorPath === undefined)
+    return unsafeSchema(normalized.value.segments).validation;
+  if (anchor === null || anchorPath !== normalized.value.path) {
     return invalidPathValidation(
       `No registered schema anchor for path "${normalized.value.path}" in environment "${environment}"`,
       normalized.value.segments,
     );
   }
+  const admitted = admitAnchorSchema(anchor, normalized.value.segments);
+  if (!admitted.success) return admitted.validation;
   const value = await getEffectiveValue(normalized.value.storageKey);
-  return validateEffectiveConfiguration(anchor.schema, value, {
+  const current = admitAnchorSchema(anchor, normalized.value.segments);
+  if (!current.success) return current.validation;
+  return validateEffectiveConfiguration(current.schema, value, {
     path: normalized.value.segments,
   });
 }
@@ -355,18 +380,6 @@ async function resolveWriteAnchor(
     path: normalized.value.path,
     segments: normalized.value.segments,
   };
-}
-
-function validateExistingLayerValue(
-  value: unknown,
-  resolved: ResolvedWriteAnchor,
-  session: ConfigurationValidationSession,
-): SchemaWritePreparation {
-  if (value === undefined) return preparedWrite(resolved.anchor, value);
-  const validation = session.validatePartial(value);
-  return validation.valid
-    ? preparedWrite(resolved.anchor, value)
-    : validationFailure(validation, resolved);
 }
 
 function preparedWrite(

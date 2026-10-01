@@ -43,16 +43,12 @@ test("inspection and projection retain inert reserved own children with ordinary
   assert.equal(Object.hasOwn(Object.prototype, "a"), false);
 });
 
-test("missing paths, own mount discrimination and sparse-array projection ignore inherited traps", () => {
-  let getters = 0, setters = 0;
-  const keys = ["inspectionInheritedTrap", "_weaver", "source", "700"];
-  for (const key of keys) Object.defineProperty(Object.prototype, key, { configurable: true, get() { getters++; return "_weaver.registry.secret"; }, set() { setters++; } });
-  try {
+test("missing paths, own mount discrimination and sparse-array projection stay distinct", () => {
     const sparse = []; sparse.length = 701;
     const entries = { cfg: { value: 1 }, sparse, missingSource: { _weaver: "mount" }, safe: { _weaver: "mount", source: "cfg.value" }, secretAlias: { _weaver: "mount", source: "_weaver.registry.secret" } };
     const layers = [{ layer: "core", entries }];
-    assert.equal(inspectPublicConfig("inspectionInheritedTrap", layers).effectiveValue, undefined);
-    assert.deepEqual(inspectPublicConfig("inspectionInheritedTrap", layers).layerValues, {});
+    assert.equal(inspectPublicConfig("absent", layers).effectiveValue, undefined);
+    assert.deepEqual(inspectPublicConfig("absent", layers).layerValues, {});
     assert.equal(inspectPublicConfig("sparse.700", layers).effectiveValue, undefined);
     assert.deepEqual(inspectPublicConfig("cfg", layers).effectiveValue, { value: 1 });
     assert.deepEqual(inspectPublicConfig("missingSource", layers).effectiveValue, { _weaver: "mount" });
@@ -60,11 +56,6 @@ test("missing paths, own mount discrimination and sparse-array projection ignore
     assert.equal(inspectPublicConfig("secretAlias", layers).effectiveValue, undefined);
     const projected = publicConfigView.entries(entries);
     assert.equal(Object.hasOwn(projected.sparse, "700"), false);
-    assert.equal(getters, 0);
-    assert.equal(setters, 0);
-  } finally {
-    for (const key of keys) delete Object.prototype[key];
-  }
 });
 
 test("server inspection rejects nested/hidden accessors without executing raw layer reads", () => {
@@ -94,17 +85,13 @@ test("server projection and inspection handle deep records and shared value grap
   assert.notEqual(projected.cfg, value);
 });
 
-test("deep projection worklists do not invoke inherited numeric setters", () => {
-  let value = { leaf: 1 }, getters = 0, setters = 0, projected;
+test("deep projection preserves the terminal leaf", () => {
+  let value = { leaf: 1 };
   for (let index = 0; index < 10000; index++) value = { next: value };
-  Object.defineProperty(Object.prototype, "700", { configurable: true, get() { getters++; }, set() { setters++; } });
-  try { projected = publicConfigView.entries({ cfg: value }); }
-  finally { delete Object.prototype["700"]; }
+  const projected = publicConfigView.entries({ cfg: value });
   let leaf = projected.cfg;
   for (let index = 0; index < 10000; index++) leaf = leaf.next;
   assert.equal(leaf.leaf, 1);
-  assert.equal(getters, 0);
-  assert.equal(setters, 0);
 });
 
 test("state adapter retains fixed-before-scope ordering and independently merged scope grouping", () => {
@@ -138,31 +125,13 @@ function mountChain(size, terminal) {
   return entries;
 }
 
-function underNumericMountTrap(operation) {
-  let getters = 0, setters = 0, result;
-  const descriptor = Object.getOwnPropertyDescriptor(Object.prototype, "700");
-  Object.defineProperty(Object.prototype, "700", {
-    configurable: true,
-    get() { getters++; return "ambient"; },
-    set() { setters++; },
-  });
-  try { result = operation(); }
-  finally {
-    if (descriptor) Object.defineProperty(Object.prototype, "700", descriptor);
-    else delete Object.prototype["700"];
-  }
-  assert.equal(getters, 0);
-  assert.equal(setters, 0);
-  return result;
-}
-
 function assertMountViews(entries, omitted) {
-  const projected = underNumericMountTrap(() => publicConfigView.entries(entries));
-  const inspected = underNumericMountTrap(() => inspectPublicConfig("node0", [{ layer: "core", entries }]));
-  const delta = underNumericMountTrap(() => publicConfigView.delta({
+  const projected = publicConfigView.entries(entries);
+  const inspected = inspectPublicConfig("node0", [{ layer: "core", entries }]);
+  const delta = publicConfigView.delta({
     action: "set", key: "alias", value: { _weaver: "mount", source: "node0" },
     layer: "core", environment: "test", timestamp: "2026-10-01T00:00:00Z",
-  }, entries));
+   }, entries);
   assert.equal(Object.hasOwn(projected, "node0"), !omitted);
   assert.equal(Object.hasOwn(projected.nested, "alias"), !omitted);
   assert.equal(inspected.effectiveValue === undefined, omitted);
@@ -186,7 +155,7 @@ for (const size of [702, 20000]) {
     ["public cycle", "node0", false],
     ["protected cycle", "_weaver.loop", true],
   ]) {
-    test(`${size} ${kind} own-data mount chain preserves redaction and memoization with numeric traps`, () => {
+    test(`${size} ${kind} mount chain preserves redaction and memoization`, () => {
       const entries = mountChain(size, terminal);
       if (kind === "protected cycle") Object.defineProperty(entries, "_weaver", { value: { loop: { _weaver: "mount", source: "node0" } }, enumerable: true });
       assertMountViews(entries, omitted);

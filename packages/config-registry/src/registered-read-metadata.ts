@@ -5,7 +5,7 @@ import {
   objectMembers,
   validBranch,
 } from "./schema-write-support";
-import { appendOwn, ownField, ownValues } from "./structural-witness-own-data";
+import { ownField } from "./structural-witness-own-data";
 
 type Schema = ConfigurationPropertySchema;
 export interface ReadEvidence {
@@ -30,8 +30,7 @@ export function expandReadEvidence(
   schemas: readonly Schema[],
   candidate: unknown,
 ): ReadEvidence {
-  const pending: Schema[] = [];
-  for (const schema of ownValues(schemas)) appendOwn(pending, schema);
+  const pending = [...schemas];
   const seen = new Set<Schema>();
   const expanded: Schema[] = [];
   let forbidden = false;
@@ -40,7 +39,7 @@ export function expandReadEvidence(
     const schema = pending.pop();
     if (!schema || seen.has(schema)) continue;
     seen.add(schema);
-    appendOwn(expanded, schema);
+    expanded.push(schema);
     forbidden ||= restricted(schema);
     const alternatives = expandBranches(schema, candidate, pending);
     ambiguous ||= alternatives;
@@ -57,8 +56,7 @@ function expandBranches(
   candidate: unknown,
   pending: Schema[],
 ): boolean {
-  for (const branch of ownValues(ownField(schema, "allOf") ?? []))
-    appendOwn(pending, branch);
+  for (const branch of ownField(schema, "allOf") ?? []) pending.push(branch);
   let uncertain = false;
   for (const keyword of ["anyOf", "oneOf"] as const) {
     const branches = ownField(schema, keyword);
@@ -69,8 +67,8 @@ function expandBranches(
       (eligible.length === 0 || (keyword === "oneOf" && eligible.length !== 1))
     )
       uncertain = true;
-    for (const branch of ownValues(eligible.length ? eligible : branches))
-      appendOwn(pending, branch);
+    for (const branch of eligible.length ? eligible : branches)
+      pending.push(branch);
   }
   const negative = ownField(schema, "not");
   if (negative && candidate !== undefined && !validBranch(schema, candidate))
@@ -82,12 +80,9 @@ function eligibleBranches(
   branches: readonly Schema[],
   candidate: unknown,
 ): Schema[] {
-  const result: Schema[] = [];
-  if (candidate === undefined) return result;
-  for (const branch of ownValues(branches)) {
-    if (validBranch(branch, candidate)) appendOwn(result, branch);
-  }
-  return result;
+  return candidate === undefined
+    ? []
+    : branches.filter((branch) => validBranch(branch, candidate));
 }
 
 export function readMemberSchemas(
@@ -97,7 +92,7 @@ export function readMemberSchemas(
 ): Schema[] {
   const members: Schema[] = [];
   const seen = new Set<Schema>();
-  for (const schema of ownValues(evidence.schemas)) {
+  for (const schema of evidence.schemas) {
     const array = allows(schema, "array");
     const object = allows(schema, "object");
     const selected =
@@ -106,10 +101,10 @@ export function readMemberSchemas(
         : object
           ? objectMembers(schema, key)
           : [];
-    for (const member of ownValues(selected)) {
+    for (const member of selected) {
       if (seen.has(member)) continue;
       seen.add(member);
-      appendOwn(members, member);
+      members.push(member);
     }
   }
   return members;
@@ -125,7 +120,7 @@ export function readMemberIsAmbiguous(
     (candidate !== null && typeof candidate === "object")
   )
     return false;
-  for (const schema of ownValues(evidence.schemas)) {
+  for (const schema of evidence.schemas) {
     if (allows(schema, "array") && allows(schema, "object")) return true;
   }
   return false;
