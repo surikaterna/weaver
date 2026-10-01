@@ -3,6 +3,8 @@ import {
   WeaverErrorInstance,
 } from "@weaver-conf/config-types";
 import { isPlainObject } from "./merge-traversal";
+import { pushOwn } from "./own-data";
+import { observeResolution } from "./resolution-observation";
 
 interface CopyTask {
   readonly value: unknown;
@@ -13,6 +15,7 @@ interface CopyContext {
   readonly active: WeakSet<object>;
   readonly tasks: (() => void)[];
   readonly nullPrototype: boolean;
+  readonly copies: WeakMap<object, object>;
 }
 
 function invalid(message: string): never {
@@ -51,6 +54,11 @@ function visit({ value, assign }: CopyTask, context: CopyContext): void {
   if (Array.isArray(value) && Object.getPrototypeOf(value) !== Array.prototype)
     invalid("Snapshot requires standard array prototypes");
   if (active.has(value)) invalid("Cyclic snapshot data");
+  const existing = context.copies.get(value);
+  if (existing) {
+    assign(existing);
+    return;
+  }
   const descriptors = dataDescriptors(value);
   const target: Record<string, unknown> | unknown[] = Array.isArray(value)
     ? []
@@ -58,14 +66,26 @@ function visit({ value, assign }: CopyTask, context: CopyContext): void {
       ? Object.create(null)
       : {};
   active.add(value);
+  context.copies.set(value, target);
+  observeResolution("copyNodes");
   assign(target);
-  tasks.push(() => {
+  pushOwn(tasks, () => {
     active.delete(value);
     Object.freeze(target);
   });
+  scheduleProperties(value, target, descriptors, context);
+}
+
+function scheduleProperties(
+  source: object,
+  target: object,
+  descriptors: [string, PropertyDescriptor][],
+  context: CopyContext,
+): void {
   for (const [key, descriptor] of descriptors.reverse()) {
+    observeResolution("copyEdges");
     const child: unknown = descriptor.value;
-    if (Array.isArray(value) && key === "length") {
+    if (Array.isArray(source) && key === "length") {
       Object.defineProperty(target, "length", { value: child });
       continue;
     }
@@ -82,7 +102,7 @@ function visit({ value, assign }: CopyTask, context: CopyContext): void {
 }
 
 function schedule(context: CopyContext, task: CopyTask): void {
-  context.tasks.push(() => visit(task, context));
+  pushOwn(context.tasks, () => visit(task, context));
 }
 
 export function copySnapshotData(
@@ -94,6 +114,7 @@ export function copySnapshotData(
     active: new WeakSet(),
     tasks: [],
     nullPrototype,
+    copies: new WeakMap(),
   };
   schedule(context, {
     value: input,
@@ -112,15 +133,26 @@ export function copySnapshotData(
 
 export function freezeSnapshotData<T>(value: T): T {
   const pending: unknown[] = [value];
+  const visited = new WeakSet<object>();
   while (pending.length) {
     const current = pending.pop();
     if (
       current === null ||
       typeof current !== "object" ||
+      visited.has(current) ||
       Object.isFrozen(current)
     )
       continue;
-    pending.push(...Object.values(current));
+    visited.add(current);
+    observeResolution("freezeNodes");
+    for (const key of Object.getOwnPropertyNames(current)) {
+      const descriptor = Object.getOwnPropertyDescriptor(current, key);
+      if (!descriptor || !Object.hasOwn(descriptor, "value"))
+        invalid("Unsafe freeze descriptor");
+      const child: unknown = descriptor.value;
+      pushOwn(pending, child);
+      observeResolution("freezeEdges");
+    }
     Object.freeze(current);
   }
   return value;

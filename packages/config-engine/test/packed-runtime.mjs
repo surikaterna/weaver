@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { assertInstalled, toolRequire } from "./packed-consumer-helper.mjs";
 import { runInNewContext } from "node:vm";
 import { checkSnapshot } from "./snapshot-behavior.mjs";
+import { compactFixtureSource } from "./compact-behavior.mjs";
 
 const esbuild = createRequire(toolRequire.resolve("tsup"))("esbuild");
 
@@ -22,7 +23,7 @@ export async function checkRuntimeClosure(directory) {
       assert.deepEqual(output.imports, [], "No external runtime aliases or builtins");
     }
     const sandbox = { assert };
-    runInNewContext(`${result.outputFiles[0].text}\n(${checkSnapshot.toString()})(engine, assert);`, sandbox);
+    runInNewContext(`${result.outputFiles[0].text}\n(${checkSnapshot.toString()})(engine, assert);\n${compactFixtureSource}\ncheckCompactSnapshots(engine, assert);`, sandbox);
     console.log(`no-alias browser runtime closure: ${entry}, ${Object.keys(result.metafile.inputs).length} files`);
   }
 }

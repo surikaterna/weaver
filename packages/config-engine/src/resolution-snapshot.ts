@@ -1,36 +1,32 @@
 import { createWeaverError } from "@weaver-conf/config-types";
-import { copySnapshotData, freezeSnapshotData } from "./descriptor-copy";
-import {
-  isPlainObject,
-  type MergeObserver,
-  mergeRecords,
-} from "./merge-traversal";
-import { ownDataValue } from "./own-data";
+import { freezeSnapshotData } from "./descriptor-copy";
+import { mergeObservedRecords } from "./merge-traversal";
+import { isPlainObject, ownDataValue } from "./own-data";
 import { assertSafePathSegment } from "./path";
 import {
+  observeOriginGraph,
+  observeResolution,
+} from "./resolution-observation";
+import type { OriginNode, RecordOrigin } from "./resolution-origins";
+import { compileResolutionPolicy } from "./resolution-policy";
+import {
   type ConfigurationSnapshot,
-  configurationSnapshotSchema,
-  type ResolutionCeiling,
   type ResolutionLayer,
   type ResolutionOrigin,
   type ResolutionSnapshotInput,
-  type ResolutionTrace,
   type ResolvedPathInspection,
   resolutionPathSchema,
   resolutionSnapshotInputSchema,
 } from "./snapshot-contracts";
 
-const issuedSnapshots = new WeakSet<object>();
-
-function isPrefix(prefix: readonly string[], path: readonly string[]): boolean {
-  return (
-    prefix.length <= path.length &&
-    prefix.every((part, index) => part === path[index])
-  );
-}
+const issuedSnapshots = new WeakMap<object, RecordOrigin>();
 
 function originOf(layer: ResolutionLayer): ResolutionOrigin {
-  return { layer: layer.layer, providerId: layer.providerId, rank: layer.rank };
+  return Object.freeze({
+    layer: layer.layer,
+    providerId: layer.providerId,
+    rank: layer.rank,
+  });
 }
 
 function validatePlan(input: ResolutionSnapshotInput): void {
@@ -57,145 +53,98 @@ function validatePlan(input: ResolutionSnapshotInput): void {
   }
 }
 
-function allowed(
-  path: readonly string[],
-  value: unknown,
-  layer: ResolutionLayer,
-  ceilings: readonly ResolutionCeiling[],
-  base: unknown,
-): boolean {
-  if (layer.trustedEmergency === true) return true;
-  return !ceilings.some(
-    (ceiling) =>
-      layer.rank > ceiling.maxRank &&
-      (isPrefix(ceiling.path, path) ||
-        ((!isPlainObject(value) || Array.isArray(base)) &&
-          isPrefix(path, ceiling.path))),
-  );
-}
-
-function observerFor(
-  layer: ResolutionLayer,
-  ceilings: readonly ResolutionCeiling[],
-  trace: Map<string, ResolutionTrace>,
-): MergeObserver {
-  const origin = originOf(layer);
-  return {
-    allow: (path, value, base) => allowed(path, value, layer, ceilings, base),
-    replace: (path, value) => {
-      for (const [key, record] of trace) {
-        if (isPrefix(path, record.path) || isPrefix(record.path, path))
-          trace.delete(key);
-      }
-      if (!isPlainObject(value))
-        trace.set(JSON.stringify(path), { path, origin });
-    },
-    empty: (path) => {
-      const key = JSON.stringify(path);
-      trace.set(key, { path, origin });
-    },
-  };
-}
-
-/** Resolves detached plain data once; inspection never reruns a merge or provider. */
+/** Data DTOs serialize; exact issued object identity is the inspection handle. */
 export function resolveConfigurationSnapshot(
   input: ResolutionSnapshotInput,
 ): ConfigurationSnapshot {
-  const parsed = resolutionSnapshotInputSchema.safeParse(
-    copySnapshotData(input),
-  );
+  const parsed = resolutionSnapshotInputSchema.safeParse(input);
   if (!parsed.success)
     throw createWeaverError(
       "VALIDATION_ERROR",
       "Invalid resolution snapshot input",
     );
   validatePlan(parsed.data);
-  const trace = new Map<string, ResolutionTrace>();
+  const policy = compileResolutionPolicy(parsed.data.ceilings);
+  const emergency = compileResolutionPolicy([]);
   let entries: Record<string, unknown> = {};
+  let origin: RecordOrigin | undefined;
   for (const layer of parsed.data.layers) {
     if (Object.keys(layer.entries).length === 0) continue;
-    entries = mergeRecords(
-      entries,
-      layer.entries,
-      observerFor(layer, parsed.data.ceilings, trace),
-    );
+    const merged = mergeObservedRecords(entries, layer.entries, origin, {
+      origin: originOf(layer),
+      rank: layer.rank,
+      policy: layer.trustedEmergency ? emergency : policy,
+    });
+    entries = merged.entries;
+    origin = merged.origin;
   }
-  const snapshot = freezeSnapshotData({
-    entries,
-    layers: parsed.data.layers,
-    trace: [...trace.values()],
-  });
-  issuedSnapshots.add(snapshot);
+  const snapshot = freezeSnapshotData({ entries, layers: parsed.data.layers });
+  const root = origin ?? emptyOrigin();
+  issuedSnapshots.set(snapshot, root);
+  observeOriginGraph(root);
   return snapshot;
+}
+
+function emptyOrigin(): RecordOrigin {
+  return Object.freeze({
+    kind: "record",
+    children: new Map(),
+    summary: "empty",
+  });
 }
 
 function lookup(
   entries: unknown,
   path: readonly string[],
-): { present: boolean; value: unknown } {
+  origin?: OriginNode,
+) {
   let value = entries;
+  let current = origin;
   for (const segment of path) {
+    observeResolution("inspectSteps");
     if (
       (!isPlainObject(value) && !Array.isArray(value)) ||
       !Object.hasOwn(value, segment)
-    ) {
-      return { present: false, value: undefined };
-    }
+    )
+      return { present: false, value: undefined, origin: undefined };
     value = ownDataValue(value, segment);
+    if (current?.kind === "record") current = current.children.get(segment);
   }
-  return { present: true, value };
-}
-
-function winningOrigin(
-  snapshot: ConfigurationSnapshot,
-  path: readonly string[],
-): ResolutionOrigin | undefined {
-  const records = snapshot.trace.filter(
-    (record) => isPrefix(path, record.path) || isPrefix(record.path, path),
-  );
-  const first = records[0]?.origin;
-  if (!first) return undefined;
-  return records.every(
-    ({ origin }) =>
-      origin.layer === first.layer && origin.providerId === first.providerId,
-  )
-    ? first
-    : undefined;
+  return { present: true, value, origin: current };
 }
 
 export function inspectResolvedPath(
   snapshot: ConfigurationSnapshot,
   path: readonly string[],
 ): ResolvedPathInspection {
-  const parsed = resolutionPathSchema.safeParse(copySnapshotData(path));
+  const root = issuedSnapshots.get(snapshot);
+  if (!root)
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Inspection requires an engine-issued snapshot handle",
+    );
+  const parsed = resolutionPathSchema.safeParse(path);
   if (!parsed.success)
     throw createWeaverError("VALIDATION_ERROR", "Invalid resolution path");
   for (const segment of parsed.data) assertSafePathSegment(segment);
-  const safeSnapshot = validatedSnapshot(snapshot);
-  const effective = lookup(safeSnapshot.entries, parsed.data);
-  const origin = effective.present
-    ? winningOrigin(safeSnapshot, parsed.data)
-    : undefined;
-  const contributions = safeSnapshot.layers.map((layer) => ({
-    origin: originOf(layer),
-    ...lookup(layer.entries, parsed.data),
-  }));
-  return freezeSnapshotData({
+  const effective = lookup(snapshot.entries, parsed.data, root);
+  const summary = effective.origin?.summary;
+  const winner =
+    effective.present && typeof summary === "object" ? summary : undefined;
+  const contributions = snapshot.layers.map((layer) => {
+    const raw = lookup(layer.entries, parsed.data);
+    return Object.freeze({
+      origin: originOf(layer),
+      present: raw.present,
+      value: raw.value,
+    });
+  });
+  return Object.freeze({
     path: parsed.data,
     present: effective.present,
     effectiveValue: effective.value,
-    effectiveLayer: origin?.layer,
-    effectiveProviderId: origin?.providerId,
-    contributions,
+    effectiveLayer: winner?.layer,
+    effectiveProviderId: winner?.providerId,
+    contributions: Object.freeze(contributions),
   });
-}
-
-function validatedSnapshot(
-  snapshot: ConfigurationSnapshot,
-): ConfigurationSnapshot {
-  if (issuedSnapshots.has(snapshot)) return snapshot;
-  const parsed = configurationSnapshotSchema.safeParse(snapshot);
-  if (!parsed.success)
-    throw createWeaverError("VALIDATION_ERROR", "Invalid resolution snapshot");
-  return freezeSnapshotData(parsed.data);
 }

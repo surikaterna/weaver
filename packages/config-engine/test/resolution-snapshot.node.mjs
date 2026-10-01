@@ -41,8 +41,7 @@ test("reserved own data survives merging and every data schema without becoming 
   assert.equal(Object.hasOwn(parent.effectiveValue, "__proto__"), true);
   assert.notEqual(parent.contributions[0].value, first.cfg);
   assert.throws(() => { parent.contributions[0].value.prototype = 9; }, TypeError);
-  const reservedTrace = snapshot.trace.find(({ path }) => JSON.stringify(path) === '["cfg","__proto__","high"]');
-  assert.equal(reservedTrace.origin.providerId, "__proto__");
+  assert.deepEqual(Object.keys(snapshot).sort(), ["entries", "layers"]);
   const parsedInput = engine.resolutionSnapshotInputSchema.parse(input);
   const parsedLayer = engine.resolutionLayerSchema.parse(input.layers[0]);
   const parsedSnapshot = engine.configurationSnapshotSchema.parse(snapshot);
@@ -53,9 +52,8 @@ test("reserved own data survives merging and every data schema without becoming 
     assert.equal(Object.hasOwn(record, "constructor"), true);
     assert.equal(Object.hasOwn(record, "prototype"), true);
   }
-  assert.deepEqual(engine.resolutionTraceSchema.parse(reservedTrace), reservedTrace);
-  assert.deepEqual(engine.resolutionOriginSchema.parse(reservedTrace.origin), reservedTrace.origin);
-  assert.deepEqual(engine.resolutionPathSchema.parse(reservedTrace.path), reservedTrace.path);
+  assert.deepEqual(engine.resolutionOriginSchema.parse(parent.contributions[0].origin), parent.contributions[0].origin);
+  assert.deepEqual(engine.resolutionPathSchema.parse(["cfg", "__proto__"]), ["cfg", "__proto__"]);
   assert.deepEqual(engine.resolvedPathInspectionSchema.parse({ ...parent, path: ["__proto__"] }).path, ["__proto__"]);
   const roundtrip = JSON.parse(JSON.stringify(parsedSnapshot));
   assert.deepEqual(engine.configurationSnapshotSchema.parse(roundtrip).entries, snapshot.entries);
@@ -119,6 +117,7 @@ test("default semantics match legacy including inserted undefined and atomic res
   }
   assert.equal(inspect(resolve([layer(values[0])]), "cfg", "a").present, true);
   assert.equal(inspect(resolve([layer({ x: undefined })]), "x").present, false);
+  assert.equal(inspect(resolve([layer({ x: undefined })])).effectiveLayer, undefined);
   assert.equal(inspect(resolve([layer({ cfg: {} }), layer({ cfg: { a: 1 } }, 1)]), "cfg").effectiveLayer, "user");
   assert.equal(inspect(resolve([layer({ cfg: {} })]), "cfg").effectiveLayer, "core");
   assert.equal(inspect(resolve([layer({ cfg: {} }), layer({ cfg: {} }, 1)]), "cfg").effectiveLayer, "user");
@@ -187,7 +186,7 @@ test("acyclic sharing is detached, null prototypes accepted, all outputs frozen"
   const inspection = inspect(snapshot, "literal.dot", "日本語", "x");
   assert.equal(inspection.effectiveValue, 1);
   assert.notEqual(snapshot.entries.other, shared);
-  assert.notEqual(snapshot.entries.other, snapshot.entries["literal.dot"]["日本語"]);
+  assert.equal(snapshot.entries.other, snapshot.entries["literal.dot"]["日本語"], "immutable acyclic aliases are preserved");
   assert.throws(() => { snapshot.entries.other.x = 7; }, TypeError);
   assert.throws(() => { inspection.contributions[0].origin.layer = "evil"; }, TypeError);
   assert.equal(inspect(snapshot, "literal", "dot").present, false);

@@ -9,6 +9,7 @@ import { run, withConsumer } from "./packed-consumer-helper.mjs";
 import { strictDeclarations } from "./packed-declarations.mjs";
 import { checkRuntimeClosure } from "./packed-runtime.mjs";
 import { checkSnapshot } from "./snapshot-behavior.mjs";
+import { compactFixtureSource } from "./compact-behavior.mjs";
 
 test("packed root supports isolated ESM/CJS behavior and strict declarations", async () => {
   await withConsumer(async directory => {
@@ -18,12 +19,13 @@ test("packed root supports isolated ESM/CJS behavior and strict declarations", a
       const prelude = mode === "esm"
         ? 'import * as engine from "@weaver-conf/config-engine"; import assert from "node:assert/strict";'
         : 'const engine = require("@weaver-conf/config-engine"); const assert = require("node:assert/strict");';
-      await fs.writeFile(filename, `${prelude}\n(${checkRoot.toString()})(engine, assert);\n(${checkSnapshot.toString()})(engine, assert);`);
+      await fs.writeFile(filename, `${prelude}\n(${checkRoot.toString()})(engine, assert);\n(${checkSnapshot.toString()})(engine, assert);\n${compactFixtureSource}\ncheckCompactSnapshots(engine, assert);`);
       run(process.execPath, [filename], directory);
     }
     const require = createRequire(join(directory, "package.json"));
     for (const subpath of ["layers", "namespace", "contract-derivation", "schema-registry",
-      "json-schema-generator", "zod-schema-generator", "src/index.ts", "dist/index.js"]) {
+      "json-schema-generator", "zod-schema-generator", "resolution-origins", "resolution-policy",
+      "resolution-observation", "src/index.ts", "dist/index.js"]) {
       assert.throws(() => require.resolve(`@weaver-conf/config-engine/${subpath}`),
         { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" });
     }

@@ -72,6 +72,36 @@ test("server inspection rejects nested/hidden accessors without executing raw la
   assert.equal(calls, 0);
 });
 
+test("server projection and inspection handle deep records and shared value graphs iteratively", () => {
+  for (const depth of [3000, 10000]) {
+    let value = { leaf: 1 };
+    for (let index = 0; index < depth; index++) value = { next: value };
+    const inspection = inspectPublicConfig("cfg", [{ layer: "core", entries: { cfg: value } }]);
+    assert.equal(inspection.effectiveLayer, "core");
+    let leaf = inspection.effectiveValue;
+    for (let index = 0; index < depth; index++) leaf = leaf.next;
+    assert.equal(leaf.leaf, 1);
+  }
+  let value = { leaf: 1 };
+  for (let index = 0; index < 30; index++) value = { left: value, right: value };
+  const projected = publicConfigView.entries({ cfg: value });
+  assert.equal(projected.cfg.left, projected.cfg.right);
+  assert.notEqual(projected.cfg, value);
+});
+
+test("deep projection worklists do not invoke inherited numeric setters", () => {
+  let value = { leaf: 1 }, getters = 0, setters = 0, projected;
+  for (let index = 0; index < 10000; index++) value = { next: value };
+  Object.defineProperty(Object.prototype, "700", { configurable: true, get() { getters++; }, set() { setters++; } });
+  try { projected = publicConfigView.entries({ cfg: value }); }
+  finally { delete Object.prototype["700"]; }
+  let leaf = projected.cfg;
+  for (let index = 0; index < 10000; index++) leaf = leaf.next;
+  assert.equal(leaf.leaf, 1);
+  assert.equal(getters, 0);
+  assert.equal(setters, 0);
+});
+
 test("state adapter retains fixed-before-scope ordering and independently merged scope grouping", () => {
   const providers = [{ id: "base", layer: "user" }, { id: "scope1", layer: "tenant:t" }, { id: "scope2", layer: "site:s" }];
   const data = new Map([

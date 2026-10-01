@@ -1,5 +1,13 @@
 import { createWeaverError } from "@weaver-conf/config-types";
 
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") return false;
+  const proto: unknown = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 export function ownDataValue(value: object, key: string): unknown {
   const descriptor = Object.getOwnPropertyDescriptor(value, key);
   if (!descriptor) return undefined;
@@ -24,4 +32,8 @@ export function defineOwnData(
     configurable: true,
     writable: true,
   });
+}
+
+export function pushOwn<T>(values: T[], value: T): void {
+  defineOwnData(values, String(values.length), value);
 }

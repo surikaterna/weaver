@@ -117,16 +117,6 @@ export type ResolutionSnapshotInput = z.infer<
   typeof resolutionSnapshotInputSchema
 >;
 
-export const resolutionTraceSchema = guarded(
-  z
-    .strictObject({
-      path: literalPathSchema,
-      origin: resolutionOriginSchema,
-    })
-    .readonly(),
-);
-export type ResolutionTrace = z.infer<typeof resolutionTraceSchema>;
-
 export const resolutionContributionSchema = guarded(
   z
     .strictObject({
@@ -145,7 +135,6 @@ export const configurationSnapshotSchema = guarded(
     .strictObject({
       entries: dataRecordSchema,
       layers: denseArray(resolutionLayerSchema),
-      trace: denseArray(resolutionTraceSchema),
     })
     .readonly(),
 );

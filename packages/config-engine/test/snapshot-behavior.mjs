@@ -22,10 +22,11 @@ export function checkSnapshot(engine, assert) {
   assert.equal(Object.hasOwn(parent.effectiveValue, "__proto__"), true);
   assert.equal(Object.hasOwn(engine.configurationSnapshotSchema.parse(reserved).entries, "__proto__"), true);
   assert.equal(Object.hasOwn(engine.resolutionSnapshotInputSchema.parse({ configuredRanks: [0, 1], ceilings: [], layers: reserved.layers }).layers[0].entries, "__proto__"), true);
-  const trace = reserved.trace.find(({ path }) => path[0] === "cfg" && path[1] === "__proto__");
-  assert.equal(engine.resolutionTraceSchema.parse(trace).origin.providerId, "constructor");
   assert.equal(parent.effectiveValue.__proto__.higher, 2);
-  assert.equal(reserved.trace.find(({ path }) => path[0] === "cfg" && path[1] === "__proto__" && path[2] === "higher").origin.providerId, "higher");
+  assert.equal(Object.hasOwn(reserved, "trace"), false);
+  assert.throws(() => engine.inspectResolvedPath({ ...reserved }, ["cfg"]), error => error.code === "VALIDATION_ERROR");
+  assert.throws(() => engine.inspectResolvedPath(engine.configurationSnapshotSchema.parse(reserved), ["cfg"]), error => error.code === "VALIDATION_ERROR");
+  assert.throws(() => engine.inspectResolvedPath(JSON.parse(JSON.stringify(reserved)), ["cfg"]), error => error.code === "VALIDATION_ERROR");
   assert.throws(() => engine.inspectResolvedPath(reserved, ["cfg", "__proto__"]), error => error.code === "VALIDATION_ERROR");
   assert.throws(() => engine.resolveConfigurationSnapshot({ configuredRanks: [0], ceilings: [{ path: ["__proto__"], maxRank: 0 }], layers: [] }), error => error.code === "VALIDATION_ERROR");
   assert.equal(Object.hasOwn(Object.prototype, "child"), false);

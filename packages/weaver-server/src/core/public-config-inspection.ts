@@ -2,6 +2,7 @@ import {
   deepMerge,
   inspectResolvedPath,
   parsePath,
+  resolutionLayerSchema,
   resolveConfigurationSnapshot,
 } from "@weaver-conf/config-engine";
 import type {
@@ -72,9 +73,22 @@ function projectPublicEntries(
   entries: Record<string, unknown>,
   state: Record<string, unknown> = entries,
 ): Record<string, unknown> {
+  const safe = resolutionLayerSchema.parse({
+    layer: "projection",
+    providerId: "projection",
+    rank: 0,
+    entries: { view: entries, state },
+  }).entries;
+  const view = ownData(safe, "view");
+  const full = ownData(safe, "state");
+  if (!isRecord(view) || !isRecord(full))
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Invalid public projection data",
+    );
   return projectRecord(
-    filterProtectedConfigEntries(entries),
-    createMountTaintClassifier(state),
+    filterProtectedConfigEntries(view),
+    createMountTaintClassifier(full),
   );
 }
 
@@ -82,11 +96,12 @@ function projectRecord(
   value: Record<string, unknown>,
   classifier: MountTaintClassifier,
 ): Record<string, unknown> {
-  const projected: Record<string, unknown> = {};
-  for (const key of Object.keys(value)) {
-    const publicChild = projectValue(ownData(value, key), classifier);
-    if (publicChild !== omitted) defineOwnData(projected, key, publicChild);
-  }
+  const projected = projectValue(value, classifier);
+  if (!isRecord(projected))
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Invalid public record projection",
+    );
   return projected;
 }
 
@@ -94,22 +109,64 @@ function projectValue(
   value: unknown,
   classifier: MountTaintClassifier,
 ): unknown | typeof omitted {
+  let result: unknown;
+  const memo = new WeakMap<object, object>();
+  const tasks: (() => void)[] = [];
+  const schedule = (child: unknown, assign: (output: unknown) => void) =>
+    pushTask(tasks, () => projectChild(child, assign, memo, tasks, classifier));
+  schedule(value, (output) => {
+    result = output;
+  });
+  while (tasks.length) tasks.pop()?.();
+  return result;
+}
+
+function projectChild(
+  value: unknown,
+  assign: (output: unknown) => void,
+  memo: WeakMap<object, object>,
+  tasks: (() => void)[],
+  classifier: MountTaintClassifier,
+): void {
   const mount = ownMount(value);
   if (mount) {
-    return classifier.isTainted(mount) ? omitted : value;
+    assign(classifier.isTainted(mount) ? omitted : value);
+    return;
   }
-  if (Array.isArray(value)) {
-    const result: unknown[] = [];
+  if (!isRecord(value) && !Array.isArray(value)) {
+    assign(value);
+    return;
+  }
+  const existing = memo.get(value);
+  if (existing) {
+    assign(existing);
+    return;
+  }
+  const result: object = Array.isArray(value) ? [] : {};
+  memo.set(value, result);
+  assign(result);
+  if (Array.isArray(value))
     Object.defineProperty(result, "length", { value: value.length });
-    for (let index = 0; index < value.length; index++) {
-      const key = String(index);
-      if (!Object.hasOwn(value, key)) continue;
-      const projected = projectValue(ownData(value, key), classifier);
-      defineOwnData(result, key, projected === omitted ? undefined : projected);
-    }
-    return result;
+  for (const key of Object.keys(value).reverse()) {
+    if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key)) continue;
+    const child = ownData(value, key);
+    pushTask(tasks, () =>
+      projectChild(
+        child,
+        (output) => {
+          if (output !== omitted || Array.isArray(value))
+            defineOwnData(result, key, output === omitted ? undefined : output);
+        },
+        memo,
+        tasks,
+        classifier,
+      ),
+    );
   }
-  return isRecord(value) ? projectRecord(value, classifier) : value;
+}
+
+function pushTask(tasks: (() => void)[], task: () => void): void {
+  defineOwnData(tasks, String(tasks.length), task);
 }
 
 type ResolveEntries = (
@@ -142,7 +199,16 @@ function projectPublicDelta(
 ): ConfigDelta | null {
   if (isProtectedConfigPath(delta.key)) return null;
   if (delta.action === "remove") return delta;
-  const value = projectValue(delta.value, createMountTaintClassifier(state));
+  const safe = resolutionLayerSchema.parse({
+    layer: "delta",
+    providerId: "delta",
+    rank: 0,
+    entries: { value: delta.value },
+  }).entries;
+  const value = projectValue(
+    ownData(safe, "value"),
+    createMountTaintClassifier(state),
+  );
   return { ...delta, value: value === omitted ? undefined : value };
 }
 

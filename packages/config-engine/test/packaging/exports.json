@@ -47,7 +47,6 @@
   "resolutionOriginSchema",
   "resolutionPathSchema",
   "resolutionSnapshotInputSchema",
-  "resolutionTraceSchema",
   "resolveConfiguration",
   "resolveConfigurationSnapshot",
   "resolvedPathInspectionSchema",
