@@ -1,27 +1,27 @@
 import { createStaticJsonStorageProvider } from "../src/static-json-provider.ts";
 
 test("load returns cloned data", async () => {
-  const original = { "ghost.app.theme": "dark", "ghost.app.zoom": 5 };
+  const original = { "example.app.theme": "dark", "example.app.zoom": 5 };
   const provider = createStaticJsonStorageProvider({
     id: "static-1",
     layer: "core",
     data: original,
   });
   const data = await provider.load();
-  expect(data.entries).toEqual({ "ghost.app.theme": "dark", "ghost.app.zoom": 5 });
+  expect(data.entries).toEqual({ "example.app.theme": "dark", "example.app.zoom": 5 });
 });
 
 test("mutation of loaded data does not affect subsequent loads", async () => {
-  const original = { "ghost.app.theme": "dark" };
+  const original = { "example.app.theme": "dark" };
   const provider = createStaticJsonStorageProvider({
     id: "static-2",
     layer: "core",
     data: original,
   });
   const data1 = await provider.load();
-  data1.entries["ghost.app.theme"] = "changed-by-consumer";
+  data1.entries["example.app.theme"] = "changed-by-consumer";
   const data2 = await provider.load();
-  expect(data2.entries["ghost.app.theme"]).not.toBe("changed-by-consumer");
+  expect(data2.entries["example.app.theme"]).not.toBe("changed-by-consumer");
 });
 
 test("load returns deep clone (nested objects)", async () => {
@@ -43,7 +43,7 @@ test("write returns failure", async () => {
     layer: "core",
     data: {},
   });
-  const result = await provider.write("ghost.app.theme", "light");
+  const result = await provider.write("example.app.theme", "light");
   expect(result.success).toBe(false);
   expect(result.error.code).toBe("READONLY");
   expect(result.error.message).toBe("StaticJsonStorageProvider is read-only");

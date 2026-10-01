@@ -53,13 +53,13 @@ function createCountingProvider() {
   return { provider, mutationCount: () => mutationCount };
 }
 
-function fragmentRegistration(providerId = "ghost.settings.panel") {
+function fragmentRegistration(providerId = "example.settings.panel") {
   return {
     serviceId: "example-service",
     providerId,
     slotPath: "/plugins",
     environment: "default",
-    owner: { name: "Ghost", contact: "ghost@example.com" },
+    owner: { name: "Example Team", contact: "example@example.com" },
     schema: { type: "object" as const },
     schemaVersion: "0.4.0",
   };
@@ -152,7 +152,7 @@ describe("SchemaRegistry", () => {
         },
         {
           kind: "fragment",
-          path: "/example-service/plugins/ghost.settings.panel",
+          path: "/example-service/plugins/example.settings.panel",
           environment: "default",
         },
       ],
@@ -195,7 +195,7 @@ describe("SchemaRegistry", () => {
     });
     expect(
       registry.getRegisteredSchema(
-        "/example-service/plugins/ghost.settings.panel",
+        "/example-service/plugins/example.settings.panel",
         "default",
       ),
     ).toMatchObject({
@@ -206,13 +206,13 @@ describe("SchemaRegistry", () => {
     for (const path of [
       "/example-service/plugins",
       "/example-service/child",
-      "/example-service/plugins/ghost.settings.panel/child",
+      "/example-service/plugins/example.settings.panel/child",
     ]) {
       expect(registry.getRegisteredSchema(path, "default")).toBeNull();
     }
     expect(
       registry.getRegisteredSchema(
-        "/example-service/plugins/ghost.settings.panel",
+        "/example-service/plugins/example.settings.panel",
         "production",
       ),
     ).toBeNull();
@@ -237,7 +237,7 @@ describe("SchemaRegistry", () => {
     expect(
       (
         await registry.resolveAnchor(
-          "/example-service/plugins/ghost.settings.panel",
+          "/example-service/plugins/example.settings.panel",
           "default",
         )
       )?.schema,
@@ -287,7 +287,7 @@ describe("SchemaRegistry", () => {
         { kind: "service", path: "/example-service", environment: "default" },
         {
           kind: "fragment",
-          path: "/example-service/plugins/ghost.settings.panel",
+          path: "/example-service/plugins/example.settings.panel",
           environment: "default",
         },
       ],
@@ -302,7 +302,7 @@ describe("SchemaRegistry", () => {
     });
     expect(
       restarted.getRegisteredSchema(
-        "/example-service/plugins/ghost.settings.panel",
+        "/example-service/plugins/example.settings.panel",
         "default",
       )?.schema,
     ).toEqual(schema);
@@ -312,7 +312,7 @@ describe("SchemaRegistry", () => {
     expect(
       (
         await restarted.resolveAnchor(
-          "/example-service/plugins/ghost.settings.panel",
+          "/example-service/plugins/example.settings.panel",
           "default",
         )
       )?.schema,
@@ -378,15 +378,15 @@ describe("SchemaRegistry", () => {
       serviceId: "example-service",
       servicePath: "/example-service",
       canonicalSlotPath: "/example-service/plugins",
-      providerId: "ghost.settings.panel",
-      fragmentPath: "/example-service/plugins/ghost.settings.panel",
+      providerId: "example.settings.panel",
+      fragmentPath: "/example-service/plugins/example.settings.panel",
       environment: "default",
-      owner: { name: "Ghost", contact: "ghost@example.com" },
+      owner: { name: "Example Team", contact: "example@example.com" },
       schemaVersion: "0.4.0",
     });
     expect(Object.keys(registry.listAll())).toEqual([
       "/example-service:default",
-      "/example-service/plugins/ghost.settings.panel:default",
+      "/example-service/plugins/example.settings.panel:default",
     ]);
   });
 
@@ -595,7 +595,7 @@ describe("SchemaRegistry", () => {
       true,
     );
     expect(Object.keys(hydrated.listAll())).toContain(
-      "/example-service/plugins/ghost.settings.panel:default",
+      "/example-service/plugins/example.settings.panel:default",
     );
   });
 

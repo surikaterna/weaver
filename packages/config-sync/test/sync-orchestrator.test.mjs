@@ -51,7 +51,7 @@ function createTransportHarness() {
 test("offline boot reads cache snapshot without network", async () => {
   const cache = new MemoryDurableConfigCacheAdapter();
   await cache.saveSnapshot({
-    entries: { "ghost.theme": "dark" },
+    entries: { "example.theme": "dark" },
     revision: "rev-cached",
     lastSyncedAt: 100,
   });
@@ -65,7 +65,7 @@ test("offline boot reads cache snapshot without network", async () => {
   orchestrator.setOnline(false);
   const snapshot = await orchestrator.load();
 
-  expect(snapshot.entries["ghost.theme"]).toBe("dark");
+  expect(snapshot.entries["example.theme"]).toBe("dark");
   expect(harness.pushes.length).toBe(0);
   expect(harness.pulls.length).toBe(0);
   expect(orchestrator.getSyncState().status).toBe("offline");
@@ -82,7 +82,7 @@ test("reconnect flushes queued writes then pulls", async () => {
 
   orchestrator.setOnline(false);
   await orchestrator.load();
-  await orchestrator.write("ghost.theme", "dark");
+  await orchestrator.write("example.theme", "dark");
   expect((await cache.getQueueMetadata()).pendingCount).toBe(1);
 
   harness.pullQueue.push({
@@ -113,7 +113,7 @@ test("conflict path surfaces conflict state and server value", async () => {
 
   orchestrator.setOnline(false);
   await orchestrator.load();
-  await orchestrator.write("ghost.mode", "compact");
+  await orchestrator.write("example.mode", "compact");
   const queued = await cache.peekQueuedMutations(10);
 
   harness.pushQueue.push({
@@ -125,7 +125,7 @@ test("conflict path surfaces conflict state and server value", async () => {
         mutationId: queued[0].mutationId,
         accepted: false,
         conflict: {
-          key: "ghost.mode",
+          key: "example.mode",
           mutationId: queued[0].mutationId,
           localRevision: "rev-10",
           serverRevision: "rev-22",
@@ -145,7 +145,7 @@ test("conflict path surfaces conflict state and server value", async () => {
   orchestrator.setOnline(true);
   const result = await orchestrator.sync();
   expect(result.conflicts.length).toBe(1);
-  expect(result.conflicts[0].key).toBe("ghost.mode");
+  expect(result.conflicts[0].key).toBe("example.mode");
   expect(orchestrator.getSyncState().status).toBe("conflict");
 });
 
@@ -161,7 +161,7 @@ test("lww-fallback requeues mutation after conflict", async () => {
 
   orchestrator.setOnline(false);
   await orchestrator.load();
-  await orchestrator.write("ghost.mode", "compact");
+  await orchestrator.write("example.mode", "compact");
   const queued = await cache.peekQueuedMutations(10);
 
   harness.pushQueue.push({
@@ -173,7 +173,7 @@ test("lww-fallback requeues mutation after conflict", async () => {
         mutationId: queued[0].mutationId,
         accepted: false,
         conflict: {
-          key: "ghost.mode",
+          key: "example.mode",
           mutationId: queued[0].mutationId,
           localRevision: "rev-10",
           serverRevision: "rev-22",
@@ -214,7 +214,7 @@ test("retryable error keeps queue and schedules retry", async () => {
 
   orchestrator.setOnline(false);
   await orchestrator.load();
-  await orchestrator.write("ghost.retry", true);
+  await orchestrator.write("example.retry", true);
   const retryError = new Error("offline");
   retryError.code = "network";
   retryError.retryable = true;
@@ -259,8 +259,8 @@ test("tenant isolation via separate orchestrator instances with separate caches"
   b.setOnline(false);
   await a.load();
   await b.load();
-  await a.write("ghost.theme", "dark");
-  await b.write("ghost.theme", "light");
+  await a.write("example.theme", "dark");
+  await b.write("example.theme", "light");
 
   const queueA = await cacheA.peekQueuedMutations(10);
   const queueB = await cacheB.peekQueuedMutations(10);
@@ -283,7 +283,7 @@ test("error classification: SyncErrorMetadata object passes through unchanged", 
 
   orchestrator.setOnline(false);
   await orchestrator.load();
-  await orchestrator.write("ghost.key", "val");
+  await orchestrator.write("example.key", "val");
 
   const err = new Error("server error");
   err.code = "server";
@@ -307,7 +307,7 @@ test("error classification: plain Error gets code unknown and retryable false", 
 
   orchestrator.setOnline(false);
   await orchestrator.load();
-  await orchestrator.write("ghost.key", "val");
+  await orchestrator.write("example.key", "val");
 
   harness.pushQueue.push(new Error("something broke"));
 
@@ -328,7 +328,7 @@ test("error classification: error with syncError property is unwrapped", async (
 
   orchestrator.setOnline(false);
   await orchestrator.load();
-  await orchestrator.write("ghost.key", "val");
+  await orchestrator.write("example.key", "val");
 
   const wrapper = new Error("wrapper");
   wrapper.syncError = { code: "timeout", message: "timed out", retryable: true };
@@ -385,16 +385,16 @@ test("remove() creates a remove mutation and deletes key from snapshot", async (
 
   orchestrator.setOnline(false);
   await orchestrator.load();
-  await orchestrator.write("ghost.theme", "dark");
-  await orchestrator.remove("ghost.theme");
+  await orchestrator.write("example.theme", "dark");
+  await orchestrator.remove("example.theme");
 
   const queued = await cache.peekQueuedMutations(10);
   const removeMutation = queued.find((m) => m.operation === "remove");
   expect(removeMutation).toBeTruthy();
-  expect(removeMutation.key).toBe("ghost.theme");
+  expect(removeMutation.key).toBe("example.theme");
 
   const snapshot = await cache.loadSnapshot();
-  expect(snapshot.entries["ghost.theme"]).toBe(undefined);
+  expect(snapshot.entries["example.theme"]).toBe(undefined);
 });
 
 // --- Online/offline transitions ---
@@ -410,7 +410,7 @@ test("offline to online triggers sync", async () => {
 
   orchestrator.setOnline(false);
   await orchestrator.load();
-  await orchestrator.write("ghost.key", "val");
+  await orchestrator.write("example.key", "val");
 
   harness.pullQueue.push({
     cursor: { serverRevision: "rev-5", serverTime: 500 },
@@ -494,7 +494,7 @@ test("onDiagnosticsChange listener fires on diagnostics updates", async () => {
 
   orchestrator.setOnline(false);
   await orchestrator.load();
-  await orchestrator.write("ghost.key", "val");
+  await orchestrator.write("example.key", "val");
 
   expect(diagnosticsLog.length > 0).toBeTruthy();
 });
@@ -566,11 +566,11 @@ test("getPendingWrites contains written key before sync", async () => {
 
   orchestrator.setOnline(false);
   await orchestrator.load();
-  await orchestrator.write("ghost.pending", "value");
+  await orchestrator.write("example.pending", "value");
 
   const pending = orchestrator.getPendingWrites();
-  expect(pending.has("ghost.pending")).toBe(true);
-  expect(pending.get("ghost.pending")).toBe("value");
+  expect(pending.has("example.pending")).toBe(true);
+  expect(pending.get("example.pending")).toBe("value");
 });
 
 test("getPendingWrites is cleared after successful sync", async () => {
@@ -584,7 +584,7 @@ test("getPendingWrites is cleared after successful sync", async () => {
 
   orchestrator.setOnline(false);
   await orchestrator.load();
-  await orchestrator.write("ghost.pending", "value");
+  await orchestrator.write("example.pending", "value");
 
   harness.pullQueue.push({
     cursor: { serverRevision: "rev-5", serverTime: 500 },
@@ -596,7 +596,7 @@ test("getPendingWrites is cleared after successful sync", async () => {
   await orchestrator.sync();
 
   const pending = orchestrator.getPendingWrites();
-  expect(pending.has("ghost.pending")).toBe(false);
+  expect(pending.has("example.pending")).toBe(false);
   expect(pending.size).toBe(0);
 });
 

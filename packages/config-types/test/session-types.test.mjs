@@ -88,8 +88,8 @@ test("overrideSessionSchema accepts a valid session", () => {
     reason: "Production debugging incident #42",
     isActive: true,
     overrides: {
-      "ghost.debug.enabled": true,
-      "ghost.log.level": "verbose",
+      "example.debug.enabled": true,
+      "example.log.level": "verbose",
     },
   };
 
@@ -269,14 +269,14 @@ test("OverrideSession round-trip: construct, validate, check fields", () => {
     activatedBy: "operator-1",
     reason: "Performance investigation",
     isActive: true,
-    overrides: { "ghost.perf.tracing": true },
+    overrides: { "example.perf.tracing": true },
   };
 
   const parsed = overrideSessionSchema.parse(input);
   expect(parsed.id).toBe("rt-session-1");
   expect(parsed.activatedBy).toBe("operator-1");
   expect(parsed.isActive).toBe(true);
-  expect(parsed.overrides).toEqual({ "ghost.perf.tracing": true });
+  expect(parsed.overrides).toEqual({ "example.perf.tracing": true });
 });
 
 test("SessionActivationRequest round-trip: construct, validate, check fields", () => {

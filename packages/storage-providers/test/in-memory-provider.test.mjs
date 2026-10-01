@@ -13,10 +13,10 @@ test("constructs with initial entries", async () => {
   const provider = createInMemoryStorageProvider({
     id: "mem-2",
     layer: "session",
-    initialEntries: { "ghost.app.theme": "dark" },
+    initialEntries: { "example.app.theme": "dark" },
   });
   const data = await provider.load();
-  expect(data.entries).toEqual({ "ghost.app.theme": "dark" });
+  expect(data.entries).toEqual({ "example.app.theme": "dark" });
 });
 
 test("load returns a snapshot (not a live reference)", async () => {
@@ -36,10 +36,10 @@ test("write adds entries", async () => {
     id: "mem-4",
     layer: "session",
   });
-  const result = await provider.write("ghost.app.zoom", 5);
+  const result = await provider.write("example.app.zoom", 5);
   expect(result.success).toBe(true);
   const data = await provider.load();
-  expect(data.entries.ghost.app.zoom).toBe(5);
+  expect(data.entries.example.app.zoom).toBe(5);
 });
 
 test("write overwrites existing entries", async () => {

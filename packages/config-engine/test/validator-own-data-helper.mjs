@@ -89,7 +89,7 @@ function validatorPrototype(counter) {
   const prototype = Object.create(null);
   for (const key of ["type", "properties", "items", "anyOf", "oneOf", "allOf", "not",
     "required", "default", "const", "enum", "minimum", "pattern", "additionalProperties",
-    "0", "1", "700", "ghost", Symbol.toStringTag, Symbol.iterator]) {
+    "0", "1", "700", "example", Symbol.toStringTag, Symbol.iterator]) {
     Object.defineProperty(prototype, key, { get() { counter.calls++; return { type: "number" }; } });
   }
   return prototype;
@@ -227,7 +227,7 @@ function validatorBoundaryCases(engine, counter) {
     ...validatorRejected(engine, "required-hole", { type: "object", required: requiredHole }, {}, "invalid-schema"),
     ...validatorRejected(engine, "invalid-pattern", { type: "string", pattern: "(a+)+$" }, "a", "invalid-schema"),
     ...validatorRejected(engine, "invalid-multiple", { type: "number", multipleOf: 0 }, 1, "invalid-schema"),
-    ...validatorRejected(engine, "inherited-member-no-grant", inherited, { ghost: true }, "unknown-property"),
+    ...validatorRejected(engine, "inherited-member-no-grant", inherited, { example: true }, "unknown-property"),
     ...validatorRejected(engine, "data-date", { type: "object", additionalProperties: true }, new Date(), "invalid-value"),
     ...validatorRejected(engine, "symbol-value", { type: "object", additionalProperties: true }, { value: Symbol("data") }, "invalid-value"),
     ...validatorRejected(engine, "noncoercive-required", { type: "object", required: [Object.create(null)] }, {}, "invalid-schema"),

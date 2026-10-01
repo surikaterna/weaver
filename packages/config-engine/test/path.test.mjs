@@ -31,8 +31,8 @@ test("parsePath: trailing bracket", () => {
   expect(parsePath("a.b[c.d]")).toEqual(["a", "b", "c.d"]);
 });
 
-test("parsePath: full Lynx example", () => {
-  expect(parsePath("lynx.plugins[ghost.settings.panel].retentionDays")).toEqual(["lynx", "plugins", "ghost.settings.panel", "retentionDays"]);
+test("parsePath: full application example", () => {
+  expect(parsePath("app.plugins[example.settings.panel].retentionDays")).toEqual(["app", "plugins", "example.settings.panel", "retentionDays"]);
 });
 
 test("parsePath: no brackets", () => {
@@ -106,7 +106,7 @@ test("buildPath: round-trip simple", () => {
 });
 
 test("buildPath: round-trip compound", () => {
-  const segments = ["lynx", "plugins", "ghost.settings.panel", "retentionDays"];
+  const segments = ["app", "plugins", "example.settings.panel", "retentionDays"];
   expect(parsePath(buildPath(segments))).toEqual(segments);
 });
 
@@ -124,7 +124,7 @@ test("buildPath: rejects dangerous segments", () => {
 // isCompoundSegment tests
 
 test("isCompoundSegment: compound", () => {
-  expect(isCompoundSegment("ghost.settings.panel")).toBe(true);
+  expect(isCompoundSegment("example.settings.panel")).toBe(true);
 });
 
 test("isCompoundSegment: simple", () => {
@@ -144,7 +144,7 @@ test("pathDepth: bracket path", () => {
 // validateKeyFormat with brackets
 
 test("validateKeyFormat: bracket key with 4 segments is valid", () => {
-  const result = validateKeyFormat("lynx.plugins[ghost.settings.panel].retentionDays");
+  const result = validateKeyFormat("app.plugins[example.settings.panel].retentionDays");
   expect(result.valid).toBe(true);
 });
 
@@ -171,7 +171,7 @@ test("validateKeyFormat: invalid chars in compound segment", () => {
 // extractNamespace with brackets
 
 test("extractNamespace: bracket key returns first two segments", () => {
-  expect(extractNamespace("lynx.plugins[ghost.settings.panel].retentionDays")).toBe("lynx.plugins");
+  expect(extractNamespace("app.plugins[example.settings.panel].retentionDays")).toBe("app.plugins");
 });
 
 test("extractNamespace: simple key unchanged behavior", () => {

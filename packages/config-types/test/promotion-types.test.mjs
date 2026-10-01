@@ -10,7 +10,7 @@ test("configAuditEntrySchema validates a valid entry", () => {
     timestamp: "2026-04-13T12:00:00Z",
     actor: "user-1",
     action: "set",
-    key: "ghost.app.theme",
+    key: "example.app.theme",
     layer: "tenant",
     scopePath: [{ scopeId: "tenant", value: "t-1" }],
     oldValue: "light",
@@ -37,7 +37,7 @@ test("configAuditEntrySchema validates plugin-management action types", () => {
       timestamp: "2026-04-13T12:00:00Z",
       actor: "user-1",
       action,
-      key: "ghost.pluginManager.registry",
+      key: "example.pluginManager.registry",
       layer: "module",
       isEmergencyOverride: false,
     };
@@ -53,7 +53,7 @@ test("configAuditEntrySchema rejects entry missing required field", () => {
     timestamp: "2026-04-13T12:00:00Z",
     actor: "user-1",
     action: "set",
-    key: "ghost.app.theme",
+    key: "example.app.theme",
     layer: "tenant",
     // missing isEmergencyOverride
   };
@@ -67,7 +67,7 @@ test("configAuditEntrySchema rejects unknown action values", () => {
     timestamp: "2026-04-13T12:00:00Z",
     actor: "user-1",
     action: "unknown-action",
-    key: "ghost.pluginManager.registry",
+    key: "example.pluginManager.registry",
     layer: "module",
     isEmergencyOverride: false,
   };
@@ -79,7 +79,7 @@ test("configAuditEntrySchema rejects unknown action values", () => {
 test("emergencyOverrideRecordSchema validates a valid record", () => {
   const record = {
     id: "override-1",
-    key: "ghost.app.maxConnections",
+    key: "example.app.maxConnections",
     actor: "ops-admin",
     reason: "Production incident #1234",
     scopePath: [{ scopeId: "tenant", value: "t-1" }],
@@ -94,7 +94,7 @@ test("emergencyOverrideRecordSchema validates a valid record", () => {
 test("emergencyOverrideRecordSchema validates record with regularized fields", () => {
   const record = {
     id: "override-2",
-    key: "ghost.app.maxConnections",
+    key: "example.app.maxConnections",
     actor: "ops-admin",
     reason: "Production incident #5678",
     scopePath: [{ scopeId: "tenant", value: "t-1" }],
@@ -111,7 +111,7 @@ test("emergencyOverrideRecordSchema validates record with regularized fields", (
 test("promotionRequestSchema validates a valid request", () => {
   const request = {
     id: "promo-1",
-    key: "ghost.app.featureFlag",
+    key: "example.app.featureFlag",
     fromValue: false,
     toValue: true,
     layer: "app",
@@ -128,7 +128,7 @@ test("promotionRequestSchema validates a valid request", () => {
 test("promotionRequestSchema rejects invalid status", () => {
   const request = {
     id: "promo-1",
-    key: "ghost.app.featureFlag",
+    key: "example.app.featureFlag",
     fromValue: false,
     toValue: true,
     layer: "app",

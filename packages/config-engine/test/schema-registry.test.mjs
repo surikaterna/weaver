@@ -3,8 +3,8 @@ import { composeConfigurationSchemas, createSchemaRegistry } from "../src/schema
 test("composes from single declaration", () => {
   const result = composeConfigurationSchemas([
     {
-      ownerId: "ghost.vesselView",
-      namespace: "ghost.vesselView",
+      ownerId: "example.vesselView",
+      namespace: "example.vesselView",
       properties: {
         theme: { type: "string", default: "dark" },
       },
@@ -12,25 +12,25 @@ test("composes from single declaration", () => {
   ]);
   expect(result.errors.length).toBe(0);
   expect(result.schemas.size).toBe(1);
-  expect(result.schemas.has("ghost.vesselView.theme")).toBeTruthy();
-  const entry = result.schemas.get("ghost.vesselView.theme");
-  expect(entry.ownerId).toBe("ghost.vesselView");
-  expect(entry.fullyQualifiedKey).toBe("ghost.vesselView.theme");
+  expect(result.schemas.has("example.vesselView.theme")).toBeTruthy();
+  const entry = result.schemas.get("example.vesselView.theme");
+  expect(entry.ownerId).toBe("example.vesselView");
+  expect(entry.fullyQualifiedKey).toBe("example.vesselView.theme");
   expect(entry.schema.type).toBe("string");
 });
 
 test("composes from multiple declarations", () => {
   const result = composeConfigurationSchemas([
     {
-      ownerId: "ghost.vesselView",
-      namespace: "ghost.vesselView",
+      ownerId: "example.vesselView",
+      namespace: "example.vesselView",
       properties: {
         theme: { type: "string" },
       },
     },
     {
-      ownerId: "ghost.fleetMap",
-      namespace: "ghost.fleetMap",
+      ownerId: "example.fleetMap",
+      namespace: "example.fleetMap",
       properties: {
         zoom: { type: "number", default: 5 },
       },
@@ -38,22 +38,22 @@ test("composes from multiple declarations", () => {
   ]);
   expect(result.errors.length).toBe(0);
   expect(result.schemas.size).toBe(2);
-  expect(result.schemas.has("ghost.vesselView.theme")).toBeTruthy();
-  expect(result.schemas.has("ghost.fleetMap.zoom")).toBeTruthy();
+  expect(result.schemas.has("example.vesselView.theme")).toBeTruthy();
+  expect(result.schemas.has("example.fleetMap.zoom")).toBeTruthy();
 });
 
 test("detects duplicate keys across declarations", () => {
   const result = composeConfigurationSchemas([
     {
       ownerId: "plugin-a",
-      namespace: "ghost.vesselView",
+      namespace: "example.vesselView",
       properties: {
         theme: { type: "string" },
       },
     },
     {
       ownerId: "plugin-b",
-      namespace: "ghost.vesselView",
+      namespace: "example.vesselView",
       properties: {
         theme: { type: "number" },
       },
@@ -69,8 +69,8 @@ test("validates key format and reports errors", () => {
   const result = composeConfigurationSchemas([
     {
       ownerId: "bad-plugin",
-      namespace: "ghost.bad",
-      // relativeKey "1invalid" → qualified key "ghost.bad.1invalid" has invalid segment
+      namespace: "example.bad",
+      // relativeKey "1invalid" → qualified key "example.bad.1invalid" has invalid segment
       properties: {
         "1invalid": { type: "string" },
       },
@@ -84,22 +84,22 @@ test("validates key format and reports errors", () => {
 test("qualifies relative keys with namespace", () => {
   const result = composeConfigurationSchemas([
     {
-      ownerId: "ghost.vesselView",
-      namespace: "ghost.vesselView",
+      ownerId: "example.vesselView",
+      namespace: "example.vesselView",
       properties: {
         "map.defaultZoom": { type: "number" },
       },
     },
   ]);
   expect(result.errors.length).toBe(0);
-  expect(result.schemas.has("ghost.vesselView.map.defaultZoom")).toBeTruthy();
+  expect(result.schemas.has("example.vesselView.map.defaultZoom")).toBeTruthy();
 });
 
 test("handles declarations with no properties", () => {
   const result = composeConfigurationSchemas([
     {
-      ownerId: "ghost.empty",
-      namespace: "ghost.empty",
+      ownerId: "example.empty",
+      namespace: "example.empty",
       properties: {},
     },
   ]);
@@ -110,8 +110,8 @@ test("handles declarations with no properties", () => {
 test("supports incremental register/get/getSchemasByOwner flows", () => {
   const registry = createSchemaRegistry();
   const registerResult = registry.register({
-    ownerId: "ghost.vesselView",
-    namespace: "ghost.vesselView",
+    ownerId: "example.vesselView",
+    namespace: "example.vesselView",
     properties: {
       theme: { type: "string", default: "dark" },
       zoom: { type: "number", default: 5 },
@@ -120,17 +120,17 @@ test("supports incremental register/get/getSchemasByOwner flows", () => {
 
   expect(registerResult.errors.length).toBe(0);
   expect(registerResult.registeredKeys).toEqual([
-    "ghost.vesselView.theme",
-    "ghost.vesselView.zoom",
+    "example.vesselView.theme",
+    "example.vesselView.zoom",
   ]);
 
-  const schema = registry.getSchema("ghost.vesselView.theme");
+  const schema = registry.getSchema("example.vesselView.theme");
   expect(schema).toBeTruthy();
-  expect(schema.ownerId).toBe("ghost.vesselView");
+  expect(schema.ownerId).toBe("example.vesselView");
   expect(schema.schema.type).toBe("string");
 
   expect(registry.getSchemas().size).toBe(2);
-  expect([...registry.getSchemasByOwner("ghost.vesselView").keys()]).toEqual(["ghost.vesselView.theme", "ghost.vesselView.zoom"]);
+  expect([...registry.getSchemasByOwner("example.vesselView").keys()]).toEqual(["example.vesselView.theme", "example.vesselView.zoom"]);
 });
 
 test("preserves first owner deterministically for duplicate keys", () => {
@@ -138,7 +138,7 @@ test("preserves first owner deterministically for duplicate keys", () => {
 
   const first = registry.register({
     ownerId: "plugin-a",
-    namespace: "ghost.vesselView",
+    namespace: "example.vesselView",
     properties: {
       theme: { type: "string" },
     },
@@ -147,7 +147,7 @@ test("preserves first owner deterministically for duplicate keys", () => {
 
   const second = registry.register({
     ownerId: "plugin-b",
-    namespace: "ghost.vesselView",
+    namespace: "example.vesselView",
     properties: {
       theme: { type: "number" },
     },
@@ -156,7 +156,7 @@ test("preserves first owner deterministically for duplicate keys", () => {
   expect(second.errors[0].type).toBe("duplicate-key");
   expect(second.errors[0].ownerIds).toEqual(["plugin-a", "plugin-b"]);
 
-  const composed = registry.getSchema("ghost.vesselView.theme");
+  const composed = registry.getSchema("example.vesselView.theme");
   expect(composed.ownerId).toBe("plugin-a");
   expect(composed.schema.type).toBe("string");
 });
@@ -166,14 +166,14 @@ test("rebinds key ownership when first owner unregisters", () => {
 
   registry.register({
     ownerId: "plugin-a",
-    namespace: "ghost.vesselView",
+    namespace: "example.vesselView",
     properties: {
       theme: { type: "string" },
     },
   });
   registry.register({
     ownerId: "plugin-b",
-    namespace: "ghost.vesselView",
+    namespace: "example.vesselView",
     properties: {
       theme: { type: "number" },
     },
@@ -182,7 +182,7 @@ test("rebinds key ownership when first owner unregisters", () => {
   const unregisterResult = registry.unregister("plugin-a");
   expect(unregisterResult.removedKeys).toEqual([]);
 
-  const composed = registry.getSchema("ghost.vesselView.theme");
+  const composed = registry.getSchema("example.vesselView.theme");
   expect(composed).toBeTruthy();
   expect(composed.ownerId).toBe("plugin-b");
   expect(composed.schema.type).toBe("number");
@@ -194,7 +194,7 @@ test("unregister removes all keys using owner index", () => {
 
   registry.register({
     ownerId: "plugin-a",
-    namespace: "ghost.multi",
+    namespace: "example.multi",
     properties: {
       alpha: { type: "string" },
       beta: { type: "boolean" },
@@ -203,8 +203,8 @@ test("unregister removes all keys using owner index", () => {
 
   const unregisterResult = registry.unregister("plugin-a");
   expect(unregisterResult.removedKeys).toEqual([
-    "ghost.multi.alpha",
-    "ghost.multi.beta",
+    "example.multi.alpha",
+    "example.multi.beta",
   ]);
   expect(registry.getSchemas().size).toBe(0);
   expect(registry.getSchemasByOwner("plugin-a").size).toBe(0);

@@ -36,10 +36,10 @@ describe("flattenObject", () => {
 
   it("wraps compound keys (dots in key names) in brackets", () => {
     const result = flattenObject({
-      plugins: { "ghost.settings.panel": { retentionDays: 30 } },
+      plugins: { "example.settings.panel": { retentionDays: 30 } },
     });
     expect(result).toEqual({
-      "plugins[ghost.settings.panel].retentionDays": 30,
+      "plugins[example.settings.panel].retentionDays": 30,
     });
   });
 

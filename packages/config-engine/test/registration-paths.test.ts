@@ -15,12 +15,12 @@ import {
 describe("schema registration paths", () => {
   it("round trips canonical paths, segments, and storage keys", () => {
     const parsed = parseCanonicalConfigPath(
-      "/lynx/plugins/ghost.settings.panel/enabled",
+      "/app/plugins/example.settings.panel/enabled",
     );
     expect(parsed).toEqual({
-      path: "/lynx/plugins/ghost.settings.panel/enabled",
-      segments: ["lynx", "plugins", "ghost.settings.panel", "enabled"],
-      storageKey: "lynx.plugins[ghost.settings.panel].enabled",
+      path: "/app/plugins/example.settings.panel/enabled",
+      segments: ["app", "plugins", "example.settings.panel", "enabled"],
+      storageKey: "app.plugins[example.settings.panel].enabled",
     });
     expect(canonicalConfigPathFromStorageKey(parsed.storageKey)).toEqual(
       parsed,
@@ -35,14 +35,14 @@ describe("schema registration paths", () => {
   });
 
   it("rejects malformed canonical path objects at the runtime boundary", () => {
-    const valid = parseCanonicalConfigPath("/lynx/plugins");
+    const valid = parseCanonicalConfigPath("/app/plugins");
     for (const malformed of [
-      { ...valid, path: "/lynx/wrong" },
-      { ...valid, storageKey: "lynx.wrong" },
+      { ...valid, path: "/app/wrong" },
+      { ...valid, storageKey: "app.wrong" },
       {
-        path: "/lynx/constructor",
-        segments: ["lynx", "constructor"],
-        storageKey: "lynx.constructor",
+        path: "/app/constructor",
+        segments: ["app", "constructor"],
+        storageKey: "app.constructor",
       },
     ]) {
       expect(canonicalConfigPathSchema.safeParse(malformed).success).toBe(
@@ -52,14 +52,12 @@ describe("schema registration paths", () => {
   });
 
   it("normalizes trailing slash and rejects non-canonical slash segments", () => {
-    expect(parseCanonicalConfigPath("/lynx/plugins/").path).toBe(
-      "/lynx/plugins",
-    );
+    expect(parseCanonicalConfigPath("/app/plugins/").path).toBe("/app/plugins");
     for (const path of [
-      "lynx/plugins",
-      "/lynx//plugins",
-      "/lynx/[plugins]",
-      "/lynx/bad]key",
+      "app/plugins",
+      "/app//plugins",
+      "/app/[plugins]",
+      "/app/bad]key",
     ]) {
       expect(() => parseCanonicalConfigPath(path)).toThrow();
     }
@@ -80,13 +78,17 @@ describe("schema registration paths", () => {
 
   it("derives fragment path from canonical slot path and providerId", () => {
     expect(
-      deriveFragmentPath("example-service", "/plugins", "ghost.settings.panel"),
+      deriveFragmentPath(
+        "example-service",
+        "/plugins",
+        "example.settings.panel",
+      ),
     ).toEqual({
       serviceId: "example-service",
       servicePath: "/example-service",
       canonicalSlotPath: "/example-service/plugins",
-      providerId: "ghost.settings.panel",
-      fragmentPath: "/example-service/plugins/ghost.settings.panel",
+      providerId: "example.settings.panel",
+      fragmentPath: "/example-service/plugins/example.settings.panel",
     });
   });
 
@@ -115,13 +117,13 @@ describe("schema registration paths", () => {
       for (const segment of ["__proto__", "constructor", "prototype"]) {
         const message = `Path segment "${segment}" is not allowed`;
         expect(() => deriveServicePath(segment)).toThrow(message);
-        expect(() => deriveCanonicalSlotPath("lynx", `/${segment}`)).toThrow(
+        expect(() => deriveCanonicalSlotPath("app", `/${segment}`)).toThrow(
           message,
         );
-        expect(() => deriveFragmentPath("lynx", "/plugins", segment)).toThrow(
+        expect(() => deriveFragmentPath("app", "/plugins", segment)).toThrow(
           message,
         );
-        expect(() => normalizeConfigPath(`/lynx/${segment}/polluted`)).toThrow(
+        expect(() => normalizeConfigPath(`/app/${segment}/polluted`)).toThrow(
           message,
         );
       }

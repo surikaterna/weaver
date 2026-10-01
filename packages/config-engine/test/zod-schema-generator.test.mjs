@@ -11,63 +11,63 @@ function entry(ownerId, schema) {
 
 describe("sanitizeKeyToIdentifier", () => {
   it("converts dots to underscores", () => {
-    expect(sanitizeKeyToIdentifier("ghost.shell.theme")).toBe("ghost_shell_theme");
+    expect(sanitizeKeyToIdentifier("example.shell.theme")).toBe("example_shell_theme");
   });
 
   it("converts hyphens to underscores", () => {
-    expect(sanitizeKeyToIdentifier("ghost.vessel-view.zoom")).toBe("ghost_vessel_view_zoom");
+    expect(sanitizeKeyToIdentifier("example.vessel-view.zoom")).toBe("example_vessel_view_zoom");
   });
 
   it("converts dots and hyphens together", () => {
-    expect(sanitizeKeyToIdentifier("ghost.my-plugin.setting")).toBe("ghost_my_plugin_setting");
+    expect(sanitizeKeyToIdentifier("example.my-plugin.setting")).toBe("example_my_plugin_setting");
   });
 });
 
 describe("generateZodForProperty", () => {
   it("generates z.string() for string type", () => {
     const result = generateZodForProperty(
-      "ghost.shell.theme",
-      entry("ghost.shell", { type: "string" }),
+      "example.shell.theme",
+      entry("example.shell", { type: "string" }),
     );
     expect(result).toBe("z.string()");
   });
 
   it("generates z.number() with min/max for number type", () => {
     const result = generateZodForProperty(
-      "ghost.map.zoom",
-      entry("ghost.map", { type: "number", minimum: 1, maximum: 20 }),
+      "example.map.zoom",
+      entry("example.map", { type: "number", minimum: 1, maximum: 20 }),
     );
     expect(result).toBe("z.number().min(1).max(20)");
   });
 
   it("generates z.boolean() for boolean type", () => {
     const result = generateZodForProperty(
-      "ghost.shell.enabled",
-      entry("ghost.shell", { type: "boolean" }),
+      "example.shell.enabled",
+      entry("example.shell", { type: "boolean" }),
     );
     expect(result).toBe("z.boolean()");
   });
 
   it("generates z.record for object type", () => {
     const result = generateZodForProperty(
-      "ghost.shell.layout",
-      entry("ghost.shell", { type: "object" }),
+      "example.shell.layout",
+      entry("example.shell", { type: "object" }),
     );
     expect(result).toBe("z.record(z.string(), z.unknown())");
   });
 
   it("generates z.array for array type", () => {
     const result = generateZodForProperty(
-      "ghost.shell.plugins",
-      entry("ghost.shell", { type: "array" }),
+      "example.shell.plugins",
+      entry("example.shell", { type: "array" }),
     );
     expect(result).toBe("z.array(z.unknown())");
   });
 
   it("generates nested object/array schemas", () => {
     const result = generateZodForProperty(
-      "ghost.shell.layout",
-      entry("ghost.shell", {
+      "example.shell.layout",
+      entry("example.shell", {
         type: "object",
         properties: {
           panels: {
@@ -87,40 +87,40 @@ describe("generateZodForProperty", () => {
 
   it("generates integer as z.number().int()", () => {
     const result = generateZodForProperty(
-      "ghost.map.grid",
-      entry("ghost.map", { type: "integer", minimum: 1, maximum: 9 }),
+      "example.map.grid",
+      entry("example.map", { type: "integer", minimum: 1, maximum: 9 }),
     );
     expect(result).toBe("z.number().int().min(1).max(9)");
   });
 
   it("uses first type for union type arrays in zod generation", () => {
     const result = generateZodForProperty(
-      "ghost.map.optionalGrid",
-      entry("ghost.map", { type: ["integer", "null"], default: 3 }),
+      "example.map.optionalGrid",
+      entry("example.map", { type: ["integer", "null"], default: 3 }),
     );
     expect(result).toBe("z.number().int().default(3)");
   });
 
   it("generates z.enum([...]) for string with enum", () => {
     const result = generateZodForProperty(
-      "ghost.shell.theme",
-      entry("ghost.shell", { type: "string", enum: ["dark", "light"] }),
+      "example.shell.theme",
+      entry("example.shell", { type: "string", enum: ["dark", "light"] }),
     );
     expect(result).toBe('z.enum(["dark", "light"])');
   });
 
   it("chains .default() for default values", () => {
     const result = generateZodForProperty(
-      "ghost.shell.theme",
-      entry("ghost.shell", { type: "string", default: "dark" }),
+      "example.shell.theme",
+      entry("example.shell", { type: "string", default: "dark" }),
     );
     expect(result).toBe('z.string().default("dark")');
   });
 
   it("chains min, max, and default for number type", () => {
     const result = generateZodForProperty(
-      "ghost.map.zoom",
-      entry("ghost.map", { type: "number", minimum: 1, maximum: 20, default: 5 }),
+      "example.map.zoom",
+      entry("example.map", { type: "number", minimum: 1, maximum: 20, default: 5 }),
     );
     expect(result).toBe("z.number().min(1).max(20).default(5)");
   });
@@ -129,9 +129,9 @@ describe("generateZodForProperty", () => {
 describe("generateZodSchemaSource", () => {
   it("produces valid header with import", () => {
     const schemas = new Map();
-    schemas.set("ghost.shell.theme", {
-      ownerId: "ghost.shell",
-      fullyQualifiedKey: "ghost.shell.theme",
+    schemas.set("example.shell.theme", {
+      ownerId: "example.shell",
+      fullyQualifiedKey: "example.shell.theme",
       schema: { type: "string", default: "dark" },
     });
 
@@ -141,34 +141,34 @@ describe("generateZodSchemaSource", () => {
 
   it("produces configSchemas record", () => {
     const schemas = new Map();
-    schemas.set("ghost.shell.theme", {
-      ownerId: "ghost.shell",
-      fullyQualifiedKey: "ghost.shell.theme",
+    schemas.set("example.shell.theme", {
+      ownerId: "example.shell",
+      fullyQualifiedKey: "example.shell.theme",
       schema: { type: "string", default: "dark" },
     });
-    schemas.set("ghost.map.zoom", {
-      ownerId: "ghost.map",
-      fullyQualifiedKey: "ghost.map.zoom",
+    schemas.set("example.map.zoom", {
+      ownerId: "example.map",
+      fullyQualifiedKey: "example.map.zoom",
       schema: { type: "number", minimum: 1, maximum: 20 },
     });
 
     const source = generateZodSchemaSource(schemas);
     expect(source.includes("export const configSchemas = {")).toBeTruthy();
-    expect(source.includes('"ghost.shell.theme": ghost_shell_theme,')).toBeTruthy();
-    expect(source.includes('"ghost.map.zoom": ghost_map_zoom,')).toBeTruthy();
+    expect(source.includes('"example.shell.theme": example_shell_theme,')).toBeTruthy();
+    expect(source.includes('"example.map.zoom": example_map_zoom,')).toBeTruthy();
     expect(source.includes("} as const;")).toBeTruthy();
   });
 
   it("produces individual exports with correct identifiers", () => {
     const schemas = new Map();
-    schemas.set("ghost.shell.theme", {
-      ownerId: "ghost.shell",
-      fullyQualifiedKey: "ghost.shell.theme",
+    schemas.set("example.shell.theme", {
+      ownerId: "example.shell",
+      fullyQualifiedKey: "example.shell.theme",
       schema: { type: "string", default: "dark" },
     });
 
     const source = generateZodSchemaSource(schemas);
-    expect(source.includes('export const ghost_shell_theme = z.string().default("dark");')).toBeTruthy();
+    expect(source.includes('export const example_shell_theme = z.string().default("dark");')).toBeTruthy();
   });
 
   it("handles empty schemas map", () => {
