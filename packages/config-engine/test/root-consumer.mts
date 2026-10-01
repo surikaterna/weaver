@@ -9,7 +9,7 @@ import {
 } from "@weaver-conf/config-engine";
 import type { ConfigurationLayerStack, ConfigurationInspection } from "@weaver-conf/config-types";
 
-const pkg: PackageJsonInput = { name: "@ghost/panel-plugin" };
+const pkg: PackageJsonInput = { name: "@example/panel-plugin" };
 const contract: ContractMetadata = deriveContractFromPackageJson(pkg);
 const namespace: string = deriveNamespace(pkg.name);
 const key: string = qualifyKey(namespace, "display.limit");

@@ -135,8 +135,8 @@ import {
   generateJsonSchema, generateZodSchemaSource,
 } from "@weaver-conf/config-engine";
 
-const contract = deriveContractFromPackageJson({ name: "@ghost/panel-plugin" });
-// namespace: "ghost.panel", version: "0.0.0", description: ""
+const contract = deriveContractFromPackageJson({ name: "@example/panel-plugin" });
+// namespace: "example.panel", version: "0.0.0", description: ""
 // weaver.configNamespace can explicitly override the derived namespace.
 const composed = composeConfigurationSchemas([{
   ownerId: contract.pluginId,
@@ -144,7 +144,7 @@ const composed = composeConfigurationSchemas([{
   properties: { "display.limit": { type: "integer", minimum: 1, default: 25 } },
 }]);
 if (composed.errors.length === 0) {
-  const jsonSchema = generateJsonSchema(composed.schemas, { title: "Ghost panel" });
+  const jsonSchema = generateJsonSchema(composed.schemas, { title: "Configuration panel" });
   const zodSource = generateZodSchemaSource(composed.schemas);
 }
 ```

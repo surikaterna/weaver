@@ -416,33 +416,33 @@ Deep merge handles per-plugin layer overrides naturally.
 
 #### Bracket Notation for Compound Key Identifiers
 
-Plugin IDs may be FQDNs containing dots (e.g., `ghost.settings.panel`).
+Plugin IDs may be FQDNs containing dots (e.g., `example.settings.panel`).
 Bracket notation disambiguates compound identifiers from path separators:
 
 ```
-lynx.plugins[ghost.settings.panel].retentionDays
+app.plugins[example.settings.panel].retentionDays
 ```
 
 The `get()` path parser understands brackets:
 
 ```typescript
-// "lynx.plugins[ghost.settings.panel].retentionDays"
-// parses to: ["lynx", "plugins", "ghost.settings.panel", "retentionDays"]
+// "app.plugins[example.settings.panel].retentionDays"
+// parses to: ["app", "plugins", "example.settings.panel", "retentionDays"]
 ```
 
 In JSON storage, the FQDN is a single property name:
 
 ```json
 {
-  "lynx": {
+  "app": {
     "plugins": {
-      "ghost.settings.panel": { "retentionDays": 90 }
+      "example.settings.panel": { "retentionDays": 90 }
     }
   }
 }
 ```
 
-Standard JSON -- `plugins["ghost.settings.panel"]` is valid.
+Standard JSON -- `plugins["example.settings.panel"]` is valid.
 
 ### 6. ServiceAccessPolicy
 

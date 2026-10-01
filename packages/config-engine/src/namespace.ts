@@ -96,7 +96,7 @@ export function validateKeyFormat(key: string): {
 /**
  * Extracts the namespace (first two segments) from a fully-qualified key.
  * "app.vesselView.map.zoom" → "app.vesselView"
- * "lynx.plugins[ghost.settings.panel].retentionDays" → "lynx.plugins"
+ * "app.plugins[example.settings.panel].retentionDays" → "app.plugins"
  */
 export function extractNamespace(fullyQualifiedKey: string): string {
   const segments = parsePath(fullyQualifiedKey);
