@@ -8,6 +8,7 @@ import { exercise, internalExports, rootExports } from "./operation-support-fixt
 import { fixture, requireTool } from "./packed-consumer-helper.mjs";
 import { ownDataExercise } from "./structural-witness-own-data-helper.mjs";
 import { readProjectionExercise } from "./read-projection-fixture.mjs";
+import { exerciseDomainBoundaries } from "../../config-types/test/domain-boundary-fixture.mjs";
 
 const { build } = requireTool("esbuild");
 
@@ -19,9 +20,9 @@ export async function browserGraphs(directory) {
       const cjs = mode === "cjs";
       const entry = await fixture(directory, `${boundary}-${mode}.${cjs ? "cjs" : "mjs"}`,
         cjs ? `const api = require('${specifier}'); const support = require('@weaver-conf/config-registry');
-          const engine = require('@weaver-conf/config-engine'); module.exports = { api, support, engine };`
+           const engine = require('@weaver-conf/config-engine'); const types = require('@weaver-conf/config-types'); module.exports = { api, support, engine, types };`
           : `import * as api from '${specifier}'; import * as support from '@weaver-conf/config-registry';
-          import * as engine from '@weaver-conf/config-engine'; export { api, support, engine };`);
+           import * as engine from '@weaver-conf/config-engine'; import * as types from '@weaver-conf/config-types'; export { api, support, engine, types };`);
       const result = await build({ entryPoints: [entry], absWorkingDir: directory, bundle: true, write: false,
         treeShaking: false, platform: "browser", format: "iife", globalName: "packed", metafile: true });
       const imports = [...Object.values(result.metafile.inputs), ...Object.values(result.metafile.outputs)]
@@ -38,11 +39,12 @@ export async function browserGraphs(directory) {
       console.log(`packed full ${boundary} ${mode} metafile: ${JSON.stringify(result.metafile)}`);
       const context = createContext({ crypto: webcrypto, structuredClone });
       runInContext(result.outputFiles[0].text, context);
-      runInContext(`const { api, support, engine } = packed;
+       runInContext(`const { api, support, engine, types } = packed;
         if (typeof process !== 'undefined' || typeof Buffer !== 'undefined' || typeof require !== 'undefined') throw Error('Node globals');
          ${exercise}
           ${ownDataExercise}
-          ${readProjectionExercise}`, context);
+          ${readProjectionExercise}
+          (${exerciseDomainBoundaries.toString()})(types, engine, support);`, context);
       const keys = JSON.parse(runInContext("JSON.stringify(Object.keys(api).sort())", context));
       assert.deepEqual(keys, boundary === "root" ? rootExports : internalExports);
       console.log(`packed ${boundary} ${mode}: ${inputs.length} full inputs, zero externals, real WebCrypto/engine`);

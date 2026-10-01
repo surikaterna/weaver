@@ -204,3 +204,12 @@ Its mount-chain loop delegates to `mount-source-classification`, whose private
 Protected lexical/logical checks live in `protected-config-paths`; mutation error
 formatting, scope/delta handling, and inspection assembly stay in server adapters.
 The resolution, merge, and provenance implementations are unchanged.
+### Snapshot/path schema migration
+
+Snapshot schemas and `canonicalConfigPathSchema` now delegate to co-located
+descriptor-first domain captures. Public input/output types and wire fields stay
+the same, while inferred concrete Zod container types change to transform adapters.
+Use `parse`/`safeParse` rather than `.in`/`.out` container introspection. Canonical
+root and trailing-slash behavior remains distinct from stricter service paths;
+`parsePath` and `buildPath` remain the sole storage codec. Schema parsing still
+does not issue or authenticate a resolution snapshot.

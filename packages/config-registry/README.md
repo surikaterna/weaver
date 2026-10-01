@@ -147,3 +147,10 @@ ancestor restriction, candidate, and raw source boundaries; shared values never
 grant access merely because another path allowed the same object. The registry
 still owns registration and longest-anchor authority. No host grants, mutation
 admission, persistence, mount evaluator, or secret backend is added here.
+### Registered-read schema migration
+
+The context and callable-shape schemas now use domain-backed transform adapters.
+Their input/output domain types and method signatures remain unchanged; concrete
+Zod object/preprocess introspection is no longer supported. Keep using
+`parse`/`safeParse`. Context identity validation shares the configuration-types
+capture predicates, and no shape parse authenticates a reader or snapshot.

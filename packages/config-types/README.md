@@ -104,3 +104,39 @@ All core types have corresponding Zod schemas exported from `schemas-core` and `
 ## License
 
 MIT
+## Domain schema adapters (pre-1 migration)
+
+The path/environment/identifier, configuration-service DTO/capability, and coupled
+snapshot/read schemas use descriptor-first domain captures rather than concrete
+Zod object, tuple, or preprocess containers. This is a minor breaking concrete
+schema API change during pre-1 development, not a domain or wire redesign.
+`z.input`, `z.output`, brands, nonempty readonly relative tuples, ordered identity
+scopes, and callable signatures are retained. Normal `parse`/`safeParse` usage is
+unchanged; failed domain checks return payload-safe Zod errors. Engine snapshot
+hazards retain their typed Weaver-error rejection before reads.
+
+Do not traverse `.in`/`.out`/`.shape` or use `unwrap`/`extend`/`pick` on the migrated
+schemas. Use domain helpers or declare an application-specific Zod schema instead:
+
+```ts
+import { captureConfigurationServiceIdentity } from "@weaver-conf/config-types";
+const result = captureConfigurationServiceIdentity(input);
+if (result.success) {
+  // Detached, frozen identity with its original ordered scope tuple.
+  consumeIdentity(result.value);
+}
+```
+
+`isRegistrationEnvironment`, `isPublicSlashPath`,
+`isLiteralConfigurationSegment`, and `isCanonicalConfigurationPath` are the same
+predicates used by public schemas. They do not normalize Unicode, decode paths,
+infer principals, or authenticate an inspection handle. Callable schema checks
+never invoke capabilities or prove their behavior. Unrelated concrete schemas,
+including `scopeInstanceSchema`, retain their object APIs.
+
+Captures inspect all own descriptors before domain fields, reject boundary-specific
+cycles/exotic containers/symbols, preserve acyclic sharing, and never freeze a
+borrowed input. Ordinary data arrays may retain holes; structural identity and
+contribution arrays must be dense. Snapshot data and service data retain their
+distinct reserved-key and executable-data rules. The storage codec remains the
+engine's existing `parsePath`/`buildPath` authority.
