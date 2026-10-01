@@ -1,3 +1,5 @@
+import { pushOwn } from "./own-data";
+
 export function deepEqual(a: unknown, b: unknown): boolean {
   const pending: ReadonlyArray<unknown>[] = [[a, b]];
   const visited = new WeakMap<object, WeakSet<object>>();
@@ -51,7 +53,8 @@ function queueArrayMembers(
   for (let index = 0; index < left.length; index++) {
     if (Object.hasOwn(left, index) !== Object.hasOwn(right, index))
       return false;
-    if (Object.hasOwn(left, index)) pending.push([left[index], right[index]]);
+    if (Object.hasOwn(left, index))
+      pushOwn(pending, [left[index], right[index]]);
   }
   return true;
 }
@@ -67,7 +70,7 @@ function queueObjectMembers(
   if (keys.length !== Object.keys(rightRecord).length) return false;
   for (const key of keys) {
     if (!Object.hasOwn(rightRecord, key)) return false;
-    pending.push([leftRecord[key], rightRecord[key]]);
+    pushOwn(pending, [leftRecord[key], rightRecord[key]]);
   }
   return true;
 }

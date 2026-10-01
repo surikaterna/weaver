@@ -1,3 +1,5 @@
+import { pushOwn } from "./own-data";
+
 interface DataDescriptorSnapshot {
   readonly configurable: boolean;
   readonly enumerable: boolean;
@@ -49,7 +51,7 @@ export function captureSchemaStability(
       if (snapshot === undefined) return { reusable: false };
       if (!records.has(entry.target)) {
         records.set(entry.target, snapshot);
-        objects.push(snapshot);
+        pushOwn(objects, snapshot);
       }
       queueObservableEdges(entry, snapshot.descriptors, pending);
     }
@@ -80,7 +82,7 @@ function captureObject(target: object): ObjectSnapshot | undefined {
       return undefined;
     }
     if (typeof descriptor.value === "function") return undefined;
-    descriptors.push(snapshotDescriptor(key, descriptor));
+    pushOwn(descriptors, snapshotDescriptor(key, descriptor));
   }
   return {
     descriptors,
@@ -154,7 +156,7 @@ function queueObject(
   pending: TraversalEntry[],
 ): void {
   if (typeof value === "object" && value !== null) {
-    pending.push({ kind, target: value });
+    pushOwn(pending, { kind, target: value });
   }
 }
 

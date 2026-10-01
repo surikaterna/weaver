@@ -4,6 +4,7 @@ import {
   createWeaverError,
   isReservedPathSegment,
 } from "@weaver-conf/config-types";
+import { pushOwn } from "./own-data";
 
 export function assertSafePathSegment(segment: string): void {
   if (isReservedPathSegment(segment)) {
@@ -119,7 +120,7 @@ function closePlainSegment(state: PathParserState): void {
 }
 
 function pushCurrentSegment(state: PathParserState): void {
-  state.segments.push(state.current);
+  pushOwn(state.segments, state.current);
   state.current = "";
 }
 
