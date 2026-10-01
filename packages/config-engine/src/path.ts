@@ -51,7 +51,7 @@ function parseNextCharacter(state: PathParserState): void {
 }
 
 function parseBracketCharacter(state: PathParserState): void {
-  const character = state.path[state.index];
+  const character = state.path.charAt(state.index);
   if (character === "[") {
     invalidAt(state, "Nested brackets");
   }
@@ -78,7 +78,7 @@ function closeBracket(state: PathParserState): void {
 
 function consumePostBracketSeparator(state: PathParserState): void {
   if (state.index >= state.path.length) return;
-  const character = state.path[state.index];
+  const character = state.path.charAt(state.index);
   if (character === "[") return;
   if (character !== ".") {
     invalidAt(state, "Expected '.' or '[' after ']'");
@@ -88,7 +88,7 @@ function consumePostBracketSeparator(state: PathParserState): void {
 }
 
 function parsePlainCharacter(state: PathParserState): void {
-  const character = state.path[state.index];
+  const character = state.path.charAt(state.index);
   if (character === "]") invalidAt(state, "Unmatched ']'");
   if (character === "[") {
     openBracket(state);
@@ -106,7 +106,8 @@ function openBracket(state: PathParserState): void {
   if (state.current.length > 0) pushCurrentSegment(state);
   state.inBracket = true;
   state.index++;
-  if (state.path[state.index] === "[") invalidAt(state, "Nested brackets");
+  if (state.path.charAt(state.index) === "[")
+    invalidAt(state, "Nested brackets");
 }
 
 function closePlainSegment(state: PathParserState): void {

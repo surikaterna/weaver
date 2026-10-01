@@ -258,6 +258,24 @@ function validatorAdditionalCases(engine, counter) {
   ];
 }
 
+function validatorPathError(path, segments = []) {
+  return { valid: false, errors: [{ code: "invalid-path", path: segments.length ? "$.base[2]" : "$", segments,
+    message: `Invalid path: Unmatched '[' in "${path}"` }] };
+}
+
+function validatorStringPathCases(engine) {
+  const schema = { type: "object", additionalProperties: true }, cases = [];
+  for (const path of ["[", "a".repeat(699) + "["]) {
+    const result = validatorPathError(path);
+    cases.push({ name: `terminal-bracket/${path.length}/patch`, invoke: () => engine.validateConfigurationPatch(schema, path, true), valid: false, result });
+    cases.push({ name: `terminal-bracket/${path.length}/based-patch`, invoke: () => engine.validateConfigurationPatch(schema, path, true, { path: ["base", 2] }), valid: false, result: validatorPathError(path, ["base", 2]) });
+    cases.push({ name: `terminal-bracket/${path.length}/effective-options`, invoke: () => engine.validateEffectiveConfiguration(schema, {}, { path }), valid: false, result });
+    cases.push({ name: `terminal-bracket/${path.length}/partial-options`, invoke: () => engine.validatePartialConfiguration(schema, {}, { path }), valid: false, result });
+    cases.push({ name: `terminal-bracket/${path.length}/patch-options`, invoke: () => engine.validateConfigurationPatch(schema, "flag", true, { path }), valid: false, result });
+  }
+  return cases;
+}
+
 function validatorZero(prototype, index, invoke, assert, label) {
   const outcome = underNumericTrap(prototype, index, invoke);
   assert.equal(outcome.getters, 0, `${label}: inherited getter`);
@@ -270,6 +288,7 @@ function validatorCase(prototype, index, fixture, assert) {
   assert.equal(expected.valid, fixture.valid, `${fixture.name}: ordinary result`);
   if (fixture.code) assert.equal(expected.errors[0].code, fixture.code, fixture.name);
   if (fixture.errors) assert.equal(expected.errors.length, fixture.errors, fixture.name);
+  if (fixture.result) assert.deepEqual(expected, fixture.result, fixture.name);
   const result = validatorZero(prototype, index, fixture.invoke, assert, fixture.name);
   assert.deepEqual(result, expected, fixture.name);
 }
@@ -366,6 +385,22 @@ function validatorAdditionalCached(engine, factory, prototype, index, assert, co
   }
 }
 
+function validatorCachedStringPaths(engine, factory, prototype, index, assert) {
+  const schema = { type: "object", properties: { flag: { type: "boolean" } }, additionalProperties: true };
+  const session = factory(schema, { path: ["base", 2] });
+  assert.equal(session.validatePartial({ flag: true }).valid, true);
+  for (const path of ["[", "a".repeat(699) + "["]) {
+    const badOptions = validatorZero(prototype, index, () => factory(schema, { path }), assert, "terminal-options-session");
+    for (let repeat = 0; repeat < 2; repeat++) {
+      assert.deepEqual(validatorZero(prototype, index, () => session.validatePatch(path, true), assert, "terminal-cached-patch"), validatorPathError(path, ["base", 2]));
+      assert.deepEqual(validatorZero(prototype, index, () => badOptions.validateEffective({}), assert, "terminal-cached-effective-options"), validatorPathError(path));
+      assert.deepEqual(validatorZero(prototype, index, () => badOptions.validatePartial({}), assert, "terminal-cached-partial-options"), validatorPathError(path));
+      assert.deepEqual(validatorZero(prototype, index, () => badOptions.validatePatch("flag", true), assert, "terminal-cached-patch-options"), validatorPathError(path));
+    }
+    assert.equal(session.validatePatch("flag", true).valid, true, "malformed path must not invalidate the session");
+  }
+}
+
 function validatorControls(prototype, index, assert) {
   const scratch = validatorOwned(index, (value) => value);
   const hole = []; hole.length = index + 1;
@@ -379,7 +414,7 @@ export function checkValidatorOwnData(engine, factory, assert, prototypeNames = 
   const custom = validatorCustom(counter);
   const branded = new Date(); Object.defineProperty(branded, "type", { value: "boolean", enumerable: true });
   const inheritedOnly = Object.create(validatorPrototype(counter));
-  const cases = [...validatorCases(engine), ...validatorLargeCases(engine), ...validatorMalformedCases(engine, counter), ...validatorBoundaryCases(engine, counter), ...validatorAdditionalCases(engine, counter),
+  const cases = [...validatorCases(engine), ...validatorLargeCases(engine), ...validatorMalformedCases(engine, counter), ...validatorBoundaryCases(engine, counter), ...validatorAdditionalCases(engine, counter), ...validatorStringPathCases(engine),
     ...validatorWrapped(engine, "custom-schema-roles", custom, { flag: true, list: [true, "untyped"] }, { flag: "wrong", list: [1] }),
     ...validatorWrapped(engine, "own-branded-schema", branded, true, "wrong"),
     { name: "inherited-type-no-grant", invoke: () => engine.validatePartialConfiguration(inheritedOnly, true), valid: false, code: "invalid-schema" }];
@@ -391,6 +426,7 @@ export function checkValidatorOwnData(engine, factory, assert, prototypeNames = 
       validatorCached(engine, factory, prototype, index, assert, counter);
       validatorLiteralCached(engine, factory, prototype, index, assert);
       validatorAdditionalCached(engine, factory, prototype, index, assert, counter);
+      validatorCachedStringPaths(engine, factory, prototype, index, assert);
     }
   }
   assert.equal(counter.calls, 0, "own/prototype/brand accessors never execute");
@@ -398,5 +434,5 @@ export function checkValidatorOwnData(engine, factory, assert, prototypeNames = 
 }
 
 export const validatorFixtureSource = [underNumericTrap, validatorOwned, validatorPrototype, validatorCustom,
-  validatorWrapped, validatorCases, validatorLargeCases, validatorMalformedCases, validatorRejected, validatorBoundaryCases, validatorAdditionalCases, validatorZero, validatorCase,
-  validatorMutations, validatorCached, validatorLiteralCached, validatorAdditionalCached, validatorControls, checkValidatorOwnData].map((fn) => fn.toString()).join("\n");
+  validatorWrapped, validatorCases, validatorLargeCases, validatorMalformedCases, validatorRejected, validatorBoundaryCases, validatorAdditionalCases, validatorPathError, validatorStringPathCases, validatorZero, validatorCase,
+  validatorMutations, validatorCached, validatorLiteralCached, validatorAdditionalCached, validatorCachedStringPaths, validatorControls, checkValidatorOwnData].map((fn) => fn.toString()).join("\n");
