@@ -3,7 +3,10 @@ import type {
   ScopeInstance,
 } from "@weaver-conf/config-types";
 import { hasScopedLayerIo } from "./config-service-internal";
-import { resolveOrderedEntries } from "./ordered-config-resolution";
+import {
+  appendOrderedValue,
+  resolveOrderedEntries,
+} from "./ordered-config-resolution";
 import {
   isSameScopeLayer,
   isScopedLayer,
@@ -37,7 +40,7 @@ function baseEntries(state: StateContext): Record<string, unknown> {
   const entries: Record<string, unknown>[] = [];
   for (const provider of state.providers) {
     if (isScopedLayer(provider.layer)) continue;
-    entries.push(state.layerData.get(provider.id) ?? {});
+    appendOrderedValue(entries, state.layerData.get(provider.id) ?? {});
   }
   return resolveOrderedEntries(entries);
 }
@@ -51,10 +54,10 @@ function scopeState(
     const scopedLayer = `${scope.scopeId}:${scope.value}`;
     for (const provider of state.providers) {
       if (!isSameScopeLayer(provider.layer, scopedLayer)) continue;
-      entries.push(state.layerData.get(provider.id) ?? {});
+      appendOrderedValue(entries, state.layerData.get(provider.id) ?? {});
     }
     const dynamic = state.dynamicScopeEntries.get(scopedLayer);
-    if (dynamic) entries.push(dynamic);
+    if (dynamic) appendOrderedValue(entries, dynamic);
   }
   return resolveOrderedEntries(entries);
 }

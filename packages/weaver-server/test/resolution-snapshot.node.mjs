@@ -3,6 +3,11 @@ import { test } from "node:test";
 import { deepMerge } from "@weaver-conf/config-engine";
 import { inspectPublicConfig, publicConfigView } from "../src/core/public-config-inspection.ts";
 import { createConfigStateReader } from "../src/core/config-service-state.ts";
+import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
+import { createWeaverConfigService } from "../src/core/config-service.ts";
+import { createSchemaRegistry } from "../src/core/schema-registry.ts";
+import { createConfigAdmission } from "../src/core/config-service-admission-context.ts";
+import { resolveOrderedEntries } from "../src/core/ordered-config-resolution.ts";
 
 test("server inspection returns merged values and operation origins without changing raw breakdown", () => {
   const layers = [
@@ -188,3 +193,141 @@ for (const size of [702, 20000]) {
     });
   }
 }
+
+async function orderedProviderFixture(kind, size) {
+  const providers = kind === "dynamic"
+    ? [createInMemoryStorageProvider({ id: "dynamic", layer: "tenant" })]
+    : Array.from({ length: size }, (_, index) => createInMemoryStorageProvider({
+      id: `p${index}`, layer: kind === "scoped" ? `tenant:v${index}` : index === size - 1 ? "user" : "core",
+      initialEntries: { cfg: { n: index, mirror: index } },
+    }));
+  const scopePath = Array.from({ length: size }, (_, index) => ({ scopeId: "tenant", value: `v${index}` }));
+  const dynamic = new Map();
+  if (kind === "dynamic") {
+    for (let index = 0; index < size; index++) {
+      const layer = `tenant:v${index}`;
+      await providers[0].writeLayer(layer, "cfg", { n: index, mirror: index });
+      dynamic.set(layer, (await providers[0].loadLayer(layer)).entries);
+    }
+  }
+  const data = new Map();
+  for (const provider of providers) data.set(provider.id, (await provider.load()).entries);
+  const effects = observeProviderEffects(providers);
+  const service = await createWeaverConfigService({ providers, environment: "test" });
+  const registry = createSchemaRegistry({ configService: service });
+  const registered = await registry.register({ serviceId: "cfg", environment: "test", owner: { name: "test", contact: "test@example.org" }, schema: orderedSchema(size - 1), fragmentSlots: [] });
+  assert.equal(registered.success, true, registered.error?.message ?? JSON.stringify(registered));
+  if (kind === "dynamic") await service.get("cfg.n", { scopePath });
+  service.onDelta(() => { effects.delta++; });
+  const target = providers[providers.length - 1];
+  const layer = kind === "fixed" ? "user" : `tenant:v${size - 1}`;
+  const preflight = createConfigAdmission({ service: () => service, environment: "test", providers, layerData: data, dynamicScopeEntries: dynamic,
+    resolveProvider: () => target, getLayerValue: async () => undefined, warmScopeLayers: async () => {},
+  });
+  return { providers, data, dynamic, scopePath, service, effects, preflight, layer, kind };
+}
+
+function observeProviderEffects(providers) {
+  const effects = { write: 0, remove: 0, flush: 0, delta: 0 };
+  for (const provider of providers) {
+    for (const name of ["write", "writeLayer", "remove", "removeLayer"]) {
+      const original = provider[name].bind(provider);
+      provider[name] = async (...args) => { effects[name.startsWith("write") ? "write" : "remove"]++; return original(...args); };
+    }
+    provider.flush = async () => { effects.flush++; };
+  }
+  return effects;
+}
+
+function orderedSchema(end) {
+  return { type: "object", properties: { n: { type: "integer" }, mirror: { type: "integer" } }, required: ["n", "mirror"],
+    anyOf: [{ type: "object", properties: { n: { type: "integer", const: end }, mirror: { type: "integer", const: end } } }, { type: "object", properties: { n: { type: "integer", const: 9001 }, mirror: { type: "integer", const: 9001 } } }],
+  };
+}
+
+async function underOrderedTrap(operation) {
+  let getters = 0, setters = 0, result, getterStack, setterStack;
+  const descriptor = Object.getOwnPropertyDescriptor(Object.prototype, "700");
+  Object.defineProperty(Object.prototype, "700", { configurable: true, get() { getters++; getterStack ??= new Error("inherited getter").stack; return "ambient"; }, set() { setters++; setterStack ??= new Error("inherited setter").stack; } });
+  try { result = await operation(); }
+  finally {
+    if (descriptor) Object.defineProperty(Object.prototype, "700", descriptor);
+    else delete Object.prototype["700"];
+  }
+  assert.equal(getters, 0, getterStack);
+  assert.equal(setters, 0, setterStack);
+  return result;
+}
+
+function directOrderedBaseline(fixture) {
+  let result = {};
+  if (fixture.kind === "fixed") {
+    for (const provider of fixture.providers) result = deepMerge(result, fixture.data.get(provider.id));
+  } else {
+    for (const scope of fixture.scopePath) {
+      const layer = `${scope.scopeId}:${scope.value}`;
+      for (const provider of fixture.providers) if (provider.layer === layer) result = deepMerge(result, fixture.data.get(provider.id));
+      const dynamic = fixture.dynamic.get(layer);
+      if (dynamic) result = deepMerge(result, dynamic);
+    }
+  }
+  return result;
+}
+
+async function assertOrderedAdmission(fixture) {
+  const options = fixture.kind === "fixed" ? undefined : { scopePath: fixture.scopePath.slice(0, 700) };
+  const revision = fixture.service.revision;
+  const valid = [{ operation: "set", key: "cfg.n", value: 9001 }, { operation: "set", key: "cfg.mirror", value: 9001 }];
+  const invalid = [{ operation: "set", key: "cfg.n", value: 9001 }, { operation: "remove", key: "cfg.mirror" }];
+  assert.equal(await underOrderedTrap(() => fixture.preflight(fixture.layer, valid, options)), null);
+  assert.equal((await underOrderedTrap(() => fixture.preflight(fixture.layer, invalid, options))).error.code, "VALIDATION_ERROR");
+  const batch = await underOrderedTrap(() => fixture.service.setMany(fixture.layer, { "cfg.n": 9001, "cfg.mirror": 7 }, options));
+  assert.equal(batch.success, false);
+  assert.equal(batch.error.code, "VALIDATION_ERROR");
+  assert.deepEqual(fixture.effects, { write: 0, remove: 0, flush: 0, delta: 0 });
+  assert.equal(fixture.service.revision, revision);
+}
+
+for (const kind of ["fixed", "scoped", "dynamic"]) {
+  test(`702 ${kind} ordered entries preserve baseline and provenance`, async () => {
+    const fixture = await orderedProviderFixture(kind, 702);
+    const baseline = await underOrderedTrap(() => directOrderedBaseline(fixture));
+    const reader = createConfigStateReader(fixture.providers, fixture.data, fixture.dynamic);
+    const actual = await underOrderedTrap(() => kind === "fixed" ? reader.getBaseEntries() : reader.getScopeState(fixture.scopePath));
+    assert.deepEqual(actual, baseline);
+    assert.equal(actual.cfg.n, 701);
+    const merged = await underOrderedTrap(() => reader.getMergedState(kind === "fixed" ? undefined : fixture.scopePath));
+    assert.deepEqual(merged, baseline);
+    const inspected = await underOrderedTrap(() => fixture.service.inspect("cfg.n"));
+    assert.equal(inspected.effectiveValue, 701);
+    assert.equal(inspected.effectiveLayer, kind === "fixed" ? "user" : "tenant:v701");
+  });
+  test(`702 ${kind} prospective and actual batch admission preserve zero effects`, async () => {
+    await assertOrderedAdmission(await orderedProviderFixture(kind, 702));
+  });
+}
+
+test("fixed scoped-provider and dynamic-cache tails both use owned ordered slots", async () => {
+  const providers = Array.from({ length: 700 }, (_, index) => createInMemoryStorageProvider({ id: `p${index}`, layer: "tenant:site", initialEntries: { cfg: { n: index } } }));
+  const data = new Map();
+  for (const provider of providers) data.set(provider.id, (await provider.load()).entries);
+  const dynamic = new Map([["tenant:site", { cfg: { n: 9001 } }]]);
+  const reader = createConfigStateReader(providers, data, dynamic);
+  assert.equal((await underOrderedTrap(() => reader.getScopeState([{ scopeId: "tenant", value: "site" }]))).cfg.n, 9001);
+});
+
+test("ordered adapter reads only own dense entries, not inherited slots or accessor rows", async () => {
+  const sparse = Array.from({ length: 702 }, (_, index) => ({ cfg: { n: index } }));
+  delete sparse["700"];
+  await underOrderedTrap(() => assert.throws(() => resolveOrderedEntries(sparse), error => error.code === "VALIDATION_ERROR"));
+  let calls = 0;
+  const accessor = [];
+  Object.defineProperty(accessor, "0", { get() { calls++; return {}; } });
+  assert.throws(() => resolveOrderedEntries(accessor), error => error.code === "VALIDATION_ERROR");
+  assert.equal(calls, 0);
+  const dense = Array.from({ length: 702 }, (_, index) => ({ cfg: { n: index } }));
+  Object.defineProperty(dense[0], "700", { value: { inert: true }, enumerable: true });
+  const result = await underOrderedTrap(() => resolveOrderedEntries(dense));
+  assert.equal(result.cfg.n, 701);
+  assert.equal(Object.hasOwn(result, "700"), true);
+});
