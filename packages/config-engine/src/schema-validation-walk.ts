@@ -1,14 +1,8 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-
-import {
-  validateArraySize,
-  validateObjectSize,
-  validateUniqueItems,
-} from "./schema-validation-cardinality";
+import { pushOwn } from "./own-data";
 import {
   addCompositionResult,
   COMPOSITION_KEYWORDS,
-  type CompositionKeyword,
   type CompositionMemo,
   createCompositionMemo,
   getCompositionBranches,
@@ -17,79 +11,45 @@ import {
 } from "./schema-validation-composition";
 import { validateValueConstraints } from "./schema-validation-constraints";
 import type { SchemaValidationPlan } from "./schema-validation-graph";
-import { collectMemberSchemas, itemSchema } from "./schema-validation-paths";
+import { ownField } from "./schema-validation-own-data";
 import {
-  appendContextPath,
   createPredicateContext,
   rejectPredicate,
   validateScalarPredicate,
 } from "./schema-validation-predicate-context";
-import { queuePredicateObjectFrames } from "./schema-validation-predicate-object";
 import {
-  addContextError,
   addError,
   describeTypes,
   describeValue,
   getEffectiveValue,
-  hasOwn,
   isRecord,
   matchesAnyType,
-  type ValidationPath,
   type ValidationState,
 } from "./schema-validation-support";
 
-type WalkFrame =
-  | { readonly kind: "value"; readonly state: ValidationState }
-  | { readonly kind: "ordinary"; readonly state: ValidationState }
-  | CompositionFrame
-  | RequiredFrame
-  | MemberFrame
-  | ArrayItemFrame;
-
-interface RequiredFrame {
-  readonly kind: "required";
-  readonly state: ValidationState;
-  readonly key: string;
-}
-
-interface MemberFrame {
-  readonly kind: "member";
-  readonly state: ValidationState;
-  readonly key: string;
-  readonly value: unknown;
-}
-
-interface ArrayItemFrame {
-  readonly kind: "array-item";
-  readonly state: ValidationState;
-  readonly value: readonly unknown[];
-  readonly index: number;
-}
-
-interface CompositionFrame {
-  readonly kind: "composition";
-  readonly state: ValidationState;
-  readonly keyword: CompositionKeyword;
-  readonly branches: readonly ConfigurationPropertySchema[];
-  matched: number;
-  index: number;
-  branchSchema?: ConfigurationPropertySchema | undefined;
-  branchContext?: ValidationState["context"] | undefined;
-}
+import {
+  type CompositionFrame,
+  processArrayItemFrame,
+  processMemberFrame,
+  processRequiredFrame,
+  queueArrayFrames,
+  queueObjectFrames,
+  type WalkFrame,
+} from "./schema-validation-walk-frames";
 
 interface WalkRuntime {
   readonly plan: SchemaValidationPlan;
-  memo?: CompositionMemo;
+  memo: CompositionMemo | undefined;
 }
 export function validateValuesIteratively(
   states: readonly ValidationState[],
   plan: SchemaValidationPlan,
 ): void {
   const pending: WalkFrame[] = [];
-  const runtime: WalkRuntime = { plan };
+  const runtime: WalkRuntime = { plan, memo: undefined };
   for (let index = states.length - 1; index >= 0; index--) {
     const state = states[index];
-    if (state !== undefined) pending.push({ kind: "value", state });
+    if (state !== undefined) pushOwn(pending, { kind: "value", state });
   }
   while (pending.length > 0) {
     const frame = pending.pop();
@@ -124,7 +84,7 @@ function processValueFrame(
   runtime: WalkRuntime,
 ): void {
   const predicateScalar =
-    runtime.plan.predicateScalars?.has(state.schema) === true;
+    ownField(runtime.plan, "predicateScalars")?.has(state.schema) === true;
   if (validateScalarPredicate(state, predicateScalar)) return;
   const value = getEffectiveValue(
     state.schema,
@@ -132,11 +92,11 @@ function processValueFrame(
     state.context.mode,
   );
   const effectiveState = value === state.value ? state : { ...state, value };
-  if (runtime.plan.composed?.has(state.schema) !== true) {
+  if (ownField(runtime.plan, "composed")?.has(state.schema) !== true) {
     processOrdinaryFrame(effectiveState, pending);
     return;
   }
-  pending.push({ kind: "ordinary", state: effectiveState });
+  pushOwn(pending, { kind: "ordinary", state: effectiveState });
   queueCompositionFrames(effectiveState, pending);
 }
 
@@ -149,13 +109,15 @@ function queueCompositionFrames(
     if (keyword === undefined || !Object.hasOwn(state.schema, keyword))
       continue;
     const branches = getCompositionBranches(state.schema, keyword);
-    pending.push({
+    pushOwn(pending, {
       kind: "composition",
       state,
       keyword,
       branches,
       matched: 0,
       index: 0,
+      branchSchema: undefined,
+      branchContext: undefined,
     });
   }
 }
@@ -197,10 +159,10 @@ function processCompositionFrame(
     addCompositionResult(frame, frame.matched, state.path, state.context);
     return;
   }
-  const branch = frame.branches[frame.index];
+  const branch = ownField(frame.branches, frame.index);
   frame.index++;
   if (branch === undefined) {
-    pending.push(frame);
+    pushOwn(pending, frame);
     return;
   }
   queueCompositionBranch(frame, branch, pending, runtime);
@@ -213,27 +175,24 @@ function queueCompositionBranch(
   runtime: WalkRuntime,
 ): void {
   const { mode } = frame.state.context;
-  const memoEligible = runtime.plan.memoEligible?.has(schema) === true;
+  const memoEligible =
+    ownField(runtime.plan, "memoEligible")?.has(schema) === true;
+  const memo = ownField(runtime, "memo");
   const cached =
-    memoEligible && runtime.memo !== undefined
-      ? getMemoizedCompositionMatch(
-          runtime.memo,
-          schema,
-          frame.state.value,
-          mode,
-        )
+    memoEligible && memo !== undefined
+      ? getMemoizedCompositionMatch(memo, schema, frame.state.value, mode)
       : undefined;
   if (cached !== undefined) {
     if (cached) frame.matched++;
-    pending.push(frame);
+    pushOwn(pending, frame);
     return;
   }
   const context = createPredicateContext(mode);
   const state = { ...frame.state, schema, context };
   frame.branchSchema = schema;
   frame.branchContext = context;
-  pending.push(frame);
-  pending.push({ kind: "value", state });
+  pushOwn(pending, frame);
+  pushOwn(pending, { kind: "value", state });
 }
 
 function completeCompositionBranch(
@@ -243,8 +202,8 @@ function completeCompositionBranch(
   const schema = frame.branchSchema;
   const context = frame.branchContext;
   if (schema === undefined || context === undefined) return;
-  const matches = !context.failed;
-  if (runtime.plan.memoEligible?.has(schema) === true) {
+  const matches = !ownField(context, "failed");
+  if (ownField(runtime.plan, "memoEligible")?.has(schema) === true) {
     runtime.memo ??= createCompositionMemo();
     memoizeCompositionMatch(
       runtime.memo,
@@ -257,143 +216,4 @@ function completeCompositionBranch(
   if (matches) frame.matched++;
   frame.branchSchema = undefined;
   frame.branchContext = undefined;
-}
-
-function queueObjectFrames(
-  state: ValidationState,
-  value: Record<string, unknown>,
-  pending: WalkFrame[],
-): void {
-  validateObjectSize(state.schema, value, state.path, state.context);
-  if (queuePredicateObjectFrames(state, value, pending)) return;
-  const entries = Object.entries(value);
-  for (let index = entries.length - 1; index >= 0; index--) {
-    const entry = entries[index];
-    if (entry !== undefined) {
-      pending.push({ kind: "member", state, key: entry[0], value: entry[1] });
-    }
-  }
-  if (state.context.mode !== "effective") return;
-  const required = Object.hasOwn(state.schema, "required")
-    ? (state.schema.required ?? [])
-    : [];
-  for (let index = required.length - 1; index >= 0; index--) {
-    const key = required[index];
-    if (key !== undefined) pending.push({ kind: "required", state, key });
-  }
-}
-
-function processRequiredFrame(
-  frame: RequiredFrame,
-  pending: WalkFrame[],
-): void {
-  if (!isRecord(frame.state.value) || hasOwn(frame.state.value, frame.key))
-    return;
-  const path = appendContextPath(
-    frame.state.context,
-    frame.state.path,
-    frame.key,
-  );
-  const properties = Object.hasOwn(frame.state.schema, "properties")
-    ? frame.state.schema.properties
-    : undefined;
-  const propertySchema =
-    properties !== undefined && Object.hasOwn(properties, frame.key)
-      ? properties[frame.key]
-      : undefined;
-  if (propertySchema?.default !== undefined) {
-    pending.push({
-      kind: "value",
-      state: { ...frame.state, schema: propertySchema, value: undefined, path },
-    });
-    return;
-  }
-  addContextError(frame.state.context, "missing-required", path, {
-    message: `Required property "${frame.key}" is missing`,
-  });
-}
-
-function processMemberFrame(frame: MemberFrame, pending: WalkFrame[]): void {
-  const { schema, path, context } = frame.state;
-  const childPath = appendContextPath(context, path, frame.key);
-  const schemas = collectMemberSchemas(schema, frame.key, path, context);
-  if (schemas.length === 0) {
-    queueAdditionalProperty(frame, childPath, pending);
-    return;
-  }
-  for (let index = schemas.length - 1; index >= 0; index--) {
-    const memberSchema = schemas[index];
-    if (memberSchema !== undefined) {
-      pending.push({
-        kind: "value",
-        state: {
-          schema: memberSchema,
-          value: frame.value,
-          path: childPath,
-          context,
-        },
-      });
-    }
-  }
-}
-
-function queueAdditionalProperty(
-  frame: MemberFrame,
-  path: ValidationPath,
-  pending: WalkFrame[],
-): void {
-  const additional = Object.hasOwn(frame.state.schema, "additionalProperties")
-    ? frame.state.schema.additionalProperties
-    : undefined;
-  if (additional === true) return;
-  if (additional === undefined || additional === false) {
-    addContextError(frame.state.context, "unknown-property", path, {
-      message: `Unknown property "${frame.key}" is not allowed`,
-    });
-    return;
-  }
-  pending.push({
-    kind: "value",
-    state: { ...frame.state, schema: additional, value: frame.value, path },
-  });
-}
-
-function queueArrayFrames(
-  state: ValidationState,
-  value: readonly unknown[],
-  pending: WalkFrame[],
-): void {
-  validateArraySize(state.schema, value, state.path, state.context);
-  validateUniqueItems(state.schema, value, state.path, state.context);
-  for (let index = value.length - 1; index >= 0; index--) {
-    pending.push({ kind: "array-item", state, value, index });
-  }
-}
-
-function processArrayItemFrame(
-  frame: ArrayItemFrame,
-  pending: WalkFrame[],
-): void {
-  const path = appendContextPath(
-    frame.state.context,
-    frame.state.path,
-    frame.index,
-  );
-  if (!Object.hasOwn(frame.value, frame.index)) {
-    addContextError(frame.state.context, "invalid-value", path, {
-      message: "Array item must be present",
-    });
-    return;
-  }
-  const schema = itemSchema(frame.state.schema, frame.index);
-  if (schema === undefined) return;
-  pending.push({
-    kind: "value",
-    state: {
-      ...frame.state,
-      schema,
-      value: frame.value[frame.index],
-      path,
-    },
-  });
 }

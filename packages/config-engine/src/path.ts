@@ -5,6 +5,8 @@ import {
   isReservedPathSegment,
 } from "@weaver-conf/config-types";
 import { pushOwn } from "./own-data";
+import { inspectValidationData } from "./schema-validation-input-guard";
+import { ownField } from "./schema-validation-own-data";
 
 export function assertSafePathSegment(segment: string): void {
   if (isReservedPathSegment(segment)) {
@@ -160,8 +162,20 @@ function invalidAt(state: PathParserState, reason: string): never {
  */
 export function buildPath(segments: readonly string[]): string {
   let result = "";
-
-  for (const [i, seg] of segments.entries()) {
+  if (!Array.isArray(segments) || !inspectValidationData(segments).safe) {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Path segments must be own plain data",
+    );
+  }
+  for (let i = 0; i < segments.length; i++) {
+    const seg = ownField(segments, i);
+    if (typeof seg !== "string") {
+      throw createWeaverError(
+        "VALIDATION_ERROR",
+        "Path segments must be own strings",
+      );
+    }
     assertSafePathSegment(seg);
     const compound = isCompoundSegment(seg);
 

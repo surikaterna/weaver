@@ -3,8 +3,21 @@ import type {
   ConfigurationPropertySchema,
 } from "@weaver-conf/config-types";
 
-import { parsePath } from "./path";
+import { defineOwnData, pushOwn } from "./own-data";
 import { getCachedRegex, isSafePattern } from "./regex-cache";
+import {
+  makeError,
+  materializeValidationPath,
+} from "./schema-validation-error-paths";
+import { ownField } from "./schema-validation-own-data";
+
+export {
+  appendValidationPath,
+  createValidationPath,
+  makeError,
+  materializeValidationPath,
+  toPathSegmentsResult,
+} from "./schema-validation-error-paths";
 
 export type SchemaValidationPathSegment = string | number;
 
@@ -71,45 +84,14 @@ export interface PathSegmentsResult {
   error?: SchemaValidationError | undefined;
 }
 
-export function createValidationPath(
-  base: readonly SchemaValidationPathSegment[],
-): ValidationPath {
-  return { kind: "validation-path", base };
-}
-
-export function appendValidationPath(
-  parent: ValidationPath,
-  segment: SchemaValidationPathSegment,
-): ValidationPath {
-  return { kind: "validation-path", base: parent.base, parent, segment };
-}
-
-export function materializeValidationPath(
-  path: ValidationErrorPath,
-): readonly SchemaValidationPathSegment[] {
-  if (!isValidationPath(path)) return path;
-  const suffix: SchemaValidationPathSegment[] = [];
-  let cursor = path;
-  while (cursor.parent !== undefined) {
-    if (cursor.segment !== undefined) suffix.push(cursor.segment);
-    cursor = cursor.parent;
-  }
-  suffix.reverse();
-  return cursor.base.length === 0 ? suffix : [...cursor.base, ...suffix];
-}
-
-function isValidationPath(path: ValidationErrorPath): path is ValidationPath {
-  return !Array.isArray(path);
-}
-
 export function addError(
   state: ValidationState,
   code: SchemaValidationErrorCode,
   message: string,
   details?: Pick<SchemaValidationError, "expected" | "actual">,
 ): void {
-  if (state.context.predicateOnly === true) {
-    state.context.failed = true;
+  if (ownField(state.context, "predicateOnly") === true) {
+    defineOwnData(state.context, "failed", true);
     return;
   }
   addContextError(state.context, code, state.path, { message, ...details });
@@ -125,28 +107,14 @@ export function addContextError(
     actual?: string | undefined;
   },
 ): void {
-  if (context.predicateOnly === true) {
-    context.failed = true;
+  if (ownField(context, "predicateOnly") === true) {
+    defineOwnData(context, "failed", true);
     return;
   }
-  context.errors.push(
+  pushOwn(
+    context.errors,
     makeError(code, materializeValidationPath(path), details.message, details),
   );
-}
-
-export function makeError(
-  code: SchemaValidationErrorCode,
-  segments: readonly SchemaValidationPathSegment[],
-  message: string,
-  details?: Pick<SchemaValidationError, "expected" | "actual">,
-): SchemaValidationError {
-  return {
-    code,
-    path: formatPath(segments),
-    segments: [...segments],
-    message,
-    ...details,
-  };
 }
 
 export function addBoundedError(
@@ -175,8 +143,8 @@ export function addBoundedContextError(
   operator: string,
 ): void {
   if (expected === undefined || boundPasses(actual, expected, operator)) return;
-  if (context.predicateOnly === true) {
-    context.failed = true;
+  if (ownField(context, "predicateOnly") === true) {
+    defineOwnData(context, "failed", true);
     return;
   }
   addContextError(context, "invalid-value", path, {
@@ -212,8 +180,8 @@ export function getEffectiveValue(
 ): unknown {
   return mode === "effective" &&
     value === undefined &&
-    schema.default !== undefined
-    ? schema.default
+    ownField(schema, "default") !== undefined
+    ? ownField(schema, "default")
     : value;
 }
 
@@ -248,62 +216,6 @@ export function describeValue(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;
-}
-
-export function toPathSegmentsResult(
-  path: string | readonly SchemaValidationPathSegment[] | undefined,
-  errorSegments: readonly SchemaValidationPathSegment[] = [],
-): PathSegmentsResult {
-  if (path === undefined) return { segments: [] };
-  if (typeof path !== "string") {
-    return toArrayPathSegmentsResult(path, errorSegments);
-  }
-
-  try {
-    return { segments: parsePath(path) };
-  } catch (error: unknown) {
-    return {
-      segments: [],
-      error: makeError(
-        "invalid-path",
-        errorSegments,
-        `Invalid path: ${errorMessage(error)}`,
-      ),
-    };
-  }
-}
-
-function toArrayPathSegmentsResult(
-  path: readonly unknown[],
-  errorSegments: readonly SchemaValidationPathSegment[],
-): PathSegmentsResult {
-  const segments: SchemaValidationPathSegment[] = [];
-  for (const [index, segment] of path.entries()) {
-    if (isValidPathSegment(segment)) {
-      segments.push(segment);
-      continue;
-    }
-
-    return {
-      segments,
-      error: makeError(
-        "invalid-path",
-        [...errorSegments, ...segments],
-        `Invalid path segment at index ${String(index)}: expected string or finite number`,
-      ),
-    };
-  }
-  return { segments };
-}
-
-function isValidPathSegment(
-  segment: unknown,
-): segment is SchemaValidationPathSegment {
-  return typeof segment === "string" || isFiniteNumber(segment);
-}
-
-function isFiniteNumber(segment: unknown): segment is number {
-  return typeof segment === "number" && Number.isFinite(segment);
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -355,10 +267,6 @@ function matchesType(
   return typeof value === type;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function isSchemaTypeArray(
   value: ConfigurationJsonSchemaType | readonly ConfigurationJsonSchemaType[],
 ): value is readonly ConfigurationJsonSchemaType[] {
@@ -374,19 +282,4 @@ function boundPasses(
   if (operator === "<=") return actual <= expected;
   if (operator === ">") return actual > expected;
   return actual < expected;
-}
-
-function formatPath(segments: readonly SchemaValidationPathSegment[]): string {
-  let path = "$";
-  for (const segment of segments) {
-    path += formatSegment(segment);
-  }
-  return path;
-}
-
-function formatSegment(segment: SchemaValidationPathSegment): string {
-  if (typeof segment === "number") return `[${String(segment)}]`;
-  return /^[A-Za-z_$][\w$-]*$/.test(segment)
-    ? `.${segment}`
-    : `[${JSON.stringify(segment)}]`;
 }

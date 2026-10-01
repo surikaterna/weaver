@@ -2,4 +2,4 @@
 "@weaver-conf/config-engine": patch
 ---
 
-Define schema-stability, deep-equality, and path-parser scratch entries as own data so inherited numeric setters cannot intercept them. The complete canonical-validator own-data hardening remains tracked in weaver-j9xk.
+Harden the canonical configuration validator with descriptor-first own-data admission, owned scratch entries and own-only schema/member reads. Preserve ordinary validation diagnostics and call-local schema stability while rejecting malformed accessor/exotic data without invoking input getters. Standard ambient numeric prototype accessors cannot intercept validation scratch or supply missing schema members. This is not a hostile-intrinsic or Proxy side-effect sandbox.

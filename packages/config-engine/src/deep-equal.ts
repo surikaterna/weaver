@@ -53,8 +53,10 @@ function queueArrayMembers(
   for (let index = 0; index < left.length; index++) {
     if (Object.hasOwn(left, index) !== Object.hasOwn(right, index))
       return false;
-    if (Object.hasOwn(left, index))
-      pushOwn(pending, [left[index], right[index]]);
+    if (!Object.hasOwn(left, index)) continue;
+    const pair = ownDataPair(left, right, index);
+    if (pair === undefined) return false;
+    pushOwn(pending, pair);
   }
   return true;
 }
@@ -70,9 +72,30 @@ function queueObjectMembers(
   if (keys.length !== Object.keys(rightRecord).length) return false;
   for (const key of keys) {
     if (!Object.hasOwn(rightRecord, key)) return false;
-    pushOwn(pending, [leftRecord[key], rightRecord[key]]);
+    const pair = ownDataPair(leftRecord, rightRecord, key);
+    if (pair === undefined) return false;
+    pushOwn(pending, pair);
   }
   return true;
+}
+
+function ownDataPair(
+  left: object,
+  right: object,
+  key: PropertyKey,
+): readonly unknown[] | undefined {
+  const a = Object.getOwnPropertyDescriptor(left, key);
+  const b = Object.getOwnPropertyDescriptor(right, key);
+  if (
+    a === undefined ||
+    b === undefined ||
+    !Object.hasOwn(a, "value") ||
+    !Object.hasOwn(b, "value")
+  )
+    return undefined;
+  const first: unknown = a.value;
+  const second: unknown = b.value;
+  return [first, second];
 }
 
 function toRecord(value: object): Record<string, unknown> {

@@ -1,4 +1,6 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
+import { defineOwnData } from "./own-data";
+import { ownField } from "./schema-validation-own-data";
 
 import {
   addContextError,
@@ -44,9 +46,10 @@ export function getCompositionBranches(
   keyword: CompositionKeyword,
 ): readonly ConfigurationPropertySchema[] {
   if (keyword === "not") {
-    return schema.not === undefined ? [] : [schema.not];
+    const branch = ownField(schema, "not");
+    return branch === undefined ? [] : [branch];
   }
-  const branches = schema[keyword];
+  const branches = ownField(schema, keyword);
   return Array.isArray(branches) ? branches : [];
 }
 
@@ -58,7 +61,7 @@ export function validateCompositionShape(
 ): boolean {
   for (const keyword of COMPOSITION_KEYWORDS) {
     if (!Object.hasOwn(schema, keyword)) continue;
-    const value = schema[keyword];
+    const value = ownField(schema, keyword);
     const valid =
       keyword === "not"
         ? validateNotShape(value, path, context, supportsSchema)
@@ -81,8 +84,8 @@ export function addCompositionResult(
   context: ValidationContext,
 ): void {
   if (compositionPassed(entry, matched)) return;
-  if (context.predicateOnly === true) {
-    context.failed = true;
+  if (ownField(context, "predicateOnly") === true) {
+    defineOwnData(context, "failed", true);
     return;
   }
   addContextError(context, "invalid-value", path, {
@@ -96,7 +99,8 @@ export function getMemoizedCompositionMatch(
   value: unknown,
   mode: ValidationMode,
 ): boolean | undefined {
-  return memo.get(schema)?.get(value)?.[mode];
+  const modes = memo.get(schema)?.get(value);
+  return modes === undefined ? undefined : ownField(modes, mode);
 }
 
 export function memoizeCompositionMatch(
@@ -112,7 +116,7 @@ export function memoizeCompositionMatch(
     memo.set(schema, values);
   }
   const modes = values.get(value) ?? {};
-  modes[mode] = matches;
+  defineOwnData(modes, mode, matches);
   values.set(value, modes);
 }
 
@@ -126,7 +130,7 @@ export function isSupportedSchema(
   if (typeof type === "string") return isSupportedType(type);
   if (!Array.isArray(type) || type.length === 0) return false;
   for (let index = 0; index < type.length; index++) {
-    const member: unknown = type[index];
+    const member = ownDataValue(type, index);
     if (
       !Object.hasOwn(type, index) ||
       typeof member !== "string" ||
@@ -152,7 +156,7 @@ function isSupportedType(value: string): boolean {
 
 function ownDataValue(value: object, key: PropertyKey): unknown {
   const descriptor = Object.getOwnPropertyDescriptor(value, key);
-  return descriptor !== undefined && "value" in descriptor
+  return descriptor !== undefined && Object.hasOwn(descriptor, "value")
     ? descriptor.value
     : undefined;
 }
@@ -181,7 +185,10 @@ function validateBranchArrayShape(
     return invalidBranchArray(keyword, path, context);
   }
   for (let index = 0; index < value.length; index++) {
-    if (!Object.hasOwn(value, index) || !supportsSchema(value[index])) {
+    if (
+      !Object.hasOwn(value, index) ||
+      !supportsSchema(ownDataValue(value, index))
+    ) {
       addContextError(context, "invalid-schema", path, {
         message: `${keyword} branch ${String(index)} must be a schema object with a supported non-empty type`,
       });

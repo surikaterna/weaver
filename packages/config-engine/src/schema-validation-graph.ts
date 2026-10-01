@@ -1,8 +1,7 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
+import { pushOwn } from "./own-data";
 
 import {
-  COMPOSITION_KEYWORDS,
-  getCompositionBranches,
   hasComposition,
   isSupportedSchema,
 } from "./schema-validation-composition";
@@ -10,7 +9,15 @@ import {
   collectConstraintRoots,
   hasObjectCycle,
 } from "./schema-validation-constraint-graph";
-import { validateSchemaNode } from "./schema-validation-definitions";
+import {
+  validateSchemaContainers,
+  validateSchemaNode,
+} from "./schema-validation-definitions";
+import {
+  pushCompositionChildren,
+  pushSchemaChildren,
+  type SchemaGraphFrame,
+} from "./schema-validation-graph-children";
 import { validateShallowComposition } from "./schema-validation-shallow-composition";
 import {
   hasOnlyTypeLeafChildren,
@@ -20,7 +27,6 @@ import {
 } from "./schema-validation-shallow-graph";
 import {
   addContextError,
-  isSchemaArray,
   type ValidationContext,
   type ValidationPath,
 } from "./schema-validation-support";
@@ -41,14 +47,6 @@ export interface SchemaValidationPlan {
 }
 
 const EMPTY_SCHEMA_VALIDATION_PLAN: SchemaValidationPlan = {};
-
-type SchemaGraphFrame =
-  | {
-      readonly kind: "enter";
-      readonly value: unknown;
-      readonly invalidMessage: string;
-    }
-  | { readonly kind: "exit"; readonly value: ConfigurationPropertySchema };
 
 interface GraphInspectionRuntime {
   readonly context: ValidationContext;
@@ -74,6 +72,7 @@ export function validateSchemaGraph(
     return undefined;
   }
   if (isTypeLeafSchema(schema)) return EMPTY_SCHEMA_VALIDATION_PLAN;
+  if (!validateSchemaContainers(schema, path, context)) return undefined;
   const rootComposed = hasComposition(schema);
   if (!hasSchemaChildren(schema, rootComposed)) {
     return validateSingleSchema(schema, path, context);
@@ -168,6 +167,9 @@ function inspectSchemaGraph(
   const inspection: SchemaInspection = {
     cyclic: false,
     valid: true,
+    composed: undefined,
+    memoEligible: undefined,
+    predicateScalars: undefined,
     constraintRoots,
   };
   const supportsSchema = (value: unknown): boolean =>
@@ -246,6 +248,10 @@ function inspectSchemaNode(
     visits.set(schema, "completed");
     return true;
   }
+  if (!validateSchemaContainers(schema, runtime.path, runtime.context)) {
+    inspection.valid = false;
+    return false;
+  }
   const composed =
     schema === runtime.root ? runtime.rootComposed : hasComposition(schema);
   if (composed) {
@@ -255,7 +261,7 @@ function inspectSchemaNode(
   if (!validateInspectedSchema(schema, composed, runtime)) return false;
   visits.set(schema, "active");
   collectConstraintRoots(schema, inspection.constraintRoots);
-  pending.push({ kind: "exit", value: schema });
+  pushOwn(pending, { kind: "exit", value: schema });
   inspection.predicateScalars ??= new WeakSet();
   if (hasOnlyTypeLeafChildren(schema, inspection.predicateScalars)) {
     if (
@@ -300,96 +306,4 @@ function isKnownSupportedSchema(
   if (!isSupportedSchema(value)) return false;
   visits.set(value, "supported");
   return true;
-}
-
-function pushSchemaChildren(
-  schema: ConfigurationPropertySchema,
-  pending: SchemaGraphFrame[],
-  composed: boolean,
-): void {
-  if (composed) pushCompositionChildren(schema, pending);
-  pushItemChildren(schema, pending);
-  const additional = Object.hasOwn(schema, "additionalProperties")
-    ? schema.additionalProperties
-    : undefined;
-  if (additional !== undefined && typeof additional !== "boolean") {
-    pending.push({
-      kind: "enter",
-      value: additional,
-      invalidMessage:
-        "additionalProperties must be a boolean or schema object with a supported non-empty type",
-    });
-  }
-  pushSchemaMapChildren(schema, "patternProperties", pending);
-  pushSchemaMapChildren(schema, "properties", pending);
-}
-
-function pushSchemaMapChildren(
-  schema: ConfigurationPropertySchema,
-  key: "properties" | "patternProperties",
-  pending: SchemaGraphFrame[],
-): void {
-  if (!Object.hasOwn(schema, key)) return;
-  const map = schema[key];
-  if (map === undefined) return;
-  const names = Object.keys(map);
-  for (let index = names.length - 1; index >= 0; index--) {
-    const name = names[index];
-    if (name === undefined) continue;
-    pending.push({
-      kind: "enter",
-      value: map[name],
-      invalidMessage: `${key} entry ${JSON.stringify(name)} must be a schema object with a supported non-empty type`,
-    });
-  }
-}
-
-function pushItemChildren(
-  schema: ConfigurationPropertySchema,
-  pending: SchemaGraphFrame[],
-): void {
-  if (!Object.hasOwn(schema, "items") || schema.items === undefined) return;
-  if (!isSchemaArray(schema.items)) {
-    pending.push({
-      kind: "enter",
-      value: schema.items,
-      invalidMessage:
-        "items must be a schema object or dense array of schema objects with supported non-empty types",
-    });
-    return;
-  }
-  for (let index = schema.items.length - 1; index >= 0; index--) {
-    pending.push({
-      kind: "enter",
-      value: Object.hasOwn(schema.items, index)
-        ? schema.items[index]
-        : undefined,
-      invalidMessage: `items entry ${String(index)} must be a schema object with a supported non-empty type`,
-    });
-  }
-}
-
-function pushCompositionChildren(
-  schema: ConfigurationPropertySchema,
-  pending: SchemaGraphFrame[],
-): void {
-  for (
-    let keyIndex = COMPOSITION_KEYWORDS.length - 1;
-    keyIndex >= 0;
-    keyIndex--
-  ) {
-    const keyword = COMPOSITION_KEYWORDS[keyIndex];
-    if (keyword === undefined || !Object.hasOwn(schema, keyword)) continue;
-    const branches = getCompositionBranches(schema, keyword);
-    for (let index = branches.length - 1; index >= 0; index--) {
-      pending.push({
-        kind: "enter",
-        value: branches[index],
-        invalidMessage:
-          keyword === "not"
-            ? "not must be a schema object with a supported non-empty type"
-            : `${keyword} branch ${String(index)} must be a schema object with a supported non-empty type`,
-      });
-    }
-  }
 }

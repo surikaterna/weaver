@@ -1,3 +1,6 @@
+import { pushOwn } from "./own-data";
+import { inspectValidationData } from "./schema-validation-input-guard";
+import { ownEntries } from "./schema-validation-own-data";
 import {
   addContextError,
   appendValidationPath,
@@ -19,9 +22,16 @@ export function validateValueGraph(
   path: ValidationPath,
   context: ValidationContext,
 ): boolean {
+  const inspection = inspectValidationData(value);
+  if (!inspection.safe) {
+    addContextError(context, "invalid-value", path, {
+      message: "Configuration values must contain only own plain data",
+    });
+    return false;
+  }
   const cyclePath = findValueCycle(value, path);
-  if (cyclePath === undefined) return true;
-  addContextError(context, "invalid-value", cyclePath, {
+  if (cyclePath === undefined && !inspection.cyclic) return true;
+  addContextError(context, "invalid-value", cyclePath ?? path, {
     message: "Configuration values must not contain cycles",
   });
   return false;
@@ -32,7 +42,7 @@ function findValueCycle(
   path: ValidationPath,
 ): ValidationPath | undefined {
   if (!isObjectValue(value)) return undefined;
-  const entries = Object.entries(value);
+  const entries = ownEntries(value);
   if (!entries.some((entry) => isObjectValue(entry[1]))) return undefined;
   const active = new WeakSet<object>([value]);
   const completed = new WeakSet<object>();
@@ -50,7 +60,7 @@ function findValueCycle(
     if (active.has(frame.value)) return frame.path;
     if (completed.has(frame.value)) continue;
     active.add(frame.value);
-    pending.push({ kind: "exit", value: frame.value });
+    pushOwn(pending, { kind: "exit", value: frame.value });
     pushValueChildren(frame.value, frame.path, pending);
   }
   return undefined;
@@ -61,7 +71,7 @@ function pushValueChildren(
   path: ValidationPath,
   pending: ValueCycleFrame[],
 ): void {
-  pushValueEntries(value, path, Object.entries(value), pending);
+  pushValueEntries(value, path, ownEntries(value), pending);
 }
 
 function pushValueEntries(
@@ -73,7 +83,7 @@ function pushValueEntries(
   for (let index = entries.length - 1; index >= 0; index--) {
     const entry = entries[index];
     if (entry === undefined) continue;
-    pending.push({
+    pushOwn(pending, {
       kind: "enter",
       value: entry[1],
       path: appendValidationPath(path, valuePathSegment(value, entry[0])),

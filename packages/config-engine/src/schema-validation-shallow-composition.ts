@@ -1,4 +1,5 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
+import { pushOwn } from "./own-data";
 
 import {
   COMPOSITION_KEYWORDS,
@@ -89,13 +90,13 @@ function shallowCompositionBranches(
     for (const branch of getCompositionBranches(schema, keyword)) {
       if (branch === schema) return undefined;
       if (isTypeLeafSchema(branch)) {
-        flattened.push(typeLeafBranch(branch, predicateScalars));
+        pushOwn(flattened, typeLeafBranch(branch, predicateScalars));
         continue;
       }
       if (hasComposition(branch)) return undefined;
       const children = inspectTerminalChildren(branch);
       if (children === undefined) return undefined;
-      flattened.push({ schema: branch, children });
+      pushOwn(flattened, { schema: branch, children });
     }
   }
   return flattened;
@@ -106,7 +107,7 @@ function typeLeafBranch(
   predicateScalars: WeakSet<ConfigurationPropertySchema>,
 ): ShallowBranch {
   if (isScalarSchema(schema)) predicateScalars.add(schema);
-  return { schema };
+  return { schema, children: undefined };
 }
 
 function validateShallowBranches(

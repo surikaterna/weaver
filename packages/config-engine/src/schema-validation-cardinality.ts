@@ -1,6 +1,7 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 
 import { deepEqual } from "./deep-equal";
+import { ownField } from "./schema-validation-own-data";
 import { appendContextPath } from "./schema-validation-predicate-context";
 import {
   addBoundedContextError,
@@ -15,23 +16,25 @@ export function validateObjectSize(
   path: ValidationPath,
   context: ValidationContext,
 ): void {
-  if (context.mode === "effective" && schema.minProperties !== undefined) {
+  const minimum = ownField(schema, "minProperties");
+  const maximum = ownField(schema, "maxProperties");
+  if (context.mode === "effective" && minimum !== undefined) {
     addBoundedContextError(
       context,
       path,
       "minProperties",
       Object.keys(value).length,
-      schema.minProperties,
+      minimum,
       ">=",
     );
   }
-  if (schema.maxProperties === undefined) return;
+  if (maximum === undefined) return;
   addBoundedContextError(
     context,
     path,
     "maxProperties",
     Object.keys(value).length,
-    schema.maxProperties,
+    maximum,
     "<=",
   );
 }
@@ -42,23 +45,25 @@ export function validateArraySize(
   path: ValidationPath,
   context: ValidationContext,
 ): void {
-  if (schema.minItems !== undefined) {
+  const minimum = ownField(schema, "minItems");
+  const maximum = ownField(schema, "maxItems");
+  if (minimum !== undefined) {
     addBoundedContextError(
       context,
       path,
       "minItems",
       value.length,
-      schema.minItems,
+      minimum,
       ">=",
     );
   }
-  if (schema.maxItems !== undefined) {
+  if (maximum !== undefined) {
     addBoundedContextError(
       context,
       path,
       "maxItems",
       value.length,
-      schema.maxItems,
+      maximum,
       "<=",
     );
   }
@@ -70,12 +75,12 @@ export function validateUniqueItems(
   path: ValidationPath,
   context: ValidationContext,
 ): void {
-  if (schema.uniqueItems !== true) return;
+  if (ownField(schema, "uniqueItems") !== true) return;
   for (let left = 0; left < value.length; left++) {
     if (!Object.hasOwn(value, left)) continue;
     for (let right = left + 1; right < value.length; right++) {
       if (!Object.hasOwn(value, right)) continue;
-      if (deepEqual(value[left], value[right])) {
+      if (deepEqual(ownField(value, left), ownField(value, right))) {
         addContextError(
           context,
           "invalid-value",

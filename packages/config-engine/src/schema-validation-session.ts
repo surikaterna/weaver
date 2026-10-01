@@ -1,6 +1,8 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-
+import { validationOptionsPath } from "./schema-validation-error-paths";
 import { validateSchemaGraph } from "./schema-validation-graph";
+import { inspectValidationData } from "./schema-validation-input-guard";
+import { ownField } from "./schema-validation-own-data";
 import { resolveMemberSchemas } from "./schema-validation-paths";
 import {
   captureSchemaStability,
@@ -9,6 +11,7 @@ import {
 } from "./schema-validation-schema-stability";
 import {
   createValidationPath,
+  makeError,
   type PathSegmentsResult,
   type SchemaValidationOptions,
   type SchemaValidationPathSegment,
@@ -53,10 +56,16 @@ export function createConfigurationValidationSession(
   schema: ConfigurationPropertySchema,
   options?: SchemaValidationOptions,
 ): ConfigurationValidationSession {
-  const basePath = toPathSegmentsResult(options?.path);
+  const basePath = validationOptionsPath(options);
   let state: PreparationState | undefined;
   const currentPreparation = (): ValidationPreparation => {
+    const pathError = ownField(basePath, "error");
+    if (pathError !== undefined) return { error: invalidPathResult(pathError) };
+    const data = inspectValidationData(schema);
+    if (!data.safe) return { error: unsafeSchemaResult(basePath.segments) };
     if (state !== undefined && schemaStabilityMatches(state.stability)) {
+      if (data.cyclic && Object.hasOwn(state.preparation, "prepared"))
+        return { error: unsafeSchemaResult(basePath.segments) };
       return state.preparation;
     }
     state = createPreparationState(schema, basePath);
@@ -87,15 +96,34 @@ function prepareValidation(
   schema: ConfigurationPropertySchema,
   parsedPath: PathSegmentsResult,
 ): ValidationPreparation {
-  if (parsedPath.error !== undefined) {
-    return { error: invalidPathResult(parsedPath.error) };
+  const pathError = ownField(parsedPath, "error");
+  if (pathError !== undefined) {
+    return { error: invalidPathResult(pathError) };
   }
   const context: ValidationContext = { mode: "partial", errors: [] };
   const path = createValidationPath(parsedPath.segments);
+  const data = inspectValidationData(schema);
+  if (!data.safe) return { error: unsafeSchemaResult(parsedPath.segments) };
   const plan = validateSchemaGraph(schema, path, context);
   if (plan === undefined) return { error: result(context) };
+  if (data.cyclic) return { error: unsafeSchemaResult(parsedPath.segments) };
   return {
     prepared: { baseSegments: parsedPath.segments, path, plan, schema },
+  };
+}
+
+function unsafeSchemaResult(
+  segments: readonly SchemaValidationPathSegment[],
+): SchemaValidationResult {
+  return {
+    valid: false,
+    errors: [
+      makeError(
+        "invalid-schema",
+        segments,
+        "Schema must contain only acyclic own plain data",
+      ),
+    ],
   };
 }
 
@@ -104,7 +132,7 @@ function validatePreparedValue(
   value: unknown,
   mode: ValidationMode,
 ): SchemaValidationResult {
-  if ("error" in preparation) return copyResult(preparation.error);
+  if (isFailedPreparation(preparation)) return copyResult(preparation.error);
   const { path, plan, schema } = preparation.prepared;
   const context: ValidationContext = { mode, errors: [] };
   if (!validateValueGraph(value, path, context)) return result(context);
@@ -117,10 +145,11 @@ function validatePreparedPatch(
   path: string | readonly SchemaValidationPathSegment[],
   value: unknown,
 ): SchemaValidationResult {
-  if ("error" in preparation) return copyResult(preparation.error);
+  if (isFailedPreparation(preparation)) return copyResult(preparation.error);
   const { baseSegments, plan, schema } = preparation.prepared;
   const patchPath = toPathSegmentsResult(path, baseSegments);
-  if (patchPath.error !== undefined) return invalidPathResult(patchPath.error);
+  const pathError = ownField(patchPath, "error");
+  if (pathError !== undefined) return invalidPathResult(pathError);
   const target = resolveMemberSchemas(schema, patchPath.segments, baseSegments);
   if (target.errors.length > 0) return { valid: false, errors: target.errors };
   return validatePatchTargets(
@@ -164,4 +193,10 @@ function invalidPathResult(
 
 function copyResult(result: SchemaValidationResult): SchemaValidationResult {
   return { valid: result.valid, errors: [...result.errors] };
+}
+
+function isFailedPreparation(
+  preparation: ValidationPreparation,
+): preparation is { readonly error: SchemaValidationResult } {
+  return Object.hasOwn(preparation, "error");
 }

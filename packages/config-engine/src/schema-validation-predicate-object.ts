@@ -1,25 +1,23 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
+import { defineOwnData } from "./own-data";
+import { ownEntries, ownField } from "./schema-validation-own-data";
 
 import { hasOwn, type ValidationState } from "./schema-validation-support";
 
-interface PredicateFrameSink {
-  push(frame: {
-    readonly kind: "value";
-    readonly state: ValidationState;
-  }): unknown;
-}
+type PredicateFrameSink = (frame: {
+  readonly kind: "value";
+  readonly state: ValidationState;
+}) => void;
 
 export function queuePredicateObjectFrames(
   state: ValidationState,
   value: Record<string, unknown>,
   pending: PredicateFrameSink,
 ): boolean {
-  if (state.context.predicateOnly !== true) return false;
-  const patterns = Object.hasOwn(state.schema, "patternProperties")
-    ? state.schema.patternProperties
-    : undefined;
+  if (ownField(state.context, "predicateOnly") !== true) return false;
+  const patterns = ownField(state.schema, "patternProperties");
   if (patterns !== undefined) return false;
-  const entries = Object.entries(value);
+  const entries = ownEntries(value);
   for (let index = entries.length - 1; index >= 0; index--) {
     const entry = entries[index];
     if (entry !== undefined) queueMember(state, entry[0], entry[1], pending);
@@ -34,29 +32,25 @@ function queueMember(
   value: unknown,
   pending: PredicateFrameSink,
 ): void {
-  const properties = Object.hasOwn(state.schema, "properties")
-    ? state.schema.properties
-    : undefined;
+  const properties = ownField(state.schema, "properties");
   const declared =
     properties !== undefined && Object.hasOwn(properties, key)
-      ? properties[key]
+      ? ownField(properties, key)
       : undefined;
   if (declared !== undefined) {
-    pending.push({
+    pending({
       kind: "value",
       state: { ...state, schema: declared, value },
     });
     return;
   }
-  const additional = Object.hasOwn(state.schema, "additionalProperties")
-    ? state.schema.additionalProperties
-    : undefined;
+  const additional = ownField(state.schema, "additionalProperties");
   if (additional === true) return;
   if (additional === undefined || additional === false) {
-    state.context.failed = true;
+    defineOwnData(state.context, "failed", true);
     return;
   }
-  pending.push({
+  pending({
     kind: "value",
     state: { ...state, schema: additional, value },
   });
@@ -68,20 +62,21 @@ function queueRequired(
   pending: PredicateFrameSink,
 ): void {
   if (state.context.mode !== "effective") return;
-  const required = Object.hasOwn(state.schema, "required")
-    ? (state.schema.required ?? [])
-    : [];
+  const required = ownField(state.schema, "required") ?? [];
   for (let index = required.length - 1; index >= 0; index--) {
-    const key = required[index];
+    const key = ownField(required, index);
     if (key === undefined || hasOwn(value, key)) continue;
     const propertySchema = ownPropertySchema(state.schema, key);
-    if (propertySchema?.default !== undefined) {
-      pending.push({
+    if (
+      propertySchema !== undefined &&
+      ownField(propertySchema, "default") !== undefined
+    ) {
+      pending({
         kind: "value",
         state: { ...state, schema: propertySchema, value: undefined },
       });
     } else {
-      state.context.failed = true;
+      defineOwnData(state.context, "failed", true);
     }
   }
 }
@@ -90,10 +85,8 @@ function ownPropertySchema(
   schema: ConfigurationPropertySchema,
   key: string,
 ): ConfigurationPropertySchema | undefined {
-  const properties = Object.hasOwn(schema, "properties")
-    ? schema.properties
-    : undefined;
+  const properties = ownField(schema, "properties");
   return properties !== undefined && Object.hasOwn(properties, key)
-    ? properties[key]
+    ? ownField(properties, key)
     : undefined;
 }
