@@ -2,4 +2,6 @@
 "@weaver-conf/config-engine": patch
 ---
 
-Harden the canonical configuration validator with descriptor-first own-data admission, owned scratch entries and own-only schema/member reads. Preserve ordinary validation diagnostics and call-local schema stability while rejecting malformed accessor/exotic data without invoking input getters. Caller schema prototypes alone do not reject valid own schema fields; literal payload/configuration/options/path data retain their separate plain-data restrictions. Standard ambient numeric prototype accessors cannot intercept validation scratch or supply missing schema members. This is not a hostile-intrinsic or Proxy side-effect sandbox.
+Reject unsafe caller configuration values and malformed own path/options slots before semantic reads or coercion. Preserve own schema/member membership, sparse-array distinctions, Unicode/bracket diagnostics, schema-valued additional properties, and mutation-aware call-local cache behavior.
+
+The low-level validator consumes trusted typed schemas, whose getters may execute. Caller schema descriptor admission belongs to canonical registry and facade boundaries. Internal scratch uses native arrays under standard prototypes; executable ambient prototype modification and Proxy reflection are not sandbox guarantees.

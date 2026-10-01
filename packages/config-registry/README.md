@@ -133,13 +133,19 @@ this API does not introduce a global registered-read gate into them.
 ### Structural reuse ledger
 
 The read walker privately imports `allows`, `objectMembers`, `arrayMembers`, and
-`validBranch` from the corrected structural-write witness. Their bodies are
-unchanged and they are not public root exports. Read traversal is iterative and
-uses the real engine branch validator; it does not invoke recursive
-`schemaWriteSupport` or copy a member resolver. The provenance test reverses only
-the four explicitly counted private export prefixes, then applies the retained
-safety reversals and historical digest check. Original-body mutations and
-missing/duplicate/unexpected export anchors remain negative cases.
+`validBranch` from the single structural-write witness. They are not public root
+exports. Read traversal is iterative and uses the real engine branch validator;
+it does not invoke recursive `schemaWriteSupport` or copy a member resolver.
+The witness retains own declaration/tuple lookup, descriptor-first input admission,
+candidate-conditioned branches, array classification and cycle behavior. Internal
+scratch uses native arrays rather than a parallel array-operations library.
+
+The original extraction and its historical digest remain recorded at their earlier
+Git/issue revisions. Current forward changes are not certified as those original
+bytes: safety-span reversal, export-prefix normalization and exact-line-count hash
+reconstruction have been removed. Original behavioral fixtures and the server's
+sole-delegate ownership test remain; ordinary declaration, malformed own path,
+accessor, composition and projection regressions establish current correctness.
 
 An operation-local anchor routing trie captures one detached schema per canonical
 anchor/environment through the supplied reader. Contexts intern structural policy,
