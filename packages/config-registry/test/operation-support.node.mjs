@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { validateEffectiveConfiguration } from "@weaver-conf/config-engine";
 import { schemaWriteSupport, structuralSupportSchema } from "../dist/index.js";
+import { reverseSafety, safetyLedger } from "./structural-witness-own-data-helper.mjs";
 
 const yes = { declared: true, arrayIndex: false, ambiguous: false };
 const no = { declared: false, arrayIndex: false, ambiguous: false };
@@ -13,7 +14,8 @@ const support = (schema, path, value = true, candidate = { enabled: true }, prev
   schemaWriteSupport(schema, path, value, candidate, previous);
 
 test("frozen helper provenance survives the explicit guard-format correction; admission delegates", async () => {
-  const moved = await readFile(new URL("../src/schema-write-support.ts", import.meta.url), "utf8");
+  const corrected = await readFile(new URL("../src/schema-write-support.ts", import.meta.url), "utf8");
+  const moved = reverseSafety(corrected);
   const guard = "    object\n  )\n    return { ...unsupported, ambiguous: true };\n";
   assert.ok(moved.includes(guard));
   const direct = moved.slice(moved.indexOf("function directSupport("), moved.indexOf("function traverseMembers(")).trimEnd();
@@ -29,6 +31,30 @@ test("frozen helper provenance survives the explicit guard-format correction; ad
   assert.equal(delegate, 'export {\n  type StructuralSupport,\n  schemaWriteSupport,\n} from "@weaver-conf/config-registry";\n');
   const admission = await readFile(new URL("../../weaver-server/src/core/config-write-admission.ts", import.meta.url), "utf8");
   assert.match(admission, /import \{ schemaWriteSupport \} from "\.\/schema-write-support";/);
+});
+
+test("literal safety provenance rejects original semantic changes, missing, duplicate and mismatched anchors", async () => {
+  const corrected = await readFile(new URL("../src/schema-write-support.ts", import.meta.url), "utf8");
+  const reconstructDigest = source => {
+    const restored = reverseSafety(source);
+    const guard = "    object\n  )\n    return { ...unsupported, ambiguous: true };\n";
+    const original = restored.replace('import { z } from "zod";\n', "")
+      .replace(/\nexport const structuralSupportSchema = z\.object\(\{[\s\S]*?satisfies z\.ZodType<StructuralSupport>;\n/, "")
+      .replace(guard, "    object\n  ) {\n    return { ...unsupported, ambiguous: true };\n  }\n");
+    return createHash("sha256").update(original).digest("hex");
+  };
+  const expected = "c9402d5735c58a5e18bdafe7b28c9e55de7c2c553285e36eb0f44e8311e0158e";
+  assert.equal(reconstructDigest(corrected), expected);
+  assert.notEqual(reconstructDigest(corrected.replace("if (members.length > 0)", "if (members.length > 1)")), expected);
+  assert.notEqual(reconstructDigest(corrected.replace("one.length === 1", "one.length === 2")), expected);
+  for (const { after } of safetyLedger) {
+    assert.throws(() => reverseSafety(corrected.replace(after, "")), /count|missing/);
+    assert.throws(() => reverseSafety(corrected.replace(after, after + after)), /count/);
+  }
+  assert.throws(() => reverseSafety(corrected.replace('ownField(schema, "items")', "schema.items")), /count/);
+  assert.throws(() => reverseSafety(corrected.replace("function child(", "function notChild(")), /anchor count/);
+  const direct = corrected.slice(corrected.indexOf("function directSupport("), corrected.indexOf("function traverseMembers(")).trimEnd();
+  assert.equal(direct.split("\n").length, 49);
 });
 
 test("object declarations, patterns, schema wildcard and recursive payload trees", () => {

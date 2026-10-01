@@ -1,6 +1,20 @@
 import { validateEffectiveConfiguration } from "@weaver-conf/config-engine";
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 import { z } from "zod";
+import {
+  appendOwn,
+  concatOwn,
+  filterOwn,
+  mapOwn,
+  ownEntries,
+  ownField,
+  ownValue,
+  ownValues,
+  preflightWitness,
+  schemaEntries,
+  someOwn,
+  tailOwn,
+} from "./structural-witness-own-data";
 
 type Schema = ConfigurationPropertySchema;
 
@@ -27,14 +41,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function allows(schema: Schema, type: "object" | "array"): boolean {
-  return Array.isArray(schema.type)
-    ? schema.type.includes(type)
-    : schema.type === type;
+  const declaredType = ownField(schema, "type");
+  return Array.isArray(declaredType)
+    ? someOwn(declaredType, (member) => member === type)
+    : declaredType === type;
 }
 
 function child(value: unknown, key: string): unknown {
-  if (Array.isArray(value)) return value[Number(key)];
-  return isRecord(value) && Object.hasOwn(value, key) ? value[key] : undefined;
+  if (Array.isArray(value)) return ownValue(value, Number(key));
+  return isRecord(value) ? ownValue(value, key) : undefined;
 }
 
 function validBranch(schema: Schema, candidate: unknown): boolean {
@@ -43,17 +58,18 @@ function validBranch(schema: Schema, candidate: unknown): boolean {
 
 function objectMembers(schema: Schema, key: string): Schema[] {
   const members: Schema[] = [];
-  if (schema.properties && Object.hasOwn(schema.properties, key)) {
-    const declared = schema.properties[key];
-    if (declared) members.push(declared);
+  const properties = ownField(schema, "properties");
+  if (properties && Object.hasOwn(properties, key)) {
+    const declared = ownField(properties, key);
+    if (declared) appendOwn(members, declared);
   }
-  for (const [pattern, member] of Object.entries(
-    schema.patternProperties ?? {},
+  for (const [pattern, member] of schemaEntries(
+    ownField(schema, "patternProperties") ?? {},
   )) {
-    if (matchesPattern(pattern, key)) members.push(member);
+    if (matchesPattern(pattern, key)) appendOwn(members, member);
   }
   if (members.length > 0) return members;
-  const additional = schema.additionalProperties;
+  const additional = ownField(schema, "additionalProperties");
   return additional !== null && typeof additional === "object"
     ? [additional]
     : [];
@@ -71,9 +87,9 @@ function arrayMembers(schema: Schema, key: string): Schema[] {
   if (!/^(?:0|[1-9][0-9]*)$/.test(key)) return [];
   const index = Number(key);
   if (!Number.isSafeInteger(index) || index > 4_294_967_294) return [];
-  const items = schema.items;
+  const items = ownField(schema, "items");
   if (!items) return [];
-  const member = Array.isArray(items) ? items[index] : items;
+  const member = Array.isArray(items) ? ownField(items, index) : items;
   return member ? [member] : [];
 }
 
@@ -87,7 +103,7 @@ function directSupport(
 ): StructuralSupport {
   if (path.length === 0)
     return payloadSupport(schema, incoming, candidate, previous, ancestors);
-  const key = path[0];
+  const key = ownField(path, 0);
   if (key === undefined) return unsupported;
   const object = allows(schema, "object");
   const array = allows(schema, "array");
@@ -105,7 +121,7 @@ function directSupport(
     const members = arrayMembers(schema, key);
     return traverseMembers(
       members,
-      path.slice(1),
+      tailOwn(path),
       incoming,
       candidate,
       previous,
@@ -117,7 +133,7 @@ function directSupport(
   const members = object ? objectMembers(schema, key) : [];
   return traverseMembers(
     members,
-    path.slice(1),
+    tailOwn(path),
     incoming,
     candidate,
     previous,
@@ -140,7 +156,7 @@ function traverseMembers(
   let declared = false;
   let nestedArray = arrayIndex;
   let ambiguous = false;
-  for (const member of members) {
+  for (const member of ownValues(members)) {
     const result = walkSupport(
       member,
       path,
@@ -165,7 +181,7 @@ function payloadSupport(
 ): StructuralSupport {
   if (!isRecord(incoming) && !Array.isArray(incoming))
     return { ...unsupported, declared: true };
-  for (const [key, value] of Object.entries(incoming)) {
+  for (const [key, value] of ownEntries(incoming)) {
     const result = directSupport(
       schema,
       [key],
@@ -199,26 +215,26 @@ function walkSupport(
     previous,
     ancestors,
   );
-  const all = schema.allOf ? [...new Set(schema.allOf)].map(combine) : [];
-  const any = schema.anyOf
-    ?.filter((branch) => validBranch(branch, candidate))
-    .map(combine);
-  const one = schema.oneOf
-    ?.filter((branch) => validBranch(branch, candidate))
-    .map(combine);
+  const allOf = ownField(schema, "allOf");
+  const all = allOf ? mapOwn(new Set(ownValues(allOf)), combine) : [];
+  const valid = (branch: Schema) => validBranch(branch, candidate);
+  const anyOf = ownField(schema, "anyOf");
+  const any = anyOf && mapOwn(filterOwn(anyOf, valid), combine);
+  const oneOf = ownField(schema, "oneOf");
+  const one = oneOf && mapOwn(filterOwn(oneOf, valid), combine);
   ancestors.delete(schema);
-  const witnesses = [direct, ...all];
+  const witnesses = concatOwn([direct], all);
   const declared =
-    (witnesses.some((part) => part.declared) ||
-      (any?.some((part) => part.declared) ?? false) ||
-      (one?.some((part) => part.declared) ?? false)) &&
-    (!any || any.some((part) => part.declared)) &&
-    (!one || (one.length === 1 && one[0]?.declared === true));
-  const parts = [...witnesses, ...(any ?? []), ...(one ?? [])];
+    (someOwn(witnesses, (part) => part.declared) ||
+      (any ? someOwn(any, (part) => part.declared) : false) ||
+      (one ? someOwn(one, (part) => part.declared) : false)) &&
+    (!any || someOwn(any, (part) => part.declared)) &&
+    (!one || (one.length === 1 && ownField(one, 0)?.declared === true));
+  const parts = concatOwn(witnesses, any ?? [], one ?? []);
   return {
     declared,
-    arrayIndex: parts.some((part) => part.arrayIndex),
-    ambiguous: parts.some((part) => part.ambiguous),
+    arrayIndex: someOwn(parts, (part) => part.arrayIndex),
+    ambiguous: someOwn(parts, (part) => part.ambiguous),
   };
 }
 
@@ -229,6 +245,7 @@ export function schemaWriteSupport(
   fullCandidate: unknown,
   previous: unknown,
 ): StructuralSupport {
+  preflightWitness(schema, path, incoming, fullCandidate, previous);
   return walkSupport(
     schema,
     path,

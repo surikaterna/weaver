@@ -13,6 +13,12 @@ const registry: CanonicalSchemaRegistryReader = createCanonicalSchemaRegistry({ 
 const adapter = createRegistryAdapter({ defaultEnvironment: 'dev' });
 const result: StructuralSupport = schemaWriteSupport({ type: 'boolean' }, [], true, true, false);
 structuralSupportSchema.parse(result);
+const tupleSupport: StructuralSupport = schemaWriteSupport(
+  { type: 'array', items: [{ type: 'boolean' }] }, ['1'], true, [], []);
+const branchSupport: StructuralSupport = schemaWriteSupport(
+  { type: 'object', anyOf: [{ type: 'object', properties: { enabled: { type: 'boolean' } }, required: ['enabled'] }] },
+  ['enabled'], true, { enabled: true }, {});
+structuralSupportSchema.parse(tupleSupport); structuralSupportSchema.parse(branchSupport);
 // @ts-expect-error Structural support is not a governed writer.
 registry.set('enabled', true);
 // @ts-expect-error The support result must preserve boolean fields.

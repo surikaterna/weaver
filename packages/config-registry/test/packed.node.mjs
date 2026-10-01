@@ -17,6 +17,7 @@ async function removeOwnedParent(parent, failed) {
 }
 
 async function nodeConsumers(directory) {
+  const { ownDataExercise } = await import("./structural-witness-own-data-helper.mjs");
   for (const cjs of [false, true]) {
     const filename = await fixture(directory, `runtime.${cjs ? "cjs" : "mjs"}`,
       `${cjs ? "const assert = require('node:assert/strict');" : "import assert from 'node:assert/strict';"}
@@ -25,6 +26,7 @@ async function nodeConsumers(directory) {
       assert.deepEqual(Object.keys(support).sort(), ${JSON.stringify(rootExports)});
       assert.deepEqual(Object.keys(internalApi).sort(), ${JSON.stringify(internalExports)});
       for (const api of [support, internalApi]) { ${exercise} }
+      ${ownDataExercise}
       console.log('packed runtime real registrations/reads/pages/validators passed');`);
     console.log(run(process.execPath, [filename], directory));
   }
