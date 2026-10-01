@@ -121,3 +121,70 @@ test("protected config and tainted mount inspection remain omitted", () => {
   assert.equal(inspectPublicConfig("_weaver.registry.secret", layers).effectiveValue, undefined);
   assert.equal(inspectPublicConfig("alias", layers).effectiveValue, undefined);
 });
+
+function mountChain(size, terminal) {
+  const entries = { terminal: { public: true }, nested: { alias: { _weaver: "mount", source: "node0" } } };
+  for (let index = 0; index < size; index++) {
+    Object.defineProperty(entries, `node${index}`, {
+      value: { _weaver: "mount", source: index === size - 1 ? terminal : `node${index + 1}` },
+      enumerable: true,
+    });
+  }
+  return entries;
+}
+
+function underNumericMountTrap(operation) {
+  let getters = 0, setters = 0, result;
+  const descriptor = Object.getOwnPropertyDescriptor(Object.prototype, "700");
+  Object.defineProperty(Object.prototype, "700", {
+    configurable: true,
+    get() { getters++; return "ambient"; },
+    set() { setters++; },
+  });
+  try { result = operation(); }
+  finally {
+    if (descriptor) Object.defineProperty(Object.prototype, "700", descriptor);
+    else delete Object.prototype["700"];
+  }
+  assert.equal(getters, 0);
+  assert.equal(setters, 0);
+  return result;
+}
+
+function assertMountViews(entries, omitted) {
+  const projected = underNumericMountTrap(() => publicConfigView.entries(entries));
+  const inspected = underNumericMountTrap(() => inspectPublicConfig("node0", [{ layer: "core", entries }]));
+  const delta = underNumericMountTrap(() => publicConfigView.delta({
+    action: "set", key: "alias", value: { _weaver: "mount", source: "node0" },
+    layer: "core", environment: "test", timestamp: "2026-10-01T00:00:00Z",
+  }, entries));
+  assert.equal(Object.hasOwn(projected, "node0"), !omitted);
+  assert.equal(Object.hasOwn(projected.nested, "alias"), !omitted);
+  assert.equal(inspected.effectiveValue === undefined, omitted);
+  assert.equal(delta.value === undefined, omitted);
+  if (omitted) {
+    assert.deepEqual(inspected.layerValues, {});
+    assert.equal(inspected.effectiveLayer, undefined);
+    for (const key of Object.keys(entries).filter(key => key.startsWith("node"))) assert.equal(Object.hasOwn(projected, key), false);
+  } else {
+    assert.equal(inspected.effectiveValue.source, "node1");
+    assert.equal(inspected.effectiveLayer, "core");
+    assert.equal(delta.value.source, "node0");
+    assert.equal(Object.hasOwn(projected, "node700"), true);
+  }
+}
+
+for (const size of [702, 20000]) {
+  for (const [kind, terminal, omitted] of [
+    ["public", "terminal", false],
+    ["unregistered protected", "_weaver.unregistered.secret", true],
+    ["public cycle", "node0", false],
+    ["protected cycle", "_weaver.loop", true],
+  ]) {
+    test(`${size} ${kind} own-data mount chain preserves redaction and memoization with numeric traps`, () => {
+      const entries = mountChain(size, terminal);
+      if (kind === "protected cycle") Object.defineProperty(entries, "_weaver", { value: { loop: { _weaver: "mount", source: "node0" } }, enumerable: true });
+      assertMountViews(entries, omitted);
+    });
+  }
+}

@@ -40,7 +40,6 @@ function createMountTaintClassifier(
   const memo = new Map<string, boolean>();
 
   function sourceIsTainted(source: string): boolean {
-    const visited: string[] = [];
     const local = new Set<string>();
     let current = source;
     let terminal = false;
@@ -56,13 +55,12 @@ function createMountTaintClassifier(
       }
       if (local.has(current)) break;
       local.add(current);
-      visited.push(current);
       const target = safeDeepGet(state, current);
       const mount = ownMount(target);
       if (!mount) break;
       current = mount.source;
     }
-    for (const path of visited) memo.set(path, terminal);
+    for (const path of local) memo.set(path, terminal);
     return terminal;
   }
 
