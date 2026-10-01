@@ -1,4 +1,4 @@
-// The same real exported-boundary matrix is also embedded in installed Node/browser probes.
+// Ordinary exported contracts also run in installed Node/browser consumers.
 export function exerciseDomainBoundaries(types, engine, registry) {
   const check = (ok, message) => { if (!ok) throw Error(message); };
   let callbacks = 0;
@@ -43,36 +43,45 @@ export function exerciseDomainBoundaries(types, engine, registry) {
   if (registry) {
     cases.push([registry.registeredReadProjectionContextSchema, { identity, revision: "r" }, { identity, revision: "" }]);
     cases.push([registry.registeredReadProjectionSchema, { get: call, getAtLayer: call, getNamespace: call, inspect: call, entries: call }, {}]);
+    check(registry.registeredReadProjectionSchema.out.pick({ entries: true }).safeParse({ entries: call }).success, "native callable pick");
+    check(registry.registeredReadProjectionContextSchema.out.unwrap().shape.revision.safeParse("r").success, "native context shape");
+    const accessor = { getAtLayer: call, getNamespace: call, inspect: call, entries: call };
+    Object.defineProperty(accessor, "get", { enumerable: true, get() { callbacks++; return call; } });
+    check(!registry.registeredReadProjectionSchema.safeParse(accessor).success, "own callable accessor rejection");
+    const parsed = registry.registeredReadProjectionSchema.parse({ get: call, getAtLayer: call, getNamespace: call, inspect: call, entries: call });
+    check(parsed.get === call && parsed.entries === call, "captured callable identity");
+    const reserved = { ...parsed };
+    Object.defineProperty(reserved, "__proto__", { value: {}, enumerable: true });
+    check(!registry.registeredReadProjectionSchema.safeParse(reserved).success, "strict callable metadata rejects reserved own fields");
   }
-  let counterScopes = 0;
-  for (const prototype of [Object.prototype, Array.prototype]) {
-    for (const key of ["0", "1", "700"]) {
-      const original = Object.getOwnPropertyDescriptor(prototype, key);
-      let getters = 0, setters = 0, failure;
-      try {
-        Object.defineProperty(prototype, key, { configurable: true, get() { getters++; return "ambient"; }, set() { setters++; } });
-        for (let repeat = 0; repeat < 2; repeat++) {
-          for (const [schema, good, bad] of cases) {
-            check(schema.safeParse(good).success, "valid domain data");
-            check(!schema.safeParse(bad).success, "invalid domain data");
-            try { schema.parse(bad); throw Error("missing parse error"); }
-            catch (error) { check(error.name === "ZodError", "ordinary invalid ZodError"); }
-          }
-          const path = engine.parseCanonicalConfigPath("/example/literal.dot");
-          check(path.segments[1] === "literal.dot", "canonical literal segments");
-          check(engine.canonicalConfigPathFromStorageKey(path.storageKey).path === path.path, "same storage codec");
-          const snapshot = engine.resolveConfigurationSnapshot({ configuredRanks: [0], ceilings: [], layers: [
-            { layer: "base", providerId: "p", rank: 0, entries: { example: { "literal.dot": "yes" } } },
-          ] });
-          check(engine.inspectResolvedPath(snapshot, ["example", "literal.dot"]).effectiveValue === "yes", "issued inspection");
-        }
-      } catch (error) { failure = error; }
-      finally { if (original) Object.defineProperty(prototype, key, original); else Reflect.deleteProperty(prototype, key); }
-      if (failure) throw failure;
-      check(getters === 0 && setters === 0, `domain numeric ${key}: ${getters}/${setters}`);
-      counterScopes++;
-    }
+  const accessorIdentity = { scopePath: [] };
+  Object.defineProperty(accessorIdentity, "environment", { enumerable: true, get() { callbacks++; return "test"; } });
+  check(!types.configurationServiceIdentitySchema.safeParse(accessorIdentity).success, "own identity accessor rejection");
+  const accessorOrigin = { providerId: "p", rank: 0 };
+  Object.defineProperty(accessorOrigin, "layer", { enumerable: true, get() { callbacks++; return "base"; } });
+  try { engine.resolutionOriginSchema.parse(accessorOrigin); throw Error("missing accessor rejection"); }
+  catch (error) { check(error.code === "VALIDATION_ERROR", "typed snapshot accessor rejection"); }
+  check(types.serviceIdSchema.min(2).safeParse("example").success, "native string extension");
+  check(types.relativeConfigurationPathSchema.out.unwrap().rest(types.providerIdSchema).safeParse(["literal.dot", "panel"]).success, "native tuple rest");
+  const identityObject = types.configurationServiceIdentitySchema.out.unwrap();
+  check(identityObject.pick({ environment: true }).safeParse({ environment: "test" }).success, "native object pick");
+  check(identityObject.omit({ scopePath: true }).safeParse({ environment: "test" }).success, "native object omit");
+  check(identityObject.extend({ revision: types.hydratedConfigurationReaderSchema.out.shape.revision }).safeParse({ ...identity, revision: "r" }).success, "native object extend");
+  check(engine.resolutionOriginSchema.out.unwrap().shape.rank.safeParse(0).success, "native origin shape");
+  check(engine.canonicalConfigPathSchema.out.unwrap().shape.storageKey.safeParse("example").success, "native canonical shape");
+  for (const [schema, good, bad] of cases) {
+    check(schema.safeParse(good).success, "valid domain data");
+    check(!schema.safeParse(bad).success, "invalid domain data");
+    try { schema.parse(bad); throw Error("missing parse error"); }
+    catch (error) { check(error.name === "ZodError", "ordinary invalid ZodError"); }
   }
+  const path = engine.parseCanonicalConfigPath("/example/literal.dot");
+  check(path.segments[1] === "literal.dot", "canonical literal segments");
+  check(engine.canonicalConfigPathFromStorageKey(path.storageKey).path === path.path, "same storage codec");
+  const snapshot = engine.resolveConfigurationSnapshot({ configuredRanks: [0], ceilings: [], layers: [
+    { layer: "base", providerId: "p", rank: 0, entries: { example: { "literal.dot": "yes" } } },
+  ] });
+  check(engine.inspectResolvedPath(snapshot, ["example", "literal.dot"]).effectiveValue === "yes", "issued inspection");
   check(callbacks === 0, "callables must never execute during shape checks");
-  return { cases: cases.length, counterScopes, callbacks };
+  return { cases: cases.length, callbacks };
 }

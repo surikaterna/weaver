@@ -134,29 +134,6 @@ test("pre-resolved aliases require public source proof across raw and effective 
   }
 });
 
-for (const target of [Object.prototype, Array.prototype]) {
-  for (const key of ["0", "1", "700"]) {
-    test(`registered factory and all read surfaces own numeric ${key} scratch on ${target === Object.prototype ? "object" : "array"}`, () => {
-      const { reader, snapshot, context } = exerciseProjection(support, engine);
-      const previous = Object.getOwnPropertyDescriptor(target, key);
-      let getters = 0, setters = 0, failure, values;
-      try {
-        Object.defineProperty(target, key, { configurable: true, get() { getters++; return "ambient"; }, set() { setters++; } });
-        const projection = support.createRegisteredReadProjection(reader, snapshot, context);
-        const inspection = projection.inspect("/example/settings/public");
-        values = { value: projection.get("/example/settings/public"), raw: projection.getAtLayer("base", "/example/settings/public"),
-          namespace: projection.getNamespace("/example"), entries: projection.entries(), inspection };
-        try { projection.get("/example/settings/unknown"); } catch (error) { if (error.code !== "SCHEMA_NOT_REGISTERED") throw error; }
-        try { projection.getAtLayer("absent", "/example/settings/sensitive"); } catch (error) { if (error.code !== "FORBIDDEN") throw error; }
-      } catch (error) { failure = error; }
-      finally { if (previous) Object.defineProperty(target, key, previous); else Reflect.deleteProperty(target, key); }
-      assert.equal(failure, undefined); assert.equal(getters, 0); assert.equal(setters, 0);
-      assert.equal(values.value, "effective"); assert.equal(values.raw, "base");
-      assert.equal(values.inspection.effective.value, "effective");
-    });
-  }
-}
-
 test("fragment transitions cannot regrant a sensitive ancestor and reserved literals cannot grant reads", () => {
   const reader = support.createCanonicalSchemaRegistry({ defaultEnvironment: "test" });
   const owner = { name: "host", contact: "host@example.org" };

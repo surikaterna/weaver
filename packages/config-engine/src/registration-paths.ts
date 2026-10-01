@@ -1,16 +1,11 @@
 import {
-  captureDomain,
   createWeaverError,
-  domainSchema,
-  hasDomainFields,
-  isDenseDomainArray,
   providerIdSchema,
   serviceIdSchema,
   slotPathSchema,
 } from "@weaver-conf/config-types";
-import type { z } from "zod";
+import { z } from "zod";
 import { copySnapshotData } from "./descriptor-copy";
-import { isPlainObject, ownDataValue } from "./own-data";
 import { assertSafePathSegment, buildPath, parsePath } from "./path";
 
 export const WEAVER_INTERNAL_ROOT = "/_weaver";
@@ -32,11 +27,17 @@ export interface CanonicalConfigPath {
   readonly storageKey: string;
 }
 
-export const canonicalConfigPathSchema: z.ZodType<CanonicalConfigPath> =
-  domainSchema<unknown, CanonicalConfigPath>(
-    (input) => captureDomain(copySnapshotData(input), isCanonicalPathData),
-    "Invalid canonical path data",
-  );
+export const canonicalConfigPathSchema = z.preprocess(
+  (input) => copySnapshotData(input, true),
+  z
+    .strictObject({
+      path: z.string(),
+      segments: z.array(z.string()).readonly(),
+      storageKey: z.string(),
+    })
+    .superRefine(validateCanonicalConfigPath)
+    .readonly(),
+);
 
 export function parseCanonicalConfigPath(path: string): CanonicalConfigPath {
   if (typeof path !== "string")
@@ -54,12 +55,7 @@ export function canonicalConfigPathFromSegments(
   segments: readonly string[],
 ): CanonicalConfigPath {
   const copied = copySnapshotData(segments);
-  if (
-    !isDenseDomainArray(
-      copied,
-      (value): value is string => typeof value === "string",
-    )
-  )
+  if (!ownStringSegments(copied))
     throw createWeaverError(
       "VALIDATION_ERROR",
       "Path segments must be own strings",
@@ -199,29 +195,33 @@ function invalidPath(path: string, reason: string): never {
   throw createWeaverError("VALIDATION_ERROR", `Path "${path}" ${reason}`);
 }
 
-function isCanonicalPathData(input: unknown): input is CanonicalConfigPath {
-  if (
-    !isPlainObject(input) ||
-    !hasDomainFields(input, ["path", "segments", "storageKey"])
-  )
-    return false;
-  const path = ownDataValue(input, "path");
-  const storageKey = ownDataValue(input, "storageKey");
-  const segments = ownDataValue(input, "segments");
-  if (
-    typeof path !== "string" ||
-    typeof storageKey !== "string" ||
-    !isDenseDomainArray(
-      segments,
-      (value): value is string => typeof value === "string",
-    )
-  )
-    return false;
+function validateCanonicalConfigPath(
+  value: CanonicalConfigPath,
+  context: z.RefinementCtx,
+): void {
   try {
-    for (const segment of segments) validateCanonicalSegment(segment);
-    const expectedPath = segments.length === 0 ? "/" : `/${segments.join("/")}`;
-    return path === expectedPath && storageKey === buildPath(segments);
+    for (const segment of value.segments) validateCanonicalSegment(segment);
+    const expectedPath =
+      value.segments.length === 0 ? "/" : `/${value.segments.join("/")}`;
+    if (value.path !== expectedPath)
+      context.addIssue({ code: "custom", message: "Canonical path mismatch" });
+    if (value.storageKey !== buildPath(value.segments))
+      context.addIssue({ code: "custom", message: "Storage key mismatch" });
   } catch {
-    return false;
+    context.addIssue({ code: "custom", message: "Invalid canonical path" });
   }
+}
+
+function ownStringSegments(value: unknown): value is string[] {
+  if (!Array.isArray(value)) return false;
+  for (let index = 0; index < value.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (
+      !descriptor ||
+      !Object.hasOwn(descriptor, "value") ||
+      typeof descriptor.value !== "string"
+    )
+      return false;
+  }
+  return true;
 }

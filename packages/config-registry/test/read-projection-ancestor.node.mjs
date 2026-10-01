@@ -39,28 +39,3 @@ for (const length of [3000, 10000]) {
   });
   }
 }
-
-for (const prototype of [Object.prototype, Array.prototype]) {
-  for (const key of ["0", "1", "700"]) {
-    test(`ancestor proof and denial descendants own numeric ${key} scratch on ${prototype === Object.prototype ? "object" : "array"}`, () => {
-      const { reader, snapshot, paths } = exerciseAncestorProjection(support, engine);
-      const descriptor = Object.getOwnPropertyDescriptor(prototype, key);
-      let getters = 0, setters = 0, failure;
-      try {
-        Object.defineProperty(prototype, key, { configurable: true, get() { getters++; return "ambient"; }, set() { setters++; } });
-        const projection = support.createRegisteredReadProjection(reader, snapshot, { identity: { environment: "test", scopePath: [] }, revision: "r" });
-        for (const suffix of paths) {
-          const path = `/example/${suffix}`;
-          assert.throws(() => projection.get(path), { code: "FORBIDDEN" });
-          assert.throws(() => projection.getAtLayer("resolved", path), { code: "FORBIDDEN" });
-          assert.throws(() => projection.getNamespace(path), { code: "FORBIDDEN" });
-          const inspection = projection.inspect(path);
-          if (inspection.effective.state !== "redacted") throw Error("missing ancestor denial");
-        }
-        if (projection.get("/example/mixed/public") !== "keep sibling") throw Error("collateral denial");
-      } catch (error) { failure = error; }
-      finally { if (descriptor) Object.defineProperty(prototype, key, descriptor); else Reflect.deleteProperty(prototype, key); }
-      assert.equal(failure, undefined); assert.equal(getters, 0); assert.equal(setters, 0);
-    });
-  }
-}

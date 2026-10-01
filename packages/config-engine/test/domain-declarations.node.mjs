@@ -16,9 +16,10 @@ const domains = [
   ["config-types", "schemas-service-capabilities", ["configurationServiceIdentitySchema", "configurationInspectionValueSchema", "configurationLayerContributionSchema", "hydratedConfigurationInspectionSchema", "configurationEffectiveChangeSchema", "configurationServiceWriteOptionsSchema", "configurationServiceWriteResultSchema", "hydratedConfigurationReaderSchema", "hydratedConfigurationServiceSchema", "hydratedScopedConfigurationServiceSchema", "hydratedServiceConfigurationServiceSchema"]],
   ["config-engine", "snapshot-contracts", ["resolutionPathSchema", "resolutionOriginSchema", "resolutionLayerSchema", "resolutionCeilingSchema", "resolutionSnapshotInputSchema", "resolutionContributionSchema", "configurationSnapshotSchema", "resolvedPathInspectionSchema"]],
   ["config-registry", "registered-read-contracts", ["registeredReadProjectionContextSchema", "registeredReadProjectionSchema"]],
+  ["config-engine", "registration-paths", ["canonicalConfigPathSchema"]],
 ];
 
-test("actual pinned source declarations preserve all domain input/output types while containers migrate", async () => {
+test("native contracts restore pinned schema input/output types", async () => {
   const directory = await mkdtemp(join(tmpdir(), "weaver-domain-types-"));
   try {
     const before = join(directory, "before"); await mkdir(before);
@@ -41,6 +42,17 @@ test("actual pinned source declarations preserve all domain input/output types w
         }
       }
     });
+    lines.push(
+      "A0.serviceIdSchema.min(2); A0.providerIdSchema.regex(/panel/);",
+      "A1.relativeConfigurationPathSchema.out.unwrap().rest(A0.providerIdSchema);",
+      "A2.configurationServiceIdentitySchema.out.unwrap().pick({ environment: true });",
+      "A2.configurationServiceIdentitySchema.out.unwrap().omit({ scopePath: true });",
+      "A2.configurationServiceIdentitySchema.out.unwrap().extend({ revision: A2.hydratedConfigurationReaderSchema.out.shape.revision });",
+      "A3.resolutionOriginSchema.out.unwrap().shape.rank.finite();",
+      "A4.registeredReadProjectionSchema.out.pick({ entries: true });",
+      "A4.registeredReadProjectionContextSchema.out.unwrap().shape.revision.min(1);",
+      "A5.canonicalConfigPathSchema.out.unwrap().shape.storageKey.min(1);",
+    );
     const fixture = join(directory, "proof.mts"); await writeFile(fixture, lines.join("\n"));
     const options = { strict: true, exactOptionalPropertyTypes: true, noEmit: true, skipLibCheck: false, types: [],
       target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
@@ -50,7 +62,7 @@ test("actual pinned source declarations preserve all domain input/output types w
     const diagnostics = ts.getPreEmitDiagnostics(program);
     assert.equal(diagnostics.length, 0, ts.formatDiagnosticsWithColorAndContext(diagnostics, {
       getCurrentDirectory: () => root, getCanonicalFileName: value => value, getNewLine: () => "\n" }));
-    console.log("Actual443ab01 source: 28 named schema domains, 56 input/output equivalence checks, strict types=[] skipLibCheck=false");
+    console.log("Actual443ab01 source: 29 named schema domains, 58 input/output equivalence checks, strict types=[] skipLibCheck=false");
     assert.match(await readFile(join(before, "packages/config-types/src/schemas-service-capabilities.ts"), "utf8"), /\.strictObject/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

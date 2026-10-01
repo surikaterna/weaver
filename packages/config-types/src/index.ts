@@ -12,24 +12,6 @@ export type {
 // cache.ts — Scope resolution cache interface
 export type { ScopeResolutionCache } from "./cache";
 export { formatScopePath, serializeScopePath } from "./cache";
-export {
-  appendDomainValue,
-  captureDomain,
-  type DomainCapture,
-  domainSchema,
-  hasDomainFields,
-  isDenseDomainArray,
-  isDomainNonempty,
-  isDomainRecord,
-  isDomainString,
-  ownDomainValue,
-} from "./domain-capture";
-export {
-  isCanonicalConfigurationPath,
-  isLiteralConfigurationSegment,
-  isPublicSlashPath,
-  isRegistrationEnvironment,
-} from "./domain-paths";
 // environment.ts — Environment-aware provider types and provenance tracking
 export type {
   ConfigValueSource,
@@ -348,10 +330,6 @@ export type {
   HydratedScopedConfigurationService,
   HydratedServiceConfigurationService,
 } from "./service-capabilities";
-export {
-  captureConfigurationServiceIdentity,
-  isConfigurationServiceIdentity,
-} from "./service-contract-captures";
 export { captureServiceData } from "./service-data-boundary";
 export type {
   CanonicalConfigurationPath,

@@ -1,49 +1,42 @@
+import type { z } from "zod";
 import type { WeaverError } from "./errors";
 import type { Result } from "./result";
+import type {
+  configurationEffectiveChangeSchema,
+  configurationInspectionValueSchema,
+  configurationLayerContributionSchema,
+  configurationServiceIdentitySchema,
+  configurationServiceWriteOptionsSchema,
+  configurationServiceWriteResultSchema,
+  hydratedConfigurationInspectionSchema,
+} from "./schemas-service-capabilities";
 import type {
   CanonicalConfigurationPath,
   RelativeConfigurationPath,
 } from "./service-paths";
 import type { ScopeInstance, Unsubscribe } from "./types";
 
-export type ConfigurationServiceIdentity = Readonly<{
-  environment: string;
-  scopePath: readonly Readonly<ScopeInstance>[];
-}>;
-export type ConfigurationInspectionValue =
-  | Readonly<{ state: "missing" }>
-  | Readonly<{ state: "redacted" }>
-  | Readonly<{ state: "value"; value: NonNullable<unknown> | null }>;
-export type ConfigurationLayerContribution = ConfigurationInspectionValue &
-  Readonly<{ layer: string; providerId: string }>;
-export type HydratedConfigurationInspection = Readonly<{
-  path: CanonicalConfigurationPath;
-  identity: ConfigurationServiceIdentity;
-  revision: string;
-  effective: ConfigurationInspectionValue;
-  effectiveLayer?: string | undefined;
-  contributions: readonly ConfigurationLayerContribution[];
-}>;
-export type ConfigurationEffectiveChange = Readonly<{
-  path: CanonicalConfigurationPath;
-  identity: ConfigurationServiceIdentity;
-  revision: string;
-  previous: ConfigurationInspectionValue;
-  current: ConfigurationInspectionValue;
-  cause: "write" | "remove" | "reload" | "external" | "session";
-  reloadBehavior: "hot" | "restart-required" | "rolling-restart";
-}>;
-export type ConfigurationServiceWriteOptions = Readonly<{
-  layer: string;
-  ifRevision?: string | undefined;
-}>;
-export type ConfigurationServiceWriteResult =
-  | Readonly<{ success: true; layer: string; revision: string }>
-  | Readonly<{
-      success: false;
-      error: Readonly<WeaverError>;
-      outcome: "rejected" | "unknown";
-    }>;
+export type ConfigurationServiceIdentity = z.infer<
+  typeof configurationServiceIdentitySchema
+>;
+export type ConfigurationInspectionValue = z.infer<
+  typeof configurationInspectionValueSchema
+>;
+export type ConfigurationLayerContribution = z.infer<
+  typeof configurationLayerContributionSchema
+>;
+export type HydratedConfigurationInspection = z.infer<
+  typeof hydratedConfigurationInspectionSchema
+>;
+export type ConfigurationEffectiveChange = z.infer<
+  typeof configurationEffectiveChangeSchema
+>;
+export type ConfigurationServiceWriteOptions = z.infer<
+  typeof configurationServiceWriteOptionsSchema
+>;
+export type ConfigurationServiceWriteResult = z.infer<
+  typeof configurationServiceWriteResultSchema
+>;
 
 /** Synchronous coherent snapshots; cold/disposed reads throw SCOPE_NOT_LOADED/DISPOSED. */
 export interface HydratedConfigurationReader {

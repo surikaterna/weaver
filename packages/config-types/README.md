@@ -104,39 +104,25 @@ All core types have corresponding Zod schemas exported from `schemas-core` and `
 ## License
 
 MIT
-## Domain schema adapters (pre-1 migration)
+## Native contracts and caller-data admission
 
-The path/environment/identifier, configuration-service DTO/capability, and coupled
-snapshot/read schemas use descriptor-first domain captures rather than concrete
-Zod object, tuple, or preprocess containers. This is a minor breaking concrete
-schema API change during pre-1 development, not a domain or wire redesign.
-`z.input`, `z.output`, brands, nonempty readonly relative tuples, ordered identity
-scopes, and callable signatures are retained. Normal `parse`/`safeParse` usage is
-unchanged; failed domain checks return payload-safe Zod errors. Engine snapshot
-hazards retain their typed Weaver-error rejection before reads.
+Paths and identifiers use native Zod string schemas. Service DTOs and capabilities
+use native object, union and readonly tuple schemas behind descriptor-first
+admission. Zod owns the domain rules; no parallel domain-validator framework is
+required. `parse`/`safeParse`, schema input/output types, brands, ordered scopes,
+nonempty relative tuples and callable signatures retain their original meaning.
+For guarded schemas, the native contract is available through `.out`; unwrap a
+readonly schema before using `.shape`, `.extend`, `.pick` or `.omit`. Refinements
+still apply; use Zod's `safeExtend` when extending an object with cross-field rules.
 
-Do not traverse `.in`/`.out`/`.shape` or use `unwrap`/`extend`/`pick` on the migrated
-schemas. Use domain helpers or declare an application-specific Zod schema instead:
+Admission rejects own accessors without invoking them, rejects boundary-specific
+cycles/exotic containers/symbols, preserves acyclic sharing, and never freezes a
+borrowed input. Ordinary data arrays may retain holes; structural metadata arrays
+must be dense. Snapshot data and service data retain their distinct reserved-key
+and executable-data rules. Callable checks do not execute or authenticate a
+capability. The engine's `parsePath`/`buildPath` remains the storage codec.
 
-```ts
-import { captureConfigurationServiceIdentity } from "@weaver-conf/config-types";
-const result = captureConfigurationServiceIdentity(input);
-if (result.success) {
-  // Detached, frozen identity with its original ordered scope tuple.
-  consumeIdentity(result.value);
-}
-```
-
-`isRegistrationEnvironment`, `isPublicSlashPath`,
-`isLiteralConfigurationSegment`, and `isCanonicalConfigurationPath` are the same
-predicates used by public schemas. They do not normalize Unicode, decode paths,
-infer principals, or authenticate an inspection handle. Callable schema checks
-never invoke capabilities or prove their behavior. Unrelated concrete schemas,
-including `scopeInstanceSchema`, retain their object APIs.
-
-Captures inspect all own descriptors before domain fields, reject boundary-specific
-cycles/exotic containers/symbols, preserve acyclic sharing, and never freeze a
-borrowed input. Ordinary data arrays may retain holes; structural identity and
-contribution arrays must be dense. Snapshot data and service data retain their
-distinct reserved-key and executable-data rules. The storage codec remains the
-engine's existing `parsePath`/`buildPath` authority.
+These are caller-data contracts under standard JavaScript prototypes, not a
+sandbox for executable modification of ambient Object/Array prototypes or Proxy
+reflection. Native Zod compilation, issue arrays and output construction are
+ordinary trusted implementation machinery.

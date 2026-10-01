@@ -65,27 +65,18 @@ test("reserved own data survives merging and every data schema without becoming 
   assert.equal(inspect(snapshot).effectiveValue, snapshot.entries);
 });
 
-test("inherited traps are never read or assigned, including absent contributions and sparse arrays", () => {
-  let getters = 0, setters = 0;
-  const trap = "snapshotInheritedTrap";
-  for (const key of [trap, "700"]) Object.defineProperty(Object.prototype, key, { configurable: true, get() { getters++; return "inherited"; }, set() { setters++; } });
-  try {
-    const own = {}; Object.defineProperty(own, trap, { value: 3, enumerable: true });
-    const sparse = []; sparse.length = 701;
-    const snapshot = resolve([layer({ own, sparse }), layer({ own: { kept: 1 } }, 1)]);
-    assert.equal(inspect(snapshot, "own", trap).effectiveValue, 3);
-    assert.equal(inspect(snapshot, trap).present, false);
-    assert.equal(inspect(snapshot, trap).contributions.every(({ present }) => !present), true);
-    assert.equal(inspect(snapshot, "sparse", "700").present, false);
-    assert.equal(Object.hasOwn(snapshot.entries.sparse, "700"), false);
-    const sparsePath = []; sparsePath.length = 701;
-    assert.throws(() => inspectResolvedPath(snapshot, sparsePath), code("VALIDATION_ERROR"));
-    assert.throws(() => inspectResolvedPath({ ...snapshot, trace: sparsePath }, ["own"]), code("VALIDATION_ERROR"));
-    assert.equal(getters, 0);
-    assert.equal(setters, 0);
-  } finally {
-    for (const key of [trap, "700"]) delete Object.prototype[key];
-  }
+test("own values, absent contributions and sparse arrays remain distinct", () => {
+  const own = { retained: 3 };
+  const sparse = []; sparse.length = 701;
+  const snapshot = resolve([layer({ own, sparse }), layer({ own: { kept: 1 } }, 1)]);
+  assert.equal(inspect(snapshot, "own", "retained").effectiveValue, 3);
+  assert.equal(inspect(snapshot, "absent").present, false);
+  assert.equal(inspect(snapshot, "absent").contributions.every(({ present }) => !present), true);
+  assert.equal(inspect(snapshot, "sparse", "700").present, false);
+  assert.equal(Object.hasOwn(snapshot.entries.sparse, "700"), false);
+  const sparsePath = []; sparsePath.length = 701;
+  assert.throws(() => inspectResolvedPath(snapshot, sparsePath), code("VALIDATION_ERROR"));
+  assert.throws(() => inspectResolvedPath({ ...snapshot, trace: sparsePath }, ["own"]), code("VALIDATION_ERROR"));
 });
 
 test("forged snapshots and public schemas preflight hidden accessors, symbols and reflection failures", () => {

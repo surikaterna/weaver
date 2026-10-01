@@ -1,12 +1,6 @@
 // schemas-layers.ts — Zod schemas for layer and context types
 
 import { z } from "zod";
-import {
-  hasDomainFields,
-  isDomainRecord,
-  ownDomainValue,
-} from "./domain-capture";
-import type { ScopeInstance } from "./types";
 
 export const configurationLayerSchema = z.string();
 
@@ -20,16 +14,6 @@ export const scopeInstanceSchema = z.strictObject({
   scopeId: z.string(),
   value: z.string(),
 });
-
-/** Field authority shared with identity captures; the legacy object schema stays intact. */
-export function isScopeInstanceData(value: unknown): value is ScopeInstance {
-  return (
-    isDomainRecord(value) &&
-    hasDomainFields(value, ["scopeId", "value"]) &&
-    typeof ownDomainValue(value, "scopeId") === "string" &&
-    typeof ownDomainValue(value, "value") === "string"
-  );
-}
 
 export const scopeHierarchySchema = z.strictObject({
   scopes: z.array(scopeDefinitionSchema),

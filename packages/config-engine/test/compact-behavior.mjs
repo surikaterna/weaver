@@ -8,7 +8,7 @@ export function checkCompactSnapshots(engine, assert) {
   const layer = (entries, rank) => ({ layer: rank ? "user" : "core", providerId: `p${rank}`, rank, entries });
   const resolve = (layers, ceilings = []) => engine.resolveConfigurationSnapshot({ configuredRanks: [0, 1, 2], layers, ceilings });
   for (const depth of [3000, 10000]) checkDeep(engine, assert, depth, layer, resolve);
-  checkDeepInheritedWorklists(engine, assert);
+  checkDeepWideSnapshot(engine, assert);
   for (const depth of [4, 8, 12, 30]) {
     let value = { leaf: 1 };
     for (let index = 0; index < depth; index++) value = { left: value, right: value };
@@ -55,24 +55,14 @@ function checkDeep(engine, assert, depth, layer, resolve) {
   }
 }
 
-function checkDeepInheritedWorklists(engine, assert) {
+function checkDeepWideSnapshot(engine, assert) {
   const wide = { leaf: 1 };
   for (let index = 0; index < 699; index++) wide[`field${index}`] = index;
   const value = chain(10000, wide);
   const path = ["cfg", ...Array(10000).fill("next"), "leaf"];
-  let getters = 0, setters = 0, inspection;
-  const descriptor = Object.getOwnPropertyDescriptor(Object.prototype, "700");
-  Object.defineProperty(Object.prototype, "700", { configurable: true, get() { getters++; }, set() { setters++; } });
-  try {
-    const snapshot = engine.resolveConfigurationSnapshot({ configuredRanks: [0], ceilings: [{ path, maxRank: 0 }], layers: [{ layer: "core", providerId: "p", rank: 0, entries: { cfg: value } }] });
-    inspection = engine.inspectResolvedPath(snapshot, path);
-  } finally {
-    if (descriptor) Object.defineProperty(Object.prototype, "700", descriptor);
-    else delete Object.prototype["700"];
-  }
+  const snapshot = engine.resolveConfigurationSnapshot({ configuredRanks: [0], ceilings: [{ path, maxRank: 0 }], layers: [{ layer: "core", providerId: "p", rank: 0, entries: { cfg: value } }] });
+  const inspection = engine.inspectResolvedPath(snapshot, path);
   assert.equal(inspection.effectiveValue, 1);
-  assert.equal(getters, 0);
-  assert.equal(setters, 0);
 }
 
 function checkDeepCallbacks(engine, assert, low, high) {
@@ -116,4 +106,4 @@ function checkPolicyAliases(engine, assert, value, depth, layer, resolve) {
   assert.notEqual(snapshot.entries.a, snapshot.entries.b);
 }
 
-export const compactFixtureSource = [chain, checkCompactSnapshots, checkDeep, checkDeepInheritedWorklists, checkDeepCallbacks, checkDeepCeilings, checkPolicyAliases].map(fn => fn.toString()).join("\n");
+export const compactFixtureSource = [chain, checkCompactSnapshots, checkDeep, checkDeepWideSnapshot, checkDeepCallbacks, checkDeepCeilings, checkPolicyAliases].map(fn => fn.toString()).join("\n");

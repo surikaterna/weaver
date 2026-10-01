@@ -1,47 +1,20 @@
-import { projectConfigurationData } from "@weaver-conf/config-engine";
-import type {
-  CanonicalConfigurationPath,
-  HydratedConfigurationInspection,
-} from "@weaver-conf/config-types";
 import {
-  type ConfigurationServiceIdentity,
-  captureDomain,
+  type CanonicalConfigurationPath,
   captureServiceData,
-  domainSchema,
-  hasDomainFields,
-  isConfigurationServiceIdentity,
-  isDomainRecord,
-  ownDomainValue,
+  configurationServiceIdentitySchema,
+  type HydratedConfigurationInspection,
+  isReservedPathSegment,
 } from "@weaver-conf/config-types";
-import type { z } from "zod";
+import { z } from "zod";
 
-interface ReadContextData {
-  readonly identity: ConfigurationServiceIdentity;
-  readonly revision: string;
-}
-function isReadContext(value: unknown): value is ReadContextData {
-  return (
-    isDomainRecord(value) &&
-    hasDomainFields(value, ["identity", "revision"]) &&
-    isConfigurationServiceIdentity(value.identity) &&
-    typeof value.revision === "string" &&
-    value.revision.length > 0
-  );
-}
-export const registeredReadProjectionContextSchema = domainSchema<
-  unknown,
-  ReadContextData
->(
-  (input) =>
-    captureDomain(
-      projectConfigurationData(
-        input,
-        {},
-        { decide: () => "retain", child: (context) => context },
-      ),
-      isReadContext,
-    ),
-  "Invalid registered read context",
+export const registeredReadProjectionContextSchema = z.preprocess(
+  (input, context) => captureReadData(input, context),
+  z
+    .strictObject({
+      identity: configurationServiceIdentitySchema,
+      revision: z.string().min(1),
+    })
+    .readonly(),
 );
 export type RegisteredReadProjectionContext = z.infer<
   typeof registeredReadProjectionContextSchema
@@ -62,24 +35,49 @@ export interface RegisteredReadProjection {
   readonly entries: () => Readonly<Record<string, unknown>>;
 }
 
-// Callable shape only: parsing never authenticates the reader or an issued snapshot.
+// Callable shape only: parsing does not authenticate a reader or an issued snapshot.
+function callable<T>() {
+  return z.custom<T>((value) => typeof value === "function");
+}
 type ProjectionShape = {
   -readonly [K in keyof RegisteredReadProjection]: RegisteredReadProjection[K];
 };
-function isProjection(value: unknown): value is ProjectionShape {
-  const methods = ["get", "getAtLayer", "getNamespace", "inspect", "entries"];
-  return (
-    isDomainRecord(value) &&
-    hasDomainFields(value, methods) &&
-    methods.every((key) => typeof ownDomainValue(value, key) === "function")
+export const registeredReadProjectionSchema = z
+  .custom<ProjectionShape>(admitProjection)
+  .pipe(
+    z.strictObject({
+      get: callable<RegisteredReadProjection["get"]>(),
+      getAtLayer: callable<RegisteredReadProjection["getAtLayer"]>(),
+      getNamespace: callable<RegisteredReadProjection["getNamespace"]>(),
+      inspect: callable<RegisteredReadProjection["inspect"]>(),
+      entries: callable<RegisteredReadProjection["entries"]>(),
+    }),
   );
+
+function admitProjection(input: unknown): boolean {
+  if (input === null || typeof input !== "object" || Array.isArray(input))
+    return false;
+  try {
+    const prototype: unknown = Object.getPrototypeOf(input);
+    if (prototype !== null && prototype !== Object.prototype) return false;
+    return Reflect.ownKeys(input).every((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(input, key);
+      return (
+        typeof key === "string" &&
+        !isReservedPathSegment(key) &&
+        descriptor !== undefined &&
+        Object.hasOwn(descriptor, "value") &&
+        descriptor.enumerable === true
+      );
+    });
+  } catch {
+    return false;
+  }
 }
-export const registeredReadProjectionSchema = domainSchema<
-  ProjectionShape,
-  ProjectionShape
->((input) => {
+
+function captureReadData(input: unknown, context: z.RefinementCtx): unknown {
   const captured = captureServiceData(input);
-  return captured.success
-    ? captureDomain(captured.value, isProjection)
-    : captured;
-}, "Invalid registered read callable shape");
+  if (captured.success) return captured.value;
+  context.addIssue({ code: "custom", message: "Invalid registered read data" });
+  return z.NEVER;
+}

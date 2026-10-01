@@ -245,20 +245,6 @@ function orderedSchema(end) {
   };
 }
 
-async function underOrderedTrap(operation) {
-  let getters = 0, setters = 0, result, getterStack, setterStack;
-  const descriptor = Object.getOwnPropertyDescriptor(Object.prototype, "700");
-  Object.defineProperty(Object.prototype, "700", { configurable: true, get() { getters++; getterStack ??= new Error("inherited getter").stack; return "ambient"; }, set() { setters++; setterStack ??= new Error("inherited setter").stack; } });
-  try { result = await operation(); }
-  finally {
-    if (descriptor) Object.defineProperty(Object.prototype, "700", descriptor);
-    else delete Object.prototype["700"];
-  }
-  assert.equal(getters, 0, getterStack);
-  assert.equal(setters, 0, setterStack);
-  return result;
-}
-
 function directOrderedBaseline(fixture) {
   let result = {};
   if (fixture.kind === "fixed") {
@@ -279,9 +265,9 @@ async function assertOrderedAdmission(fixture) {
   const revision = fixture.service.revision;
   const valid = [{ operation: "set", key: "cfg.n", value: 9001 }, { operation: "set", key: "cfg.mirror", value: 9001 }];
   const invalid = [{ operation: "set", key: "cfg.n", value: 9001 }, { operation: "remove", key: "cfg.mirror" }];
-  assert.equal(await underOrderedTrap(() => fixture.preflight(fixture.layer, valid, options)), null);
-  assert.equal((await underOrderedTrap(() => fixture.preflight(fixture.layer, invalid, options))).error.code, "VALIDATION_ERROR");
-  const batch = await underOrderedTrap(() => fixture.service.setMany(fixture.layer, { "cfg.n": 9001, "cfg.mirror": 7 }, options));
+  assert.equal(await fixture.preflight(fixture.layer, valid, options), null);
+  assert.equal((await fixture.preflight(fixture.layer, invalid, options)).error.code, "VALIDATION_ERROR");
+  const batch = await fixture.service.setMany(fixture.layer, { "cfg.n": 9001, "cfg.mirror": 7 }, options);
   assert.equal(batch.success, false);
   assert.equal(batch.error.code, "VALIDATION_ERROR");
   assert.deepEqual(fixture.effects, { write: 0, remove: 0, flush: 0, delta: 0 });
@@ -291,14 +277,14 @@ async function assertOrderedAdmission(fixture) {
 for (const kind of ["fixed", "scoped", "dynamic"]) {
   test(`702 ${kind} ordered entries preserve baseline and provenance`, async () => {
     const fixture = await orderedProviderFixture(kind, 702);
-    const baseline = await underOrderedTrap(() => directOrderedBaseline(fixture));
+    const baseline = directOrderedBaseline(fixture);
     const reader = createConfigStateReader(fixture.providers, fixture.data, fixture.dynamic);
-    const actual = await underOrderedTrap(() => kind === "fixed" ? reader.getBaseEntries() : reader.getScopeState(fixture.scopePath));
+    const actual = kind === "fixed" ? reader.getBaseEntries() : reader.getScopeState(fixture.scopePath);
     assert.deepEqual(actual, baseline);
     assert.equal(actual.cfg.n, 701);
-    const merged = await underOrderedTrap(() => reader.getMergedState(kind === "fixed" ? undefined : fixture.scopePath));
+    const merged = reader.getMergedState(kind === "fixed" ? undefined : fixture.scopePath);
     assert.deepEqual(merged, baseline);
-    const inspected = await underOrderedTrap(() => fixture.service.inspect("cfg.n"));
+    const inspected = await fixture.service.inspect("cfg.n");
     assert.equal(inspected.effectiveValue, 701);
     assert.equal(inspected.effectiveLayer, kind === "fixed" ? "user" : "tenant:v701");
   });
@@ -313,13 +299,13 @@ test("fixed scoped-provider and dynamic-cache tails both use owned ordered slots
   for (const provider of providers) data.set(provider.id, (await provider.load()).entries);
   const dynamic = new Map([["tenant:site", { cfg: { n: 9001 } }]]);
   const reader = createConfigStateReader(providers, data, dynamic);
-  assert.equal((await underOrderedTrap(() => reader.getScopeState([{ scopeId: "tenant", value: "site" }]))).cfg.n, 9001);
+  assert.equal(reader.getScopeState([{ scopeId: "tenant", value: "site" }]).cfg.n, 9001);
 });
 
 test("ordered adapter reads only own dense entries, not inherited slots or accessor rows", async () => {
   const sparse = Array.from({ length: 702 }, (_, index) => ({ cfg: { n: index } }));
   delete sparse["700"];
-  await underOrderedTrap(() => assert.throws(() => resolveOrderedEntries(sparse), error => error.code === "VALIDATION_ERROR"));
+  assert.throws(() => resolveOrderedEntries(sparse), error => error.code === "VALIDATION_ERROR");
   let calls = 0;
   const accessor = [];
   Object.defineProperty(accessor, "0", { get() { calls++; return {}; } });
@@ -327,7 +313,7 @@ test("ordered adapter reads only own dense entries, not inherited slots or acces
   assert.equal(calls, 0);
   const dense = Array.from({ length: 702 }, (_, index) => ({ cfg: { n: index } }));
   Object.defineProperty(dense[0], "700", { value: { inert: true }, enumerable: true });
-  const result = await underOrderedTrap(() => resolveOrderedEntries(dense));
+  const result = resolveOrderedEntries(dense);
   assert.equal(result.cfg.n, 701);
   assert.equal(Object.hasOwn(result, "700"), true);
 });

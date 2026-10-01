@@ -1,4 +1,18 @@
-import { appendDomainValue, type DomainCapture } from "./domain-capture";
+import { z } from "zod";
+
+type ServiceDataCapture =
+  | { readonly success: true; readonly value: unknown }
+  | { readonly success: false };
+
+/** Admission/copy only; the supplied native schema owns all domain semantics. */
+export function serviceDataBoundary<T extends z.ZodType>(schema: T) {
+  return z.preprocess((input, context) => {
+    const captured = captureServiceData(input);
+    if (captured.success) return captured.value;
+    context.addIssue({ code: "custom", message: "Invalid service data" });
+    return z.NEVER;
+  }, schema);
+}
 
 interface Visit {
   readonly value: unknown;
@@ -7,7 +21,7 @@ interface Visit {
 }
 
 /** Capture all own descriptors before domain parsers read fields. Never freeze a borrower. */
-export function captureServiceData(input: unknown): DomainCapture<unknown> {
+export function captureServiceData(input: unknown): ServiceDataCapture {
   try {
     return captureGraph(input);
   } catch {
@@ -15,7 +29,7 @@ export function captureServiceData(input: unknown): DomainCapture<unknown> {
   }
 }
 
-function captureGraph(input: unknown): DomainCapture<unknown> {
+function captureGraph(input: unknown): ServiceDataCapture {
   let result: unknown;
   const pending: Visit[] = [
     {
@@ -51,7 +65,7 @@ function captureGraph(input: unknown): DomainCapture<unknown> {
     active.add(value);
     copies.set(value, output);
     frame.assign(output);
-    appendDomainValue(pending, {
+    pending.push({
       value: output,
       assign: frame.assign,
       leave: value,
@@ -92,7 +106,7 @@ function scheduleFields(
       return false;
     if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key)) return false;
     const child: unknown = descriptor.value;
-    appendDomainValue(pending, {
+    pending.push({
       value: child,
       assign: (copied) => {
         Object.defineProperty(output, key, { value: copied, enumerable: true });
