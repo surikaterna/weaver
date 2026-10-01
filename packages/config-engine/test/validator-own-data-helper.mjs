@@ -236,6 +236,28 @@ function validatorBoundaryCases(engine, counter) {
   ];
 }
 
+function validatorAdditionalCases(engine, counter) {
+  const child = Object.setPrototypeOf({ type: "string" }, validatorPrototype(counter));
+  const root = { type: "object", additionalProperties: child };
+  const nested = { type: "object", additionalProperties: Object.setPrototypeOf({ type: "object", additionalProperties: child }, validatorPrototype(counter)) };
+  const accessor = Object.setPrototypeOf({ type: "string" }, validatorPrototype(counter));
+  Object.defineProperty(accessor, "minLength", { get() { counter.calls++; return 0; } });
+  const cases = validatorWrapped(engine, "additional-nested", nested, { extra: { value: "ok" } }, { extra: { value: 1 } });
+  for (const [name, value, valid] of [["good", "ok", true], ["bad", 1, false]]) {
+    cases.push({ name: `additional-root/effective-${name}`, invoke: () => engine.validateEffectiveConfiguration(root, { extra: value }), valid });
+    cases.push({ name: `additional-root/partial-${name}`, invoke: () => engine.validatePartialConfiguration(root, { extra: value }), valid });
+    cases.push({ name: `additional-root/patch-${name}`, invoke: () => engine.validateConfigurationPatch(root, ["extra"], value), valid });
+  }
+  for (const fixture of cases) if (!fixture.valid) fixture.code = "invalid-type";
+  return [...cases,
+    ...validatorRejected(engine, "additional-own-accessor", { type: "object", additionalProperties: accessor }, { extra: "ok" }, "invalid-schema"),
+    ...validatorRejected(engine, "additional-default-role", { type: "object", default: child, additionalProperties: child }, {}, "invalid-schema"),
+    ...validatorRejected(engine, "additional-default-reverse", { type: "object", additionalProperties: child, default: child }, {}, "invalid-schema"),
+    ...validatorRejected(engine, "unsupported-definitions-data", { type: "object", additionalProperties: true, definitions: { ignored: child } }, {}, "invalid-schema"),
+    ...validatorWrapped(engine, "additional-boolean", { type: "object", additionalProperties: false }, {}, { extra: "unknown" }),
+  ];
+}
+
 function validatorZero(prototype, index, invoke, assert, label) {
   const outcome = underNumericTrap(prototype, index, invoke);
   assert.equal(outcome.getters, 0, `${label}: inherited getter`);
@@ -309,6 +331,41 @@ function validatorLiteralCached(engine, factory, prototype, index, assert) {
   }
 }
 
+function validatorAdditionalCached(engine, factory, prototype, index, assert, counter) {
+  const child = { type: "object", properties: { value: { type: "string" } }, additionalProperties: false };
+  const schema = { type: "object", additionalProperties: child }, options = { path: ["base"] };
+  const session = validatorZero(prototype, index, () => factory(schema, options), assert, "additional-session");
+  const changes = [() => {},
+    () => { child.properties.value.type = "number"; },
+    () => { child.properties.value = Object.setPrototypeOf({ type: "string" }, validatorPrototype(counter)); },
+    () => { Object.defineProperty(child.properties, "value", { enumerable: false }); },
+    () => { Object.setPrototypeOf(child, validatorPrototype(counter)); },
+    () => { Object.setPrototypeOf(schema, validatorPrototype(counter)); },
+    () => { Object.preventExtensions(child); },
+    () => { schema.additionalProperties = Object.setPrototypeOf({ type: "object", additionalProperties: Object.setPrototypeOf({ type: "string" }, validatorPrototype(counter)) }, validatorPrototype(counter)); },
+    () => { Object.defineProperty(schema.additionalProperties, "properties", { value: Object.setPrototypeOf({ value: { type: "number" } }, validatorPrototype(counter)), configurable: true, enumerable: true, writable: true }); },
+    () => { schema.additionalProperties = { type: "string" }; },
+    () => { schema.additionalProperties = false; }, () => { schema.additionalProperties = true; },
+    () => { schema.additionalProperties = { type: "object", properties: { value: { type: "string" } }, additionalProperties: false }; },
+    () => { Object.defineProperty(schema.additionalProperties, "type", { get() { counter.calls++; return "object"; } }); },
+  ];
+  const validSteps = [true, false, true, true, true, true, true, true, false, false, false, true, true, false];
+  for (const [step, change] of changes.entries()) {
+    change();
+    const checks = [
+      [() => session.validateEffective({ extra: { value: "ok" } }), () => engine.validateEffectiveConfiguration(schema, { extra: { value: "ok" } }, options)],
+      [() => session.validatePartial({ extra: { value: "ok" } }), () => engine.validatePartialConfiguration(schema, { extra: { value: "ok" } }, options)],
+      [() => session.validatePatch(["extra", "value"], "ok"), () => engine.validateConfigurationPatch(schema, ["extra", "value"], "ok", options)],
+    ];
+    for (const [cached, fresh] of checks) {
+      const expected = fresh();
+      assert.equal(expected.valid, validSteps[step], `additional mutation ${step}`);
+      assert.deepEqual(validatorZero(prototype, index, cached, assert, "additional-cache"), expected);
+      assert.deepEqual(validatorZero(prototype, index, cached, assert, "additional-repeat"), expected);
+    }
+  }
+}
+
 function validatorControls(prototype, index, assert) {
   const scratch = validatorOwned(index, (value) => value);
   const hole = []; hole.length = index + 1;
@@ -322,7 +379,7 @@ export function checkValidatorOwnData(engine, factory, assert, prototypeNames = 
   const custom = validatorCustom(counter);
   const branded = new Date(); Object.defineProperty(branded, "type", { value: "boolean", enumerable: true });
   const inheritedOnly = Object.create(validatorPrototype(counter));
-  const cases = [...validatorCases(engine), ...validatorLargeCases(engine), ...validatorMalformedCases(engine, counter), ...validatorBoundaryCases(engine, counter),
+  const cases = [...validatorCases(engine), ...validatorLargeCases(engine), ...validatorMalformedCases(engine, counter), ...validatorBoundaryCases(engine, counter), ...validatorAdditionalCases(engine, counter),
     ...validatorWrapped(engine, "custom-schema-roles", custom, { flag: true, list: [true, "untyped"] }, { flag: "wrong", list: [1] }),
     ...validatorWrapped(engine, "own-branded-schema", branded, true, "wrong"),
     { name: "inherited-type-no-grant", invoke: () => engine.validatePartialConfiguration(inheritedOnly, true), valid: false, code: "invalid-schema" }];
@@ -333,6 +390,7 @@ export function checkValidatorOwnData(engine, factory, assert, prototypeNames = 
       for (const fixture of cases) validatorCase(prototype, index, fixture, assert);
       validatorCached(engine, factory, prototype, index, assert, counter);
       validatorLiteralCached(engine, factory, prototype, index, assert);
+      validatorAdditionalCached(engine, factory, prototype, index, assert, counter);
     }
   }
   assert.equal(counter.calls, 0, "own/prototype/brand accessors never execute");
@@ -340,5 +398,5 @@ export function checkValidatorOwnData(engine, factory, assert, prototypeNames = 
 }
 
 export const validatorFixtureSource = [underNumericTrap, validatorOwned, validatorPrototype, validatorCustom,
-  validatorWrapped, validatorCases, validatorLargeCases, validatorMalformedCases, validatorRejected, validatorBoundaryCases, validatorZero, validatorCase,
-  validatorMutations, validatorCached, validatorLiteralCached, validatorControls, checkValidatorOwnData].map((fn) => fn.toString()).join("\n");
+  validatorWrapped, validatorCases, validatorLargeCases, validatorMalformedCases, validatorRejected, validatorBoundaryCases, validatorAdditionalCases, validatorZero, validatorCase,
+  validatorMutations, validatorCached, validatorLiteralCached, validatorAdditionalCached, validatorControls, checkValidatorOwnData].map((fn) => fn.toString()).join("\n");

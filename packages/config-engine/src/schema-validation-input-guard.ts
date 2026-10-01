@@ -125,6 +125,8 @@ function childRole(role: DataRole, key: string, value: unknown): DataRole {
   if (key === "properties" || key === "patternProperties") return "map";
   if (key === "type" || key === "required") return "slots";
   if (key === "items") return Array.isArray(value) ? "schemas" : "schema";
+  if (key === "additionalProperties")
+    return typeof value === "boolean" ? "data" : "schema";
   if (key === "not") return "schema";
   if (key === "anyOf" || key === "oneOf" || key === "allOf") return "schemas";
   return "data";
