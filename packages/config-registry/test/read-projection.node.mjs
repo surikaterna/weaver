@@ -195,3 +195,25 @@ test("missing alternatives retain declaration evidence without defaulting throug
   assert.equal(projection.inspect("/example/public/enabled").effective.state, "missing");
   assert.throws(() => projection.get("/example/denied/enabled"), { code: "FORBIDDEN" });
 });
+
+test("real registered shared schema/value DAG preserves only unique policy contexts", () => {
+  let schema = { type: "object", properties: { value: { type: "string" } } };
+  let value = { value: "leaf" };
+  for (let index = 0; index < 100; index++) {
+    schema = { type: "object", properties: { left: schema, right: schema } };
+    value = { left: value, right: value };
+  }
+  const projection = fixture(schema, value);
+  let current = projection.get("/example");
+  const seen = new Set();
+  for (let index = 0; index < 100; index++) {
+    seen.add(current);
+    assert.equal(current.left, current.right);
+    assert.ok(Object.isFrozen(current));
+    current = current.left;
+  }
+  seen.add(current);
+  assert.equal(current.value, "leaf");
+  assert.equal(seen.size, 101);
+  assert.notEqual(projection.get("/example"), value);
+});
