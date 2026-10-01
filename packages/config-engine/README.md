@@ -22,6 +22,12 @@ Partial validation does not apply defaults or enforce `required` and `minPropert
 
 Patch validation fully checks composition on the resolved leaf. At unknown ancestor context it conservatively defers `anyOf`, `oneOf`, and `not`, while retaining direct and `allOf` structural constraints. Registered server writes always validate the fully patched candidate before storage mutation, which remains authoritative for sibling-dependent composition.
 
+Validators inspect own descriptors before reading schemas, configuration values, options, or path arrays. Own accessors (including hidden and nested metadata accessors), symbols and executable data fail with the existing typed validation-result categories without invoking input getters. Inherited fields never supply schema types, defaults, constraints, branches, properties, or tuple members. Structural schema arrays use their own semantic slots; absent tuple declarations cannot be filled by prototype data. Standard Object/Array numeric prototype accessors cannot intercept internal validation scratch or error/path arrays.
+
+Caller **schema** nodes, maps and structural arrays are own-field contracts: an unrelated custom prototype or intrinsic brand alone does not reject otherwise valid own schema fields. Prototype getters, `Symbol.toStringTag`, and inherited iterators are not read to interpret schemas. This exemption does not apply to configuration values, options/path data, or literal `default`/`const`/`enum`/example payloads, whose plain-data restrictions remain in force. Registry registration retains its separate, stricter admission contract; validator success neither registers schemas nor grants access.
+
+Validation does not clone, freeze, or mutate callers. Call-local preparation retains original schema identities and checks descriptor/prototype/extensibility changes before reuse; custom schema prototypes may conservatively disable cache reuse without invalidating admission. Graph inspection and validation worklists are iterative and support acyclic sharing without arbitrary depth limits. These guarantees assume standard intrinsics, not a hostile same-realm sandbox or side-effect-free Proxy reflection.
+
 ## Usage
 
 ### Deep merge

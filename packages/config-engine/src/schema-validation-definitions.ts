@@ -23,6 +23,7 @@ export function validateSchemaNode(
   )
     return false;
   if (!validateMultipleOfDefinition(schema, path, context)) return false;
+  if (!validateScalarDefinitions(schema, path, context)) return false;
   if (!validatePatternDefinition(schema, path, context)) return false;
   return validatePatternProperties(schema, path, context);
 }
@@ -51,6 +52,12 @@ function validatePatternDefinition(
   const pattern = ownField(schema, "pattern");
   if (pattern === undefined) {
     return true;
+  }
+  if (typeof pattern !== "string") {
+    addContextError(context, "invalid-schema", path, {
+      message: "pattern must be a string",
+    });
+    return false;
   }
   return compileSchemaPattern(pattern, path, context) !== undefined;
 }
@@ -88,7 +95,10 @@ export function validateSchemaContainers(
   for (const key of ["required", "enum"] as const) {
     const values = ownField(schema, key);
     if (values === undefined) continue;
-    if (!Array.isArray(values) || !hasDenseDataSlots(values)) {
+    if (
+      !Array.isArray(values) ||
+      !hasDenseDataSlots(values, key === "required")
+    ) {
       addContextError(context, "invalid-schema", path, {
         message: `${key} must be a dense array`,
       });
@@ -98,9 +108,46 @@ export function validateSchemaContainers(
   return true;
 }
 
-function hasDenseDataSlots(values: readonly unknown[]): boolean {
+function hasDenseDataSlots(
+  values: readonly unknown[],
+  stringsOnly: boolean,
+): boolean {
   for (let index = 0; index < values.length; index++) {
     if (!Object.hasOwn(values, index)) return false;
+    if (stringsOnly && typeof ownField(values, index) !== "string")
+      return false;
   }
   return true;
+}
+
+function validateScalarDefinitions(
+  schema: ConfigurationPropertySchema,
+  path: ValidationPath,
+  context: ValidationContext,
+): boolean {
+  for (const key of [
+    "minLength",
+    "maxLength",
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "minItems",
+    "maxItems",
+    "minProperties",
+    "maxProperties",
+  ] as const) {
+    const value = ownField(schema, key);
+    if (value === undefined || typeof value === "number") continue;
+    addContextError(context, "invalid-schema", path, {
+      message: `${key} must be a number`,
+    });
+    return false;
+  }
+  const unique = ownField(schema, "uniqueItems");
+  if (unique === undefined || typeof unique === "boolean") return true;
+  addContextError(context, "invalid-schema", path, {
+    message: "uniqueItems must be a boolean",
+  });
+  return false;
 }

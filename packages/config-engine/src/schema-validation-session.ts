@@ -61,7 +61,7 @@ export function createConfigurationValidationSession(
   const currentPreparation = (): ValidationPreparation => {
     const pathError = ownField(basePath, "error");
     if (pathError !== undefined) return { error: invalidPathResult(pathError) };
-    const data = inspectValidationData(schema);
+    const data = inspectValidationData(schema, "schema");
     if (!data.safe) return { error: unsafeSchemaResult(basePath.segments) };
     if (state !== undefined && schemaStabilityMatches(state.stability)) {
       if (data.cyclic && Object.hasOwn(state.preparation, "prepared"))
@@ -102,7 +102,7 @@ function prepareValidation(
   }
   const context: ValidationContext = { mode: "partial", errors: [] };
   const path = createValidationPath(parsedPath.segments);
-  const data = inspectValidationData(schema);
+  const data = inspectValidationData(schema, "schema");
   if (!data.safe) return { error: unsafeSchemaResult(parsedPath.segments) };
   const plan = validateSchemaGraph(schema, path, context);
   if (plan === undefined) return { error: result(context) };

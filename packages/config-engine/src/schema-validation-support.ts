@@ -178,10 +178,9 @@ export function getEffectiveValue(
   value: unknown,
   mode: ValidationMode,
 ): unknown {
-  return mode === "effective" &&
-    value === undefined &&
-    ownField(schema, "default") !== undefined
-    ? ownField(schema, "default")
+  const fallback = ownField(schema, "default");
+  return mode === "effective" && value === undefined && fallback !== undefined
+    ? fallback
     : value;
 }
 
@@ -189,27 +188,44 @@ export function matchesAnyType(
   value: unknown,
   schema: ConfigurationPropertySchema,
 ): boolean {
-  const types = schema.type;
+  const types = ownField(schema, "type");
+  if (types === undefined) return false;
   if (!isSchemaTypeArray(types)) return matchesType(value, types);
-  return types.some((type) => matchesType(value, type));
+  for (let index = 0; index < types.length; index++) {
+    const type = ownField(types, index);
+    if (type !== undefined && matchesType(value, type)) return true;
+  }
+  return false;
 }
 
 export function allowsType(
   schema: ConfigurationPropertySchema,
   type: ConfigurationJsonSchemaType,
 ): boolean {
-  const types = schema.type;
-  return isSchemaTypeArray(types) ? types.includes(type) : types === type;
+  const types = ownField(schema, "type");
+  if (types === undefined) return false;
+  if (!isSchemaTypeArray(types)) return types === type;
+  for (let index = 0; index < types.length; index++) {
+    if (ownField(types, index) === type) return true;
+  }
+  return false;
 }
 
 export function getTypes(
   schema: ConfigurationPropertySchema,
 ): readonly ConfigurationJsonSchemaType[] {
-  return isSchemaTypeArray(schema.type) ? schema.type : [schema.type];
+  const types = ownField(schema, "type");
+  if (types === undefined) return [];
+  return isSchemaTypeArray(types) ? types : [types];
 }
 
 export function describeTypes(schema: ConfigurationPropertySchema): string {
-  return isSchemaTypeArray(schema.type) ? schema.type.join(" | ") : schema.type;
+  const types = getTypes(schema);
+  let result = "";
+  for (let index = 0; index < types.length; index++) {
+    result += `${index === 0 ? "" : " | "}${ownField(types, index) ?? ""}`;
+  }
+  return result;
 }
 
 export function describeValue(value: unknown): string {

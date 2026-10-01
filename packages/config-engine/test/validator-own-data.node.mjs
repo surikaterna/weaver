@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { loadPrivateSafetyModules, probeCanonicalRoots, underNumericTrap } from "./validator-own-data-helper.mjs";
+import { checkValidatorOwnData, loadPrivateSafetyModules, probeCanonicalRoots, underNumericTrap } from "./validator-own-data-helper.mjs";
+import * as engine from "../dist/index.js";
+import { createConfigurationValidationSession } from "../dist/schema-validation-session.js";
 
 const modules = await loadPrivateSafetyModules();
 const childMode = process.env.WEAVER_VALIDATOR_SCRATCH_CHILD;
@@ -74,10 +76,11 @@ if (process.argv.includes("--probe")) {
   const index = Number(indexText);
   exerciseNegativeControls(prototype, index);
   exerciseSafeScratch(prototype, index);
+  checkValidatorOwnData(engine, createConfigurationValidationSession, assert, [prototypeName], [index]);
 } else {
   for (const prototype of ["object", "array"]) {
     for (const index of [0, 1, 700]) {
-      test(`owned stability/equality/parser scratch: ${prototype} numeric ${index}, with unsafe controls`, () => {
+      test(`real roots/cached sessions and owned scratch: ${prototype} numeric ${index}, with unsafe controls`, () => {
         const child = spawnSync(process.execPath, [new URL(import.meta.url).pathname], {
           env: { ...process.env, WEAVER_VALIDATOR_SCRATCH_CHILD: `${prototype}:${index}` },
           encoding: "utf8", timeout: 30_000,

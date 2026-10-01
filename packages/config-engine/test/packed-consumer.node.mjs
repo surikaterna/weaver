@@ -10,6 +10,7 @@ import { strictDeclarations } from "./packed-declarations.mjs";
 import { checkRuntimeClosure } from "./packed-runtime.mjs";
 import { checkSnapshot } from "./snapshot-behavior.mjs";
 import { compactFixtureSource } from "./compact-behavior.mjs";
+import { validatorFixtureSource } from "./validator-own-data-helper.mjs";
 
 test("packed root supports isolated ESM/CJS behavior and strict declarations", async () => {
   await withConsumer(async directory => {
@@ -17,10 +18,10 @@ test("packed root supports isolated ESM/CJS behavior and strict declarations", a
     for (const mode of ["esm", "cjs"]) {
       const filename = join(directory, `consumer.${mode === "esm" ? "mjs" : "cjs"}`);
       const prelude = mode === "esm"
-        ? 'import * as engine from "@weaver-conf/config-engine"; import assert from "node:assert/strict";'
-        : 'const engine = require("@weaver-conf/config-engine"); const assert = require("node:assert/strict");';
-      await fs.writeFile(filename, `${prelude}\n(${checkRoot.toString()})(engine, assert);\n(${checkSnapshot.toString()})(engine, assert);\n${compactFixtureSource}\ncheckCompactSnapshots(engine, assert);`);
-      run(process.execPath, [filename], directory);
+        ? 'import * as engine from "@weaver-conf/config-engine"; import { createConfigurationValidationSession } from "@weaver-conf/config-engine/internal/schema-validation-session"; import assert from "node:assert/strict";'
+        : 'const engine = require("@weaver-conf/config-engine"); const { createConfigurationValidationSession } = require("@weaver-conf/config-engine/internal/schema-validation-session"); const assert = require("node:assert/strict");';
+      await fs.writeFile(filename, `${prelude}\n(${checkRoot.toString()})(engine, assert);\n(${checkSnapshot.toString()})(engine, assert);\n${compactFixtureSource}\ncheckCompactSnapshots(engine, assert);\n${validatorFixtureSource}\nconst cases = checkValidatorOwnData(engine, createConfigurationValidationSession, assert);\nconsole.log("real packed ${mode} validator cases:", cases, "x Object/Array x 0/1/700 plus cached mutations");`);
+      console.log(run(process.execPath, [filename], directory));
     }
     const require = createRequire(join(directory, "package.json"));
     for (const subpath of ["layers", "namespace", "contract-derivation", "schema-registry",

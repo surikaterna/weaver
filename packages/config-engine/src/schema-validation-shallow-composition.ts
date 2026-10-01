@@ -12,6 +12,7 @@ import {
   hasObjectCycle,
 } from "./schema-validation-constraint-graph";
 import { validateSchemaNode } from "./schema-validation-definitions";
+import { ownField } from "./schema-validation-own-data";
 import {
   inspectTerminalChildren,
   isScalarSchema,
@@ -87,7 +88,10 @@ function shallowCompositionBranches(
   const flattened: ShallowBranch[] = [];
   for (const keyword of COMPOSITION_KEYWORDS) {
     if (!Object.hasOwn(schema, keyword)) continue;
-    for (const branch of getCompositionBranches(schema, keyword)) {
+    const branches = getCompositionBranches(schema, keyword);
+    for (let index = 0; index < branches.length; index++) {
+      const branch = ownField(branches, index);
+      if (branch === undefined) return undefined;
       if (branch === schema) return undefined;
       if (isTypeLeafSchema(branch)) {
         pushOwn(flattened, typeLeafBranch(branch, predicateScalars));
