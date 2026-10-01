@@ -1,65 +1,103 @@
-import { z } from "zod";
+import { appendDomainValue, type DomainCapture } from "./domain-capture";
 
-/** Inspect descriptors before Zod reads fields; never invoke an input accessor. */
-export function serviceDataBoundary<T extends z.ZodType>(schema: T) {
-  return z
-    .unknown()
-    .superRefine((input, context) => {
-      if (!isPlainServiceData(input)) {
-        context.addIssue({
-          code: "custom",
-          message: "Expected plain service data",
-        });
-      }
-    })
-    .pipe(schema);
+interface Visit {
+  readonly value: unknown;
+  readonly assign: (value: unknown) => void;
+  readonly leave?: object;
 }
 
-function isPlainServiceData(input: unknown): boolean {
-  const pending: { value: unknown; leave?: boolean }[] = [{ value: input }];
+/** Capture all own descriptors before domain parsers read fields. Never freeze a borrower. */
+export function captureServiceData(input: unknown): DomainCapture<unknown> {
+  try {
+    return captureGraph(input);
+  } catch {
+    return { success: false };
+  }
+}
+
+function captureGraph(input: unknown): DomainCapture<unknown> {
+  let result: unknown;
+  const pending: Visit[] = [
+    {
+      value: input,
+      assign: (value) => {
+        result = value;
+      },
+    },
+  ];
   const active = new Set<object>();
-  while (pending.length > 0) {
-    const entry = pending.pop();
-    if (entry === undefined) continue;
-    const { value } = entry;
-    if (typeof value === "symbol") return false;
-    if (value === null || typeof value !== "object") continue;
-    if (entry.leave) {
-      active.delete(value);
+  const copies = new Map<object, object>();
+  while (pending.length) {
+    const frame = pending.pop();
+    if (!frame) continue;
+    if (frame.leave) {
+      active.delete(frame.leave);
+      Object.freeze(frame.value);
       continue;
     }
-    if (active.has(value)) return false;
+    const value = frame.value;
+    if (typeof value === "symbol") return { success: false };
+    if (value === null || typeof value !== "object") {
+      frame.assign(value);
+      continue;
+    }
+    if (active.has(value) || !plainPrototype(value)) return { success: false };
+    const existing = copies.get(value);
+    if (existing) {
+      frame.assign(existing);
+      continue;
+    }
+    const output: object = Array.isArray(value) ? [] : {};
     active.add(value);
-    if (!hasPlainPrototype(value)) return false;
-    const children = dataChildren(value);
-    if (children === undefined) return false;
-    pending.push({ value, leave: true });
-    for (const child of children) pending.push({ value: child });
+    copies.set(value, output);
+    frame.assign(output);
+    appendDomainValue(pending, {
+      value: output,
+      assign: frame.assign,
+      leave: value,
+    });
+    if (!scheduleFields(value, output, pending)) return { success: false };
   }
-  return true;
+  return { success: true, value: result };
 }
 
-function hasPlainPrototype(value: object): boolean {
+function plainPrototype(value: object): boolean {
   const prototype: unknown = Object.getPrototypeOf(value);
   return Array.isArray(value)
     ? prototype === Array.prototype
     : prototype === Object.prototype || prototype === null;
 }
 
-function dataChildren(value: object): unknown[] | undefined {
-  const children: unknown[] = [];
-  for (const key of Reflect.ownKeys(value)) {
-    if (Array.isArray(value) && key === "length") continue;
+function scheduleFields(
+  value: object,
+  output: object,
+  pending: Visit[],
+): boolean {
+  for (const key of Reflect.ownKeys(value).reverse()) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (
       typeof key !== "string" ||
+      !descriptor ||
+      !Object.hasOwn(descriptor, "value")
+    )
+      return false;
+    if (Array.isArray(value) && key === "length") {
+      Object.defineProperty(output, "length", { value: descriptor.value });
+      continue;
+    }
+    if (
+      !descriptor.enumerable ||
       ["__proto__", "constructor", "prototype"].includes(key)
     )
-      return undefined;
-    if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key))
-      return undefined;
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (!descriptor?.enumerable || !("value" in descriptor)) return undefined;
-    children.push(descriptor.value);
+      return false;
+    if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key)) return false;
+    const child: unknown = descriptor.value;
+    appendDomainValue(pending, {
+      value: child,
+      assign: (copied) => {
+        Object.defineProperty(output, key, { value: copied, enumerable: true });
+      },
+    });
   }
-  return children;
+  return true;
 }

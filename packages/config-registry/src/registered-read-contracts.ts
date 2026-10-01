@@ -3,22 +3,45 @@ import type {
   CanonicalConfigurationPath,
   HydratedConfigurationInspection,
 } from "@weaver-conf/config-types";
-import { configurationServiceIdentitySchema } from "@weaver-conf/config-types";
-import { z } from "zod";
+import {
+  type ConfigurationServiceIdentity,
+  captureDomain,
+  captureServiceData,
+  domainSchema,
+  hasDomainFields,
+  isConfigurationServiceIdentity,
+  isDomainRecord,
+  ownDomainValue,
+} from "@weaver-conf/config-types";
+import type { z } from "zod";
 
-export const registeredReadProjectionContextSchema = z.preprocess(
+interface ReadContextData {
+  readonly identity: ConfigurationServiceIdentity;
+  readonly revision: string;
+}
+function isReadContext(value: unknown): value is ReadContextData {
+  return (
+    isDomainRecord(value) &&
+    hasDomainFields(value, ["identity", "revision"]) &&
+    isConfigurationServiceIdentity(value.identity) &&
+    typeof value.revision === "string" &&
+    value.revision.length > 0
+  );
+}
+export const registeredReadProjectionContextSchema = domainSchema<
+  unknown,
+  ReadContextData
+>(
   (input) =>
-    projectConfigurationData(
-      input,
-      {},
-      { decide: () => "retain", child: (context) => context },
+    captureDomain(
+      projectConfigurationData(
+        input,
+        {},
+        { decide: () => "retain", child: (context) => context },
+      ),
+      isReadContext,
     ),
-  z
-    .strictObject({
-      identity: configurationServiceIdentitySchema,
-      revision: z.string().min(1),
-    })
-    .readonly(),
+  "Invalid registered read context",
 );
 export type RegisteredReadProjectionContext = z.infer<
   typeof registeredReadProjectionContextSchema
@@ -40,20 +63,23 @@ export interface RegisteredReadProjection {
 }
 
 // Callable shape only: parsing never authenticates the reader or an issued snapshot.
-export const registeredReadProjectionSchema = z.strictObject({
-  get: z.custom<RegisteredReadProjection["get"]>(
-    (value) => typeof value === "function",
-  ),
-  getAtLayer: z.custom<RegisteredReadProjection["getAtLayer"]>(
-    (value) => typeof value === "function",
-  ),
-  getNamespace: z.custom<RegisteredReadProjection["getNamespace"]>(
-    (value) => typeof value === "function",
-  ),
-  inspect: z.custom<RegisteredReadProjection["inspect"]>(
-    (value) => typeof value === "function",
-  ),
-  entries: z.custom<RegisteredReadProjection["entries"]>(
-    (value) => typeof value === "function",
-  ),
-});
+type ProjectionShape = {
+  -readonly [K in keyof RegisteredReadProjection]: RegisteredReadProjection[K];
+};
+function isProjection(value: unknown): value is ProjectionShape {
+  const methods = ["get", "getAtLayer", "getNamespace", "inspect", "entries"];
+  return (
+    isDomainRecord(value) &&
+    hasDomainFields(value, methods) &&
+    methods.every((key) => typeof ownDomainValue(value, key) === "function")
+  );
+}
+export const registeredReadProjectionSchema = domainSchema<
+  ProjectionShape,
+  ProjectionShape
+>((input) => {
+  const captured = captureServiceData(input);
+  return captured.success
+    ? captureDomain(captured.value, isProjection)
+    : captured;
+}, "Invalid registered read callable shape");

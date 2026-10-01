@@ -1,32 +1,32 @@
-import { z } from "zod";
 import {
-  isReservedPathSegment,
-  publicConfigPathSchema,
-} from "./schemas-registration-paths";
-import { serviceDataBoundary } from "./service-data-boundary";
+  captureDomain,
+  domainSchema,
+  isDenseDomainArray,
+} from "./domain-capture";
+import {
+  isCanonicalConfigurationPath,
+  isLiteralConfigurationSegment,
+} from "./domain-paths";
+import { captureServiceData } from "./service-data-boundary";
 
-const literalSegmentSchema = z
-  .string()
-  .min(1)
-  .refine(
-    (segment) =>
-      segment !== "." &&
-      segment !== ".." &&
-      segment !== "_weaver" &&
-      !/[/[\]]/.test(segment) &&
-      !isReservedPathSegment(segment),
-    { message: "Expected a literal configuration segment" },
+export const canonicalConfigurationPathSchema = domainSchema<string, string>(
+  (input) => captureDomain(input, isCanonicalConfigurationPath),
+  "Invalid canonical configuration path",
+).brand<"CanonicalConfigurationPath">();
+
+function nonemptySegments(
+  value: unknown,
+): value is readonly [string, ...string[]] {
+  return (
+    isDenseDomainArray(value, isLiteralConfigurationSegment) && value.length > 0
   );
-
-export const canonicalConfigurationPathSchema = publicConfigPathSchema
-  .refine((path) =>
-    path
-      .slice(1)
-      .split("/")
-      .every((segment) => literalSegmentSchema.safeParse(segment).success),
-  )
-  .brand<"CanonicalConfigurationPath">();
-
-export const relativeConfigurationPathSchema = serviceDataBoundary(
-  z.tuple([literalSegmentSchema]).rest(literalSegmentSchema).readonly(),
-);
+}
+export const relativeConfigurationPathSchema = domainSchema<
+  unknown,
+  readonly [string, ...string[]]
+>((input) => {
+  const captured = captureServiceData(input);
+  return captured.success
+    ? captureDomain(captured.value, nonemptySegments)
+    : captured;
+}, "Invalid relative configuration path");
