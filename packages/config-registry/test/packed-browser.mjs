@@ -9,6 +9,7 @@ import { fixture, requireTool } from "./packed-consumer-helper.mjs";
 import { ownDataExercise } from "./structural-witness-own-data-helper.mjs";
 import { readProjectionExercise } from "./read-projection-fixture.mjs";
 import { exerciseDomainBoundaries } from "../../config-types/test/domain-boundary-fixture.mjs";
+import { ancestorProjectionExercise } from "./read-projection-ancestor-fixture.mjs";
 
 const { build } = requireTool("esbuild");
 
@@ -44,6 +45,7 @@ export async function browserGraphs(directory) {
          ${exercise}
           ${ownDataExercise}
           ${readProjectionExercise}
+          ${ancestorProjectionExercise}
           (${exerciseDomainBoundaries.toString()})(types, engine, support);`, context);
       const keys = JSON.parse(runInContext("JSON.stringify(Object.keys(api).sort())", context));
       assert.deepEqual(keys, boundary === "root" ? rootExports : internalExports);

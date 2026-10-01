@@ -1,6 +1,9 @@
 import { parseCanonicalConfigPath } from "@weaver-conf/config-engine";
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-import { isReservedPathSegment } from "@weaver-conf/config-types";
+import {
+  createWeaverError,
+  isReservedPathSegment,
+} from "@weaver-conf/config-types";
 import {
   expandReadEvidence,
   type ReadEvidence,
@@ -25,6 +28,7 @@ export interface ReadContext {
   readonly anchor: AnchorNode | undefined;
   readonly declared: boolean;
   readonly forbidden: boolean;
+  readonly ancestorDenied: boolean;
   readonly uncertain: boolean;
   readonly sources: readonly unknown[];
 }
@@ -60,6 +64,7 @@ class ReadContexts {
   readonly root: ReadContext;
   private readonly ids = new Map<unknown, number>();
   private readonly contextKeys = new Map<string, Map<unknown, ReadContext>>();
+  private referenceDenial: ((context: ReadContext) => boolean) | undefined;
 
   constructor(
     anchors: AnchorNode,
@@ -72,6 +77,7 @@ class ReadContexts {
       anchors,
       false,
       sources,
+      false,
       false,
     );
   }
@@ -92,13 +98,14 @@ class ReadContexts {
     inherited: boolean,
     sources: readonly unknown[],
     uncertain: boolean,
+    ancestorDenied: boolean,
   ): ReadContext {
     const evidence = expandReadEvidence(schemas, candidate);
     const parts: number[] = [];
     for (const schema of ownValues(evidence.schemas))
       appendOwn(parts, this.id(schema));
     const sourceIds = mapOwn(ownValues(sources), (value) => this.id(value));
-    const key = `${inherited || evidence.forbidden}:${uncertain || evidence.ambiguous}:${anchor ? this.id(anchor) : ""}:${parts.join(",")}:${sourceIds.join(",")}`;
+    const key = `${inherited || evidence.forbidden}:${ancestorDenied}:${uncertain || evidence.ambiguous}:${anchor ? this.id(anchor) : ""}:${parts.join(",")}:${sourceIds.join(",")}`;
     let values = this.contextKeys.get(key);
     if (!values) {
       values = new Map();
@@ -112,6 +119,7 @@ class ReadContexts {
       anchor,
       declared: schemas.length > 0 || (anchor?.children.size ?? 0) > 0,
       forbidden: inherited || evidence.forbidden,
+      ancestorDenied,
       uncertain: uncertain || evidence.ambiguous,
       sources: Object.freeze(sources),
     });
@@ -119,6 +127,11 @@ class ReadContexts {
     return context;
   }
   readonly child = (parent: ReadContext, key: string): ReadContext => {
+    // Classify the intact parent before narrowing its marker and source context.
+    const ancestorDenied =
+      parent.ancestorDenied ||
+      isReadReference(parent.candidate) ||
+      (this.referenceDenial?.(parent) ?? false);
     const anchor = parent.anchor?.children.get(key);
     const schemas = readMemberSchemas(parent.evidence, key, parent.candidate);
     if (anchor?.schema) appendOwn(schemas, anchor.schema);
@@ -141,13 +154,28 @@ class ReadContexts {
         readMemberIsAmbiguous(parent.evidence, key, parent.candidate),
       sources,
       parent.uncertain,
+      ancestorDenied,
     );
   };
+  bindReferenceDenial(classify: (context: ReadContext) => boolean): void {
+    if (this.referenceDenial)
+      throw createWeaverError(
+        "VALIDATION_ERROR",
+        "Read parent policy is already bound",
+      );
+    this.referenceDenial = classify;
+  }
   at(segments: readonly string[]): ReadContext {
     let context = this.root;
     for (const key of ownValues(segments)) context = this.child(context, key);
     return context;
   }
+}
+
+export function isReadReference(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  const marker = ownValue(value, "_weaver");
+  return marker === "secret-ref" || marker === "mount";
 }
 
 export function createReadContexts(

@@ -4,9 +4,10 @@ import {
   projectConfigurationData,
 } from "@weaver-conf/config-engine";
 import { createWeaverError } from "@weaver-conf/config-types";
-import type {
-  createReadContexts,
-  ReadContext,
+import {
+  type createReadContexts,
+  isReadReference,
+  type ReadContext,
 } from "./registered-read-contexts";
 import { appendOwn, ownField, ownValue } from "./structural-witness-own-data";
 
@@ -30,6 +31,7 @@ function sourceForbidden(context: ReadContext, contexts: Contexts): boolean {
     if (
       !next.declared ||
       next.forbidden ||
+      next.ancestorDenied ||
       next.uncertain ||
       next.candidate === undefined
     )
@@ -48,33 +50,28 @@ function sourceForbidden(context: ReadContext, contexts: Contexts): boolean {
 }
 
 class ReadPolicy {
+  private readonly decisions = new WeakMap<ReadContext, boolean>();
   constructor(
     private readonly contexts: Contexts,
-    private readonly classifier: MountSourceClassifier,
     private readonly effectiveClassifier: MountSourceClassifier,
     private readonly aliases: readonly MountSourceClassifier[],
-  ) {}
+  ) {
+    contexts.bindReferenceDenial((context) => this.referenceDenied(context));
+  }
 
   denied(context: ReadContext): boolean {
-    if (context.forbidden) return true;
+    if (context.forbidden || context.ancestorDenied) return true;
     if (context.uncertain && context.candidate !== undefined) return true;
-    if (aliasForbidden(context.sources, this.aliases, this.effectiveClassifier))
-      return true;
-    const kind = marker(context.candidate);
-    if (kind === "secret-ref") return true;
-    if (kind !== "mount") return false;
-    const value = context.candidate;
-    const source =
-      value !== null && typeof value === "object"
-        ? ownValue(value, "source")
-        : undefined;
-    if (typeof source === "string") {
-      const mount = { _weaver: "mount" as const, source };
-      this.classifier.isTainted(mount);
-      this.effectiveClassifier.isTainted(mount);
-    }
-    // No mount evaluator or secret backend exists at this public-only boundary.
-    return true;
+    return this.referenceDenied(context);
+  }
+  private referenceDenied(context: ReadContext): boolean {
+    const cached = this.decisions.get(context);
+    if (cached !== undefined) return cached;
+    const denied =
+      isReadReference(context.candidate) ||
+      aliasForbidden(context.sources, this.aliases, this.effectiveClassifier);
+    this.decisions.set(context, denied);
+    return denied;
   }
   projected(context: ReadContext): unknown {
     return projectConfigurationData(context.candidate, context, {
@@ -104,13 +101,11 @@ class ReadPolicy {
 export function createReadPolicy(
   contexts: Contexts,
   effective: Contexts,
-  state: Readonly<Record<string, unknown>>,
   effectiveState: Readonly<Record<string, unknown>>,
   aliases: readonly MountSourceClassifier[] = [],
 ) {
   return new ReadPolicy(
     contexts,
-    createReadSourceClassifier(contexts, state),
     createReadSourceClassifier(effective, effectiveState),
     aliases,
   );

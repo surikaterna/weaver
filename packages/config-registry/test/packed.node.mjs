@@ -10,6 +10,7 @@ import { strictDeclarations } from "./packed-declarations.mjs";
 import { exercise, internalExports, rootExports } from "./operation-support-fixture.mjs";
 import { readProjectionExercise } from "./read-projection-fixture.mjs";
 import { exerciseDomainBoundaries } from "../../config-types/test/domain-boundary-fixture.mjs";
+import { ancestorProjectionExercise } from "./read-projection-ancestor-fixture.mjs";
 
 async function removeOwnedParent(parent, failed) {
   try { await rm(parent, { recursive: true, force: true }); }
@@ -36,6 +37,7 @@ async function nodeConsumers(directory) {
       for (const api of [support, internalApi]) { ${exercise} }
       ${ownDataExercise}
       ${readProjectionExercise}
+      ${ancestorProjectionExercise}
       ${cjs ? "const types = require('@weaver-conf/config-types');" : "import * as types from '@weaver-conf/config-types';"}
       console.log('packed boundary matrix', (${exerciseDomainBoundaries.toString()})(types, engine, support));
       console.log('packed runtime real registrations/reads/pages/validators passed');`);

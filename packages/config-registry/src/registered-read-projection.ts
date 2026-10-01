@@ -81,6 +81,8 @@ function createRevision(
   const anchors = captureReadAnchors(reader, context.identity.environment);
   const sources = mapOwn(ownValues(snapshot.layers), (layer) => layer.entries);
   const effective = createReadContexts(anchors, snapshot.entries, sources);
+  // Source proof is a separate iterative graph, never a recursive read-policy lookup.
+  const sourceEffective = createReadContexts(anchors, snapshot.entries);
   const rawContexts = mapOwn(ownValues(snapshot.layers), (layer) =>
     createReadContexts(anchors, layer.entries),
   );
@@ -96,8 +98,7 @@ function createRevision(
       contexts,
       policy: createReadPolicy(
         contexts,
-        effective,
-        entries,
+        sourceEffective,
         snapshot.entries,
         aliases,
       ),
