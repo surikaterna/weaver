@@ -20,7 +20,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --test test/fs-read-errors.node.mjs",
     "lint": "biome check ."
   },
   "dependencies": {

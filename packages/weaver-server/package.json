@@ -17,22 +17,29 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "build": "tsup",
     "start": "node dist/cli.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && node --import tsx --test test/canonical-registry*.node.mjs test/resolution-snapshot.node.mjs test/public-projection*.node.mjs test/schema-admission.node.mjs",
+    "test": "vitest run && node --import tsx --test test/canonical-registry*.node.mjs test/resolution-snapshot.node.mjs test/public-projection*.node.mjs test/schema-admission.node.mjs test/authority-*.node.mjs",
     "lint": "biome check ."
   },
   "dependencies": {
+    "@weaver-conf/config-service": "workspace:^",
     "@weaver-conf/config-registry": "workspace:^",
     "@weaver-conf/config-types": "workspace:*",
     "@weaver-conf/config-engine": "workspace:*",

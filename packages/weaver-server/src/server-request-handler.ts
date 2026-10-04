@@ -11,7 +11,7 @@ import { createWeaverError } from "./types/index";
 export function createRequestHandler(
   health: HealthEndpoints,
   restAdapter: RestAdapter,
-  sseAdapter: SSEAdapter,
+  sseAdapter: SSEAdapter | undefined,
   corsOrigins: string[] | undefined,
   authMiddleware?: AuthMiddleware,
 ) {
@@ -42,7 +42,7 @@ export function createRequestHandler(
       res.status(result.status).json(result.body);
       return;
     }
-    if (pathname === "/v1/events" && method === "GET") {
+    if (sseAdapter && pathname === "/v1/events" && method === "GET") {
       await handleSSE(url, req, res, sseAdapter, corsOrigins);
       return;
     }

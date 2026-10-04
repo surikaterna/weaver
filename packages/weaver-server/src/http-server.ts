@@ -58,7 +58,8 @@ export async function startHttpServer(options: {
 
   const server = await new Promise<ReturnType<typeof app.listen>>(
     (resolve, reject) => {
-      const httpServer = app.listen(options.port, () => {
+      const httpServer = app.listen(options.port, (error?: Error) => {
+        if (error) return reject(error);
         httpServer.off("error", reject);
         resolve(httpServer);
       });

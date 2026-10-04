@@ -13,6 +13,11 @@ import { createWeaverConfigService } from "./core/config-service";
 import { createPersistentSchemaRegistry } from "./core/schema-registry";
 import { createHealthEndpoints } from "./health";
 import { type HttpServer, startHttpServer } from "./http-server";
+import { startAuthorityServer } from "./server-authority";
+import {
+  hasAuthorityOptions,
+  type ServerAuthorityOptions,
+} from "./server-authority-options";
 import { parseServerEnv } from "./server-env";
 import { createRequestHandler } from "./server-request-handler";
 import { createShutdownManager } from "./shutdown";
@@ -38,6 +43,7 @@ interface ServerRuntime extends ServerAuth {
 }
 
 export interface WeaverServerOptions {
+  authority?: ServerAuthorityOptions;
   port?: number;
   repoUrl?: string;
   environment?: string;
@@ -94,6 +100,7 @@ export async function startWeaverServerInternal(
   options: WeaverServerOptions | undefined,
   resolveBootstrap: BootstrapResolver,
 ): Promise<WeaverServer> {
+  if (hasAuthorityOptions(options)) return startAuthorityServer(options);
   const config = resolveOptions(options);
   const health = createHealthEndpoints();
   const shutdownManager = createShutdownManager({ drainTimeoutMs: 10_000 });

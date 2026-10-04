@@ -4,7 +4,38 @@
 
 Accepted (amended by the JSON-Schema-first client design)
 
+## Hosting clarification — 2026-10-02
+
+The unified transport-backed client remains the consumer SDK for browser and backend
+applications. It is not mandatory infrastructure inside a configuration authority:
+`config-service` directly owns registered projections, identity revisions and provider
+lifecycle, without an internal SDK cache or snapshot transport. An optional local
+consumer adapter may sit outside that authority; it is not implemented by this decision.
+
+The approved target shares this application authority between embedded and central
+hosting; the existing server has **not yet been migrated**. Server adapters retain
+authentication, transports and durable bootstrap. One authoritative API writer per
+backing domain is a deployment responsibility, not a distributed mutex or transaction.
+Configured external inputs may refresh through the authority publication path without
+implying concurrent-writer coordination. No automatic hybrid mutation replay is promised:
+pending is not committed, required flush is not universal durability, and a timeout
+after dispatch does not establish rollback. The historical consumer decisions below
+remain applicable except where this hosting clarification explicitly narrows them.
+
 ## Context
+
+### Hosting progress — 2026-10-03
+
+`weaver-0b81.5.3` introduces an opt-in programmatic central host for the shared
+authority's registered public primitive/null leaf operations. The default
+one-argument service root remains read-only; explicit host options enable
+governed writes. The legacy server remains the default. This new raw HTTP subset
+uses canonical hydrated inspection and intentionally omits list/SSE startup,
+live schema administration, sessions and aggregate handles. It therefore does
+**not** certify current SDK compatibility or imply a new internal SDK dependency.
+The full SDK matrix remains `weaver-0b81.9`; independent integrated audit and
+packed consumer gates remain required. Historical architecture below is retained
+without expanding replay, distributed-writer or durability guarantees.
 
 Browser clients need synchronous local reads and optional offline persistence. Backend
 services need layer-targeted writes, schema metadata, and restart detection. Both use

@@ -15,7 +15,38 @@ test("server admission delegates to the sole registry witness implementation", a
   const delegate = await readFile(new URL("../../weaver-server/src/core/schema-write-support.ts", import.meta.url), "utf8");
   assert.equal(delegate, 'export {\n  type StructuralSupport,\n  schemaWriteSupport,\n} from "@weaver-conf/config-registry";\n');
   const admission = await readFile(new URL("../../weaver-server/src/core/config-write-admission.ts", import.meta.url), "utf8");
-  assert.match(admission, /import \{ schemaWriteSupport \} from "\.\/schema-write-support";/);
+  const ts = await import("typescript");
+  const parse = (text) => ts.createSourceFile("admission.ts", text, ts.ScriptTarget.Latest, true);
+  const server = parse(admission);
+  assert.equal(server.statements.length, 2);
+  const exports = server.statements.flatMap((node) => {
+    assert.ok(ts.isExportDeclaration(node) && ts.isNamedExports(node.exportClause));
+    assert.equal(node.moduleSpecifier.text, "@weaver-conf/config-service/admission");
+    return node.exportClause.elements.map((item) => `${node.isTypeOnly || item.isTypeOnly ? "type" : "value"}:${item.name.text}`);
+  });
+  assert.deepEqual(exports, ["type:AdmissionContext", "type:Mutation", "value:prepareConfigMutation"]);
+  const entry = parse(await readFile(new URL("../../config-service/src/admission.ts", import.meta.url), "utf8"));
+  assert.ok(entry.statements.some((node) => ts.isExportDeclaration(node) && !node.isTypeOnly &&
+    node.moduleSpecifier.text === "./authority/schema-admission" && ts.isNamedExports(node.exportClause) &&
+    node.exportClause.elements.some((item) => !item.isTypeOnly && item.name.text === "prepareConfigMutation")));
+  const shared = parse(await readFile(new URL("../../config-service/src/authority/schema-admission.ts", import.meta.url), "utf8"));
+  const witness = shared.statements.find((node) => ts.isImportDeclaration(node) && node.moduleSpecifier.text === "@weaver-conf/config-registry");
+  assert.ok(witness && !witness.importClause.isTypeOnly && ts.isNamedImports(witness.importClause.namedBindings));
+  assert.ok(witness.importClause.namedBindings.elements.some((item) => !item.isTypeOnly &&
+    item.name.text === "schemaWriteSupport" && (item.propertyName?.text ?? item.name.text) === "schemaWriteSupport"));
+  const callers = [];
+  for (const fn of shared.statements.filter(ts.isFunctionDeclaration)) {
+    let calls = 0;
+    const visit = (node) => {
+      if (ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node))
+        assert.notEqual(node.name?.text, "schemaWriteSupport", "canonical witness must not be shadowed or duplicated");
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "schemaWriteSupport") calls++;
+      ts.forEachChild(node, visit);
+    };
+    visit(fn);
+    if (calls) callers.push([fn.name.text, calls]);
+  }
+  assert.deepEqual(callers, [["errorForSupport", 2], ["rejectExistingArrayIndices", 1]]);
 });
 
 test("object declarations, patterns, schema wildcard and recursive payload trees", () => {
