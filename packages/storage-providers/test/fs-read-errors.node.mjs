@@ -34,8 +34,13 @@ async function fixture(run) {
   const provider = createFileSystemStorageProvider({
     id: "disk", layer: "base", filePath, writable: true, watchDebounceMs: 10,
   });
-  try { await run({ directory, filePath, provider }); }
-  finally { provider.dispose(); await rm(directory, { recursive: true, force: true }); }
+  const io = trackFileIO();
+  try { await run({ directory, filePath, provider, io }); }
+  finally {
+    provider.dispose();
+    try { await io.settle(); await rm(directory, { recursive: true, force: true }); }
+    finally { io.close(); }
+  }
 }
 function selected(filePath, provider, dialect) {
   if (dialect === "load") return { path: filePath, load: () => provider.load() };
@@ -135,6 +140,22 @@ test("missing ordinary/mapped targets still initialize nested data and remove no
 function resourceCount(name) {
   return process.getActiveResourcesInfo().filter((value) => value === name).length;
 }
+function isFileRequest(type) {
+  // Node 26's UTF-8 readFile uses FSREQCALLBACK, not the older FSREQPROMISE path.
+  return type === "FSREQPROMISE" || type === "FSREQCALLBACK" || type === "FILEHANDLECLOSEREQ";
+}
+function trackFileIO() {
+  const pending = new Set();
+  const hook = createHook({
+    init(id, type) { if (isFileRequest(type)) pending.add(id); },
+    destroy(id) { pending.delete(id); },
+  }).enable();
+  return {
+    pending: () => pending.size,
+    settle: () => until(() => pending.size === 0, "filesystem requests settled"),
+    close: () => hook.disable(),
+  };
+}
 async function until(predicate, description) {
   const deadline = performance.now() + 3000;
   while (!predicate()) {
@@ -155,14 +176,16 @@ async function change(filePath, observed, entries) {
 }
 for (const failure of ["invalid", "unreadable"]) {
   test(`${failure} initial subscription owns no watcher; repair and explicit re-subscription works`, async () => {
-    await fixture(async ({ filePath, provider }) => {
+    await fixture(async ({ filePath, provider, io }) => {
       if (failure === "invalid") await writeFile(filePath, "SENTINEL-secret {{{");
       else await mkdir(filePath);
+      await io.settle();
       const watchers = resourceCount("FSEventWrap");
       const failed = observer(provider);
       try {
         // Observe completion of actual filesystem work, not an assumed startup delay.
-        await until(() => resourceCount("FSReqPromise") === 0, "initial read settlement");
+        assert.ok(io.pending() > 0, "initial read observed before settlement");
+        await io.settle();
         assert.equal(resourceCount("FSEventWrap"), watchers);
         assert.deepEqual(failed.received, []);
       } finally { failed.unsubscribe(); }
@@ -203,69 +226,76 @@ test("active watcher keeps last good snapshot across invalid data, then recovers
   });
 });
 
-async function rapidSubscription(provider, filePath, before) {
+async function rapidSubscription(provider, filePath, before, io) {
   const retired = [], current = [];
   let acquired = 0;
   const hook = createHook({ init(_id, type) { if (type === "FSEVENTWRAP") acquired++; } });
   hook.enable();
   const stale = provider.onExternalChange((changes) => retired.push(changes));
+  assert.ok(io.pending() > 0, "unsubscribe while initial read is unsettled");
   stale();
   const stop = provider.onExternalChange((changes) => current.push(changes));
   try {
-    await until(() => resourceCount("FSReqPromise") === 0, "initial reads settled");
+    await io.settle();
     const afterResubscribe = resourceCount("FSEventWrap") - before;
     console.log(JSON.stringify({ afterResubscribe, acquired }));
     assert.equal(afterResubscribe, 1);
     assert.equal(acquired, 1);
     assert.deepEqual(retired, []);
     assert.deepEqual(current, []);
+    assert.deepEqual(await change(filePath, { received: current }, { flag: "current" }), [{ key: "flag", oldValue: "initial", newValue: "current" }]);
+    assert.deepEqual(retired, []);
   } finally { hook.disable(); stop(); }
 }
-async function staleUnsubscribe(provider, filePath, before) {
+async function staleUnsubscribe(provider, filePath, before, io) {
   const retired = observer(provider);
   await until(() => resourceCount("FSEventWrap") > before, "first watcher ready");
   const current = observer(provider);
   try {
-    await until(() => resourceCount("FSReqPromise") === 0, "replacement read settled");
+    await io.settle();
     retired.unsubscribe(); retired.unsubscribe();
     assert.equal(resourceCount("FSEventWrap") - before, 1);
     assert.deepEqual(await change(filePath, current, { flag: "current" }), [{ key: "flag", oldValue: "initial", newValue: "current" }]);
     assert.deepEqual(retired.received, []);
   } finally { current.unsubscribe(); }
 }
-async function malformedReplacement(provider, filePath, before) {
+async function malformedReplacement(provider, filePath, before, io) {
   writeFileSync(filePath, "invalid JSON {");
   await assert.rejects(provider.load(), { code: "VALIDATION_ERROR" });
-  let reads = 0, retired, current;
-  const hook = createHook({ init(_id, type) {
-    if (type !== "FSREQPROMISE" || ++reads !== 2) return;
-    hook.disable();
-    // The open has completed: keep its corrupt inode while replacing the pathname.
-    queueMicrotask(() => {
-      retired.unsubscribe();
-      renameSync(filePath, `${filePath}.retired`);
-      writeFileSync(filePath, '{"flag":"repaired"}');
-      current = observer(provider);
-    });
-  } });
+  let request, retired, current;
+  const hook = createHook({
+    init(id, type) { if (request === undefined && isFileRequest(type)) request = id; },
+    before(id) {
+      if (id !== request) return;
+      hook.disable();
+      // Open (Node 24) or whole UTF-8 read (Node 26) completed, but its
+      // promise continuation has not run. Preserve the corrupt inode/result.
+      queueMicrotask(() => {
+        retired.unsubscribe();
+        renameSync(filePath, `${filePath}.retired`);
+        writeFileSync(filePath, '{"flag":"repaired"}');
+        current = observer(provider);
+      });
+    },
+  });
   try {
     hook.enable();
     retired = observer(provider);
-    await until(() => current !== undefined, "repair with old file open");
-    await until(() => resourceCount("FSReqPromise") === 0, "repair reads settled");
+    await until(() => current !== undefined, "repair before old read continuation");
+    await io.settle();
     retired.unsubscribe();
     assert.equal(resourceCount("FSEventWrap") - before, 1);
     assert.deepEqual(await change(filePath, current, { flag: "current" }), [{ key: "flag", oldValue: "repaired", newValue: "current" }]);
     assert.deepEqual(retired.received, []);
   } finally { hook.disable(); retired?.unsubscribe(); current?.unsubscribe(); }
 }
-async function refreshReplacement(provider, filePath, before) {
+async function refreshReplacement(provider, filePath, before, io) {
   const retired = observer(provider);
   await until(() => resourceCount("FSEventWrap") > before, "first watcher ready");
   let current;
   // Real async resource observation places replacement inside the watch read's await.
   const hook = createHook({ init(_id, type) {
-    if (type !== "FSREQPROMISE") return;
+    if (!isFileRequest(type)) return;
     hook.disable();
     queueMicrotask(() => {
       retired.unsubscribe();
@@ -277,22 +307,23 @@ async function refreshReplacement(provider, filePath, before) {
     writeFileSync(filePath, '{"flag":"retired-read"}');
     hook.enable();
     await until(() => current !== undefined, "watch read entered");
-    await until(() => resourceCount("FSReqPromise") === 0, "overlapping reads settled");
+    await io.settle();
     assert.deepEqual(retired.received, []);
     assert.deepEqual(current.received, []);
     assert.equal(resourceCount("FSEventWrap") - before, 1);
     assert.deepEqual(await change(filePath, current, { flag: "current" }), [{ key: "flag", oldValue: "replacement-baseline", newValue: "current" }]);
   } finally { hook.disable(); retired.unsubscribe(); current?.unsubscribe(); }
 }
-async function pendingDispose(provider, _filePath, before) {
+async function pendingDispose(provider, _filePath, before, io) {
   const retired = observer(provider);
+  assert.ok(io.pending() > 0, "dispose while initial read is unsettled");
   provider.dispose();
-  await until(() => resourceCount("FSReqPromise") === 0, "disposed initialization settled");
+  await io.settle();
   assert.equal(resourceCount("FSEventWrap"), before);
   assert.deepEqual(retired.received, []);
   retired.unsubscribe();
 }
-async function callbackReplacement(provider, filePath, before) {
+async function callbackReplacement(provider, filePath, before, io) {
   const retired = [];
   let current;
   const stale = provider.onExternalChange((changes) => {
@@ -304,7 +335,7 @@ async function callbackReplacement(provider, filePath, before) {
     await until(() => resourceCount("FSEventWrap") > before, "first watcher ready");
     await writeFile(filePath, '{"flag":"callback-baseline"}');
     await until(() => current !== undefined, "callback replacement");
-    await until(() => resourceCount("FSReqPromise") === 0, "replacement initialized");
+    await io.settle();
     stale();
     assert.equal(retired.length, 1);
     assert.deepEqual(current.received, []);
@@ -320,12 +351,15 @@ async function ownershipWorker(probe) {
   const directory = await mkdtemp(join(tmpdir(), "weaver-watch-owner-"));
   const filePath = join(directory, "config.json");
   const provider = createFileSystemStorageProvider({ id: "disk", layer: "base", filePath, watchDebounceMs: 10 });
+  const io = trackFileIO();
   try {
     await writeFile(filePath, '{"flag":"initial"}');
-    await probe(provider, filePath, before);
+    await io.settle();
+    await probe(provider, filePath, before, io);
   } finally {
     provider.dispose();
-    await until(() => resourceCount("FSReqPromise") === 0, "final IO settlement");
+    await io.settle();
+    io.close();
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
     const afterDispose = resourceCount("FSEventWrap") - before;
@@ -347,7 +381,7 @@ for (const probe of [rapidSubscription, staleUnsubscribe, malformedReplacement, 
       import { join } from "node:path";
       import { setTimeout as sleep } from "node:timers/promises";
       import { createFileSystemStorageProvider } from ${JSON.stringify(new URL("../dist/index.js", import.meta.url).href)};
-      ${[resourceCount, until, observer, change, ownershipWorker, probe].map((fn) => fn.toString()).join("\n")}
+      ${[resourceCount, isFileRequest, trackFileIO, until, observer, change, ownershipWorker, probe].map((fn) => fn.toString()).join("\n")}
       try { await ownershipWorker(${probe.name}); }
       catch (error) { console.error(error); process.exitCode = 1; }
       finally { process.exit(process.exitCode ?? 0); }
