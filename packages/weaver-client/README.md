@@ -8,6 +8,38 @@
 pnpm add @weaver-conf/weaver-client @weaver-conf/config-types
 ```
 
+## Browser and Node entries
+
+Browser applications must import from `@weaver-conf/weaver-client/browser`.
+This explicit ESM/CJS/TypeScript entry exports the same client, transports,
+IndexedDB persistence, and supporting APIs as the Node root, except
+`createFileSystemPersistence` and `FileSystemPersistenceOptions`. It uses the
+same implementations, not filesystem stubs, aliases, or tree-shaking assumptions.
+
+```typescript
+import { createWeaverClient, createLocalTransport } from "@weaver-conf/weaver-client/browser";
+
+const client = await createWeaverClient({
+  transport: createLocalTransport({
+    snapshot: {
+      entries: { app: { enabled: true } },
+      scopes: {},
+      revision: "local-1",
+      timestamp: new Date().toISOString(),
+    },
+  }),
+});
+const enabled = client.get<boolean>("app.enabled"); // synchronous after boot
+await client.close();
+```
+
+The local transport is an in-memory/offline helper, **not** a governed policy
+adapter. Browser packaging does not confer authorization or provenance semantics.
+The existing `@weaver-conf/weaver-client` root remains Node-oriented and retains
+real atomic filesystem persistence unchanged; it is not browser-safe. Node
+examples below continue to use that root. Browser callers should change only the
+import path, and use IndexedDB or a supplied persistence adapter instead of files.
+
 ## Register a Runtime Schema
 
 `ConfigurationPropertySchema` is the sole runtime schema model. Pass a `SchemaRegistrationRequest` directly to the client; registration does not convert or infer another schema format.

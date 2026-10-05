@@ -4,6 +4,14 @@ import {
   deriveFragmentPath,
   deriveServicePath,
 } from "@weaver-conf/config-engine";
+import type {
+  RegistryState,
+  SchemaEntry,
+} from "@weaver-conf/config-registry/internal/server-adapter";
+import {
+  createEmptyState,
+  schemaKey,
+} from "@weaver-conf/config-registry/internal/server-adapter";
 import {
   fragmentSlotRegistrationMetadataSchema,
   objectConfigurationPropertySchemaSchema,
@@ -16,8 +24,6 @@ import {
   encodeSchemaGraph,
   type PersistedSchemaGraph,
 } from "./schema-registry-schema-codec";
-import type { RegistryState, SchemaEntry } from "./schema-registry-state";
-import { createEmptyState, schemaKey } from "./schema-registry-state";
 
 const persistedSchemaEntrySchema = z.strictObject({
   kind: z.enum(["service", "fragment"]),

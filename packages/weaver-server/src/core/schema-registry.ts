@@ -1,24 +1,13 @@
-import {
-  assertPublicConfigPath,
-  deriveServicePath,
-} from "@weaver-conf/config-engine";
 import type {
-  ConfigurationPropertySchema,
-  ObjectConfigurationPropertySchema,
-  SchemaRegistrationRequest as PathSchemaRegistrationRequest,
-  RegisteredSchemaDetailResponse,
-  RegisteredSchemaIdentityListResponse,
-  RegisteredSchemaIdentityPageRequest,
-  RegisteredSchemaIdentityPageResponse,
-  SchemaRegistrationAuditMetadata,
-  SchemaRegistrationMetadata,
-} from "@weaver-conf/config-types";
+  CanonicalSchemaRegistryReader,
+  SchemaRegistrationContext,
+  SchemaRegistrationRequest,
+  SchemaRegistrationResult,
+} from "@weaver-conf/config-registry";
 import {
-  objectConfigurationPropertySchemaSchema,
-  schemaRegistrationMetadataSchema,
-} from "@weaver-conf/config-types";
-import { z } from "zod";
-import type { WeaverError } from "../types/errors";
+  createRegistryAdapter,
+  type RegistryState,
+} from "@weaver-conf/config-registry/internal/server-adapter";
 import { createWeaverError } from "../types/errors";
 import {
   beginRegistryBinding,
@@ -33,56 +22,18 @@ import {
 } from "./config-service-internal";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
 import {
-  buildIdentityIndex,
-  SchemaIdentityPages,
-} from "./schema-identity-pages";
-import {
   parsePersistedRegistry,
   serializeRegistry,
 } from "./schema-registry-persistence";
-import {
-  applyEvaluation,
-  cloneState,
-  createEmptyState,
-  evaluateRegistration,
-  listSchemaIdentities,
-  listSchemas,
-  type SchemaEntry,
-  schemaKey,
-} from "./schema-registry-state";
 
-export type SchemaRegistrationRequest = PathSchemaRegistrationRequest;
-
-export interface SchemaRegistrationContext {
-  readonly subject?: string | undefined;
-  readonly actor?: string | undefined;
-}
-
-export interface SchemaRegistrationResult {
-  success: boolean;
-  isNewSchema: boolean;
-  hasBreakingChanges: boolean;
-  metadata?: SchemaRegistrationMetadata | undefined;
-  breakingChanges?: string[];
-  error?: WeaverError;
-}
-
-export interface RegisteredSchemaAnchor {
-  readonly kind: "service" | "fragment";
-  readonly path: string;
-  readonly schema: ObjectConfigurationPropertySchema;
-  readonly environment: string;
-  readonly metadata: SchemaRegistrationMetadata;
-}
-
-export const registeredSchemaAnchorSchema: z.ZodType<RegisteredSchemaAnchor> =
-  z.strictObject({
-    kind: z.enum(["service", "fragment"]),
-    path: z.string(),
-    schema: objectConfigurationPropertySchemaSchema,
-    environment: z.string(),
-    metadata: schemaRegistrationMetadataSchema,
-  });
+export type {
+  RegisteredSchemaAnchor,
+  SchemaRegistrationAuditMetadata,
+  SchemaRegistrationContext,
+  SchemaRegistrationRequest,
+  SchemaRegistrationResult,
+} from "@weaver-conf/config-registry";
+export { registeredSchemaAnchorSchema } from "@weaver-conf/config-registry";
 
 export interface SchemaRegistryOptions {
   configService: WeaverConfigService;
@@ -95,42 +46,22 @@ export interface PersistentSchemaRegistryOptions extends SchemaRegistryOptions {
   environment?: string;
 }
 
-export interface SchemaRegistry {
+export interface SchemaRegistry
+  extends Omit<CanonicalSchemaRegistryReader, "getSchema" | "resolveAnchor"> {
   register(
     request: SchemaRegistrationRequest,
     context?: SchemaRegistrationContext,
   ): Promise<SchemaRegistrationResult>;
   getSchema(
-    serviceId: string,
-    environment: string,
-  ): Promise<ObjectConfigurationPropertySchema | null>;
+    ...args: Parameters<CanonicalSchemaRegistryReader["getSchema"]>
+  ): Promise<ReturnType<CanonicalSchemaRegistryReader["getSchema"]>>;
   resolveAnchor(
-    path: string,
-    environment?: string,
-  ): Promise<RegisteredSchemaAnchor | null>;
-  listAll(): Record<string, ConfigurationPropertySchema>;
-  listRegisteredSchemaIdentities(): RegisteredSchemaIdentityListResponse;
-  listRegisteredSchemaIdentityPage(
-    input?: RegisteredSchemaIdentityPageRequest,
-  ): RegisteredSchemaIdentityPageResponse;
-  getRegisteredSchema(
-    path: string,
-    environment: string,
-  ): RegisteredSchemaDetailResponse | null;
+    ...args: Parameters<CanonicalSchemaRegistryReader["resolveAnchor"]>
+  ): Promise<ReturnType<CanonicalSchemaRegistryReader["resolveAnchor"]>>;
 }
-
-export type { SchemaRegistrationAuditMetadata };
 
 const defaultPersistenceLayer = "platform";
 const defaultPersistenceKey = INTERNAL_SCHEMA_REGISTRY_KEY;
-
-function createSchemaPersistenceWriter(
-  options: PersistentSchemaRegistryOptions,
-  layer: string,
-  key: string,
-): ReturnType<typeof persistenceWriter> {
-  return persistenceWriter(options, layer, key);
-}
 
 function persistenceWriter(
   options: PersistentSchemaRegistryOptions,
@@ -138,7 +69,7 @@ function persistenceWriter(
   key: string,
 ) {
   return async (
-    updatedState: ReturnType<typeof createEmptyState>,
+    updatedState: RegistryState,
     environment: string,
     context: SchemaRegistrationContext | undefined,
   ): Promise<SchemaRegistrationResult | null> => {
@@ -167,85 +98,40 @@ function persistenceWriter(
   };
 }
 
-export function createSchemaRegistry(
-  _options: SchemaRegistryOptions,
+function serverRegistry(
+  reader: CanonicalSchemaRegistryReader,
+  register: SchemaRegistry["register"],
 ): SchemaRegistry {
-  const state = createEmptyState();
-  const pages = new SchemaIdentityPages(
-    state,
-    _options.schemaIdentityMaxPageSize ?? 200,
-  );
-  const defaultEnvironment = inMemoryRegistryEnvironment(
-    _options.configService,
-  );
-  const registry: SchemaRegistry = {
-    async register(request, context) {
-      return serializeConfigMutation(_options.configService, async () => {
-        const evaluation = evaluateRegistration(state, request, context);
-        if (!evaluation.result.success) return evaluation.result;
-        const candidate = cloneState(state);
-        applyEvaluation(candidate, evaluation);
-        const index = buildIdentityIndex(candidate);
-        pages.assertCanPublish();
-        applyEvaluation(state, evaluation);
-        pages.publish(index);
-        return evaluation.result;
-      });
-    },
-
+  return {
+    ...reader,
+    register,
     async getSchema(serviceId, environment) {
-      try {
-        const { servicePath } = deriveServicePath(serviceId);
-        return structuredClone(
-          state.schemas.get(schemaKey(servicePath, environment))?.schema ??
-            null,
-        );
-      } catch {
-        return null;
-      }
+      return reader.getSchema(serviceId, environment);
     },
-
     async resolveAnchor(path, environment) {
-      return findRegisteredAnchor(
-        state.schemas.values(),
-        path,
-        environment ?? defaultEnvironment,
-      );
-    },
-
-    listAll() {
-      return structuredClone(listSchemas(state));
-    },
-    listRegisteredSchemaIdentities() {
-      return listSchemaIdentities(state);
-    },
-    listRegisteredSchemaIdentityPage(input) {
-      return pages.page(input);
-    },
-    getRegisteredSchema(path, environment) {
-      const entry = state.schemas.get(schemaKey(path, environment));
-      return entry?.path === path && entry.environment === environment
-        ? registeredAnchorFromEntry(entry)
-        : null;
+      return reader.resolveAnchor(path, environment);
     },
   };
-  bindInMemoryRegistry(_options.configService, registry);
-  return registry;
 }
 
-function getRegisteredServiceSchema(
-  schemas: ReadonlyMap<string, SchemaEntry>,
-  serviceId: string,
-  environment: string,
-): ObjectConfigurationPropertySchema | null {
-  try {
-    const { servicePath } = deriveServicePath(serviceId);
-    return structuredClone(
-      schemas.get(schemaKey(servicePath, environment))?.schema ?? null,
-    );
-  } catch {
-    return null;
-  }
+export function createSchemaRegistry(
+  options: SchemaRegistryOptions,
+): SchemaRegistry {
+  const adapter = createRegistryAdapter({
+    defaultEnvironment: inMemoryRegistryEnvironment(options.configService),
+    ...(options.schemaIdentityMaxPageSize !== undefined
+      ? { schemaIdentityMaxPageSize: options.schemaIdentityMaxPageSize }
+      : {}),
+  });
+  const registry = serverRegistry(adapter.reader, (request, context) =>
+    serializeConfigMutation(options.configService, async () => {
+      const prepared = adapter.prepare(request, context);
+      if (prepared.result.success) prepared.publish();
+      return prepared.result;
+    }),
+  );
+  bindInMemoryRegistry(options.configService, registry);
+  return registry;
 }
 
 export async function createPersistentSchemaRegistry(
@@ -271,39 +157,55 @@ async function hydratePersistentRegistry(
   key: string,
 ): Promise<SchemaRegistry> {
   const layer = options.layer ?? defaultPersistenceLayer;
-  const defaultEnvironment = serviceRegistryEnvironment(options.configService);
+  const defaultEnvironment =
+    serviceRegistryEnvironment(options.configService) ?? "";
   const state = parsePersistedRegistry(
     await readPersistentRegistry(options.configService, layer, key),
   );
-  const persist = createSchemaPersistenceWriter(options, layer, key);
-  const pages = new SchemaIdentityPages(
+  const adapter = createRegistryAdapter(
+    {
+      defaultEnvironment,
+      ...(options.schemaIdentityMaxPageSize !== undefined
+        ? { schemaIdentityMaxPageSize: options.schemaIdentityMaxPageSize }
+        : {}),
+    },
     state,
-    options.schemaIdentityMaxPageSize ?? 200,
   );
-  let pending: Promise<unknown> = Promise.resolve();
+  const persist = persistenceWriter(options, layer, key);
+  const register = persistentRegistrationQueue(
+    options.configService,
+    adapter,
+    persist,
+    defaultEnvironment,
+  );
+  const registry = serverRegistry(adapter.reader, register);
+  finishRegistryBinding(options.configService, registry);
+  return registry;
+}
 
-  function registerSerialized(
-    request: SchemaRegistrationRequest,
-    context?: SchemaRegistrationContext,
-  ): Promise<SchemaRegistrationResult> {
+function persistentRegistrationQueue(
+  service: WeaverConfigService,
+  adapter: ReturnType<typeof createRegistryAdapter>,
+  persist: ReturnType<typeof persistenceWriter>,
+  defaultEnvironment: string,
+): SchemaRegistry["register"] {
+  let pending: Promise<unknown> = Promise.resolve();
+  return (request, context) => {
     const work = pending.then(() =>
-      serializeConfigMutation(options.configService, async () => {
-        const environment = request.environment || defaultEnvironment || "";
-        const evaluation = evaluateRegistration(
-          state,
-          { ...request, environment },
-          context,
+      serializeConfigMutation(service, async () => {
+        const prepared = adapter.prepare(request, context, defaultEnvironment);
+        if (!prepared.result.success) return prepared.result;
+        const candidate = prepared.candidate;
+        if (!candidate || prepared.environment === undefined)
+          return prepared.result;
+        const failure = await persist(
+          candidate,
+          prepared.environment,
+          prepared.context,
         );
-        if (!evaluation.result.success) return evaluation.result;
-        const candidate = cloneState(state);
-        applyEvaluation(candidate, evaluation);
-        const index = buildIdentityIndex(candidate);
-        pages.assertCanPublish();
-        const failure = await persist(candidate, environment, context);
         if (failure) return failure;
-        applyEvaluation(state, evaluation);
-        pages.publish(index);
-        return evaluation.result;
+        prepared.publish();
+        return prepared.result;
       }),
     );
     pending = work.then(
@@ -311,81 +213,5 @@ async function hydratePersistentRegistry(
       () => undefined,
     );
     return work;
-  }
-
-  const registry: SchemaRegistry = {
-    register: registerSerialized,
-
-    async getSchema(serviceId, environment) {
-      return getRegisteredServiceSchema(state.schemas, serviceId, environment);
-    },
-
-    async resolveAnchor(path, environment) {
-      return findRegisteredAnchor(
-        state.schemas.values(),
-        path,
-        environment ?? defaultEnvironment ?? "",
-      );
-    },
-
-    listAll() {
-      return structuredClone(listSchemas(state));
-    },
-    listRegisteredSchemaIdentities() {
-      return listSchemaIdentities(state);
-    },
-    listRegisteredSchemaIdentityPage(input) {
-      return pages.page(input);
-    },
-    getRegisteredSchema(path, environment) {
-      const entry = state.schemas.get(schemaKey(path, environment));
-      return entry?.path === path && entry.environment === environment
-        ? registeredAnchorFromEntry(entry)
-        : null;
-    },
   };
-  finishRegistryBinding(options.configService, registry);
-  return registry;
-}
-
-function findRegisteredAnchor(
-  entries: Iterable<SchemaEntry>,
-  path: string,
-  environment: string,
-): RegisteredSchemaAnchor | null {
-  const normalizedPath = normalizeAnchorLookupPath(path);
-  if (normalizedPath === null) return null;
-  let match: RegisteredSchemaAnchor | null = null;
-
-  for (const entry of entries) {
-    const anchor = registeredAnchorFromEntry(entry);
-    if (anchor.environment !== environment) continue;
-    if (!isAnchorPathMatch(anchor.path, normalizedPath)) continue;
-    if (match === null || anchor.path.length > match.path.length)
-      match = anchor;
-  }
-
-  return match;
-}
-
-function registeredAnchorFromEntry(entry: SchemaEntry): RegisteredSchemaAnchor {
-  return {
-    kind: entry.kind,
-    path: entry.path,
-    schema: structuredClone(entry.schema),
-    environment: entry.environment,
-    metadata: structuredClone(entry.metadata),
-  };
-}
-
-function isAnchorPathMatch(anchorPath: string, path: string): boolean {
-  return path === anchorPath || path.startsWith(`${anchorPath}/`);
-}
-
-function normalizeAnchorLookupPath(path: string): string | null {
-  try {
-    return assertPublicConfigPath(path);
-  } catch {
-    return null;
-  }
 }

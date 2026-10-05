@@ -533,7 +533,7 @@ describe("WeaverConfigService", () => {
     }
   });
 
-  it("classifies long mount graphs iteratively without disclosure", async () => {
+  it("classifies long protected mount chains iteratively without disclosure", async () => {
     const size = 20_000;
     const protectedChain = mountGraph(size, (index) =>
       index === size - 1 ? "_weaver.registry.schemas" : `node${index + 1}`,
@@ -550,7 +550,10 @@ describe("WeaverConfigService", () => {
     expect(Object.keys(protectedSnapshot.entries)).toEqual([]);
     expect(await protectedService.get("node0")).toBeUndefined();
     expect(await protectedService.get("protectedCycle")).toBeUndefined();
+  });
 
+  it("classifies long public mount cycles iteratively without disclosure", async () => {
+    const size = 20_000;
     const cycle = mountGraph(size, (index) => `node${(index + 1) % size}`);
     const cycleService = await makeService(cycle);
     const cycleSnapshot = await cycleService.resolveAll();

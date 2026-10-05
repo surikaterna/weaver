@@ -44,7 +44,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --test test/packaging/*.node.mjs test/*.node.mjs",
     "lint": "biome check ."
   },
   "dependencies": {
