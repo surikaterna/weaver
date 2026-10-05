@@ -275,6 +275,7 @@ export {
   schemaValidationPathSegmentSchema,
   schemaValidationResultSchema,
 } from "./schemas-schema-validation";
+export * from "./schemas-service-authority";
 export {
   configurationEffectiveChangeSchema,
   configurationInspectionValueSchema,
@@ -316,6 +317,7 @@ export type {
   ServiceConfigurationService,
   ViewConfigurationService,
 } from "./service";
+export * from "./service-authority";
 // service.ts — Service interfaces
 export type {
   ConfigurationEffectiveChange,
@@ -332,9 +334,28 @@ export type {
 } from "./service-capabilities";
 export { captureServiceData } from "./service-data-boundary";
 export type {
+  ConfigurationServiceLayerSlot,
+  ConfigurationServiceOptions,
+  ConfigurationServiceProviderBinding,
+  ConfigurationServiceProviderEnvironment,
+  ConfigurationServiceProviderOwnership,
+  ConfigurationServiceProviderRead,
+  ConfigurationServiceProviderReadContext,
+} from "./service-factory-options";
+export {
+  configurationServiceLayerSlotSchema,
+  configurationServiceOptionsSchema,
+  configurationServiceProviderBindingSchema,
+  configurationServiceProviderEnvironmentSchema,
+  configurationServiceProviderOwnershipSchema,
+  configurationServiceProviderReadContextSchema,
+  configurationServiceProviderReadSchema,
+} from "./service-factory-options";
+export type {
   CanonicalConfigurationPath,
   RelativeConfigurationPath,
 } from "./service-paths";
+export * from "./service-provider-write";
 // session.ts — Session layer types
 export type {
   GodModeSession,

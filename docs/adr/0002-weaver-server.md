@@ -7,7 +7,38 @@
 - **Depends on**: ADR-0001 (Marker Architecture, Secret Management)
 - **Issue**: weaver-hw7
 
+## Scoped supersession — 2026-10-02
+
+The historical offline auto-queue/replay proposals below are superseded: the current
+consumer SDK does not promise automatic hybrid mutation replay. Pending work is not
+committed configuration, required provider flush is not universal durability, and
+timeout after dispatch does not mean rollback. Retaining those proposals records
+history, not a current runtime guarantee.
+
+The approved hosting target is one `config-service` application authority shared by
+embedded and central adapters, with the unified transport-backed client outside the
+authority as a consumer SDK (see ADR-0003's hosting clarification). Server authentication,
+transports and durable bootstrap remain server responsibilities; the existing server
+has **not yet been migrated**, and the current service root is read-only. One API writer
+per backing domain is a deployment responsibility, not a distributed lock or multiwriter
+transaction guarantee. Configured out-of-band provider inputs may later refresh through
+the authority publication path without promising coordination of concurrent API writers.
+
 ## Context
+
+### Implementation progress — 2026-10-03
+
+The earlier migration statement records the pre-hosting state. The **default
+one-argument** service factory remains read-only; explicit host composition now
+supports governed primitive/null leaf writes. `weaver-0b81.5.3` adds opt-in
+programmatic `startWeaverServer({ authority })` hosting of that same root, with
+real JWT authentication, durable canonical registry bootstrap, and GET/inspect,
+PUT and DELETE. The default legacy server has not been cut over. This subset is
+not the legacy SDK's list/inspect/SSE contract, a live schema-administration API,
+or a full alpha-readiness certificate. Independent integrated audit and packed
+consumer gates remain required; see the root README for the explicit wire and
+lifecycle boundaries. The single-API-writer deployment responsibility above
+continues to apply.
 
 ADR-0001 established the marker architecture, secret management model, service declarations, access policies, environment overlays, and mount resolution for Weaver. It designated a central configuration server (weaver-server) as the primary enforcement point for most of these features but deferred its design.
 

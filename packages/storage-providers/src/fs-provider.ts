@@ -14,10 +14,9 @@ import type {
   ConfigurationLayer,
   ConfigurationLayerData,
   ConfigurationStorageProvider,
-  Result,
   WriteResult,
 } from "@weaver-conf/config-types";
-import { err, ok } from "@weaver-conf/config-types";
+import { createWeaverError } from "@weaver-conf/config-types";
 
 /** Options for creating a file-system storage provider. */
 export interface FileSystemProviderOptions {
@@ -55,6 +54,7 @@ export class FileSystemStorageProvider implements ConfigurationStorageProvider {
   private fsWatcher: FSWatcher | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private snapshot: Record<string, unknown> = {};
+  private subscription: symbol | null = null;
   private changeListener: ((changes: ConfigurationChange[]) => void) | null =
     null;
 
@@ -157,32 +157,44 @@ export class FileSystemStorageProvider implements ConfigurationStorageProvider {
     listener: (changes: ConfigurationChange[]) => void,
   ): () => void {
     this.stopWatching();
+    const subscription = Symbol();
+    this.subscription = subscription;
     this.changeListener = listener;
 
-    void this.readJsonFile(this.filePath).then((entries) => {
-      if (!this.changeListener) return;
-      this.snapshot = entries;
-      this.startWatching();
-    });
+    void this.readJsonFile(this.filePath)
+      .then((entries) => {
+        if (this.subscription !== subscription) return;
+        this.snapshot = entries;
+        this.startWatching(subscription);
+      })
+      .catch(() => {
+        // Failed initialization owns no watcher; re-subscribe after repair.
+      });
 
-    return () => this.stopWatching();
+    return () => {
+      if (this.subscription === subscription) this.stopWatching();
+    };
   }
 
   dispose(): void {
     this.stopWatching();
   }
 
-  private startWatching(): void {
+  private startWatching(subscription: symbol): void {
+    if (this.subscription !== subscription) return;
     const dir = dirname(this.filePath);
     const filename = this.filePath.slice(dir.length + 1);
 
     this.fsWatcher = watch(dir, (_eventType, changedFile) => {
       if (changedFile !== filename) return;
-      this.scheduleCheck();
+      this.scheduleCheck(subscription);
     });
   }
 
   private stopWatching(): void {
+    // Fence pending reads and callbacks before releasing this registration's handles.
+    this.subscription = null;
+    this.changeListener = null;
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
@@ -191,56 +203,55 @@ export class FileSystemStorageProvider implements ConfigurationStorageProvider {
       this.fsWatcher.close();
       this.fsWatcher = null;
     }
-    this.changeListener = null;
   }
 
-  private scheduleCheck(): void {
+  private scheduleCheck(subscription: symbol): void {
+    if (this.subscription !== subscription) return;
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
     }
     this.debounceTimer = setTimeout(() => {
+      if (this.subscription !== subscription) return;
       this.debounceTimer = null;
-      void this.checkForChanges();
+      void this.checkForChanges(subscription).catch(() => {
+        // Keep the last good snapshot; a later filesystem event can recover.
+      });
     }, this.watchDebounceMs);
     this.debounceTimer.unref();
   }
 
-  private async checkForChanges(): Promise<void> {
-    if (!this.changeListener) return;
+  private async checkForChanges(subscription: symbol): Promise<void> {
+    const listener = this.changeListener;
+    if (this.subscription !== subscription || !listener) return;
 
     const current = await this.readJsonFile(this.filePath);
+    if (this.subscription !== subscription) return;
     const changes = diffEntries(this.snapshot, current);
 
     if (changes.length > 0) {
       this.snapshot = current;
-      this.changeListener(changes);
+      listener(changes);
     }
   }
 
   private async readJsonFile(path: string): Promise<Record<string, unknown>> {
-    const result = await this.readJsonFileResult(path);
-    if (!result.ok) {
-      // Preserve legacy behavior: log and return empty for parse errors
-      console.warn(result.error.message);
-      return {};
-    }
-    return result.value;
-  }
-
-  private async readJsonFileResult(
-    path: string,
-  ): Promise<Result<Record<string, unknown>, Error>> {
+    let content: string;
     try {
-      const content = await readFile(path, "utf-8");
-      return ok(safeParseConfigEntries(JSON.parse(content)));
-    } catch (e: unknown) {
-      if (e instanceof SyntaxError) {
-        return err(new Error(`Invalid JSON in config file: ${path}`));
-      }
-      if (isNodeError(e) && e.code === "ENOENT") {
-        return ok({});
-      }
-      return err(e instanceof Error ? e : new Error(String(e)));
+      content = await readFile(path, "utf-8");
+    } catch (error: unknown) {
+      if (isNodeError(error) && error.code === "ENOENT") return {};
+      throw createWeaverError(
+        "SERVER_DEGRADED",
+        "Configuration file could not be read",
+      );
+    }
+    try {
+      return safeParseConfigEntries(JSON.parse(content));
+    } catch {
+      throw createWeaverError(
+        "VALIDATION_ERROR",
+        "Configuration file contains invalid configuration data",
+      );
     }
   }
 

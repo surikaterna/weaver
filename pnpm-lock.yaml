@@ -194,6 +194,31 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/config-service:
+    dependencies:
+      '@weaver-conf/config-auth':
+        specifier: workspace:^
+        version: link:../config-auth
+      '@weaver-conf/config-engine':
+        specifier: workspace:^
+        version: link:../config-engine
+      '@weaver-conf/config-policy':
+        specifier: workspace:^
+        version: link:../config-policy
+      '@weaver-conf/config-registry':
+        specifier: workspace:^
+        version: link:../config-registry
+      '@weaver-conf/config-types':
+        specifier: workspace:^
+        version: link:../config-types
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+    devDependencies:
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   packages/config-sessions:
     dependencies:
       '@weaver-conf/config-types':
@@ -339,6 +364,9 @@ importers:
       '@weaver-conf/config-runtime':
         specifier: workspace:*
         version: link:../config-runtime
+      '@weaver-conf/config-service':
+        specifier: workspace:^
+        version: link:../config-service
       '@weaver-conf/config-types':
         specifier: workspace:*
         version: link:../config-types

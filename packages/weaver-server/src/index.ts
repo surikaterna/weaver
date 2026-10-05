@@ -125,6 +125,10 @@ export {
 export type { WeaverServer, WeaverServerOptions } from "./server";
 // server
 export { startWeaverServer } from "./server";
+export {
+  type ServerAuthorityOptions,
+  serverAuthorityOptionsSchema,
+} from "./server-authority-options";
 export type { ServerEnv } from "./server-env";
 export { parseServerEnv, serverEnvSchema } from "./server-env";
 export type { ShutdownManager, ShutdownManagerOptions } from "./shutdown";

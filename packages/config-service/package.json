@@ -1,0 +1,61 @@
+{
+  "name": "@weaver-conf/config-service",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Provider-backed hydrated configuration snapshots",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/surikaterna/weaver.git",
+    "directory": "packages/config-service"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./admission": {
+      "import": {
+        "types": "./dist/admission.d.ts",
+        "default": "./dist/admission.js"
+      },
+      "require": {
+        "types": "./dist/admission.d.cts",
+        "default": "./dist/admission.cjs"
+      }
+    },
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "node --test test/*.node.mjs"
+  },
+  "dependencies": {
+    "@weaver-conf/config-policy": "workspace:^",
+    "@weaver-conf/config-auth": "workspace:^",
+    "@weaver-conf/config-types": "workspace:^",
+    "@weaver-conf/config-engine": "workspace:^",
+    "@weaver-conf/config-registry": "workspace:^",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

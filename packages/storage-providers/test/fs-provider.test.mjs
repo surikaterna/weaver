@@ -65,29 +65,22 @@ test("load() returns empty entries for missing file", async () => {
   expect(data.revision).toBe(undefined);
 });
 
-test("load() returns empty entries for invalid JSON with console.warn", async () => {
+test("load() rejects invalid JSON with a sanitized validation error", async () => {
   const dir = makeTempDir();
   await mkdir(dir, { recursive: true });
   const filePath = join(dir, "bad.json");
   await writeFile(filePath, "not valid json {{{");
 
   try {
-    const warnings = [];
-    const originalWarn = console.warn;
-    console.warn = (...args) => warnings.push(args.join(" "));
-
     const provider = createFileSystemStorageProvider({
       id: "test",
       layer: "core",
       filePath,
     });
-    const data = await provider.load();
-
-    console.warn = originalWarn;
-
-    expect(data.entries).toEqual({});
-    expect(warnings.length).toBe(1);
-    expect(warnings[0].includes(filePath)).toBeTruthy();
+    await expect(provider.load()).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: "Configuration file contains invalid configuration data",
+    });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
