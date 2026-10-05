@@ -100,3 +100,66 @@ A repeated version invocation without new changesets does not bump again. A
 dependent server may advance its existing alpha train; this is not a global reset.
 Source prerelease state and evidence-only publication allowlists remain unchanged.
 Actual release/publication requires separate approval and release-boundary review.
+## Registered public reads
+
+`createRegisteredReadProjection(reader, snapshot, context)` composes the same
+canonical registry reader with an **exact engine-issued** resolution snapshot.
+The snapshot is authenticated through `inspectResolvedPath(snapshot, [])` before
+any supplied snapshot fields are read. Clones and DTO-parsed copies are not
+inspection handles. The context carries an environment, ordered scope tuple, and
+revision; the returned interface exposes no raw snapshot or registry capability.
+
+The interface provides `get`, `getAtLayer`, `getNamespace`, `inspect`, and `entries`.
+Unknown direct paths throw `SCHEMA_NOT_REGISTERED`. Declared non-public or
+sensitive paths throw `FORBIDDEN`; inspection represents denial as `redacted`
+without a value field. Declared absent values are ordinary missing values.
+Defaults belong to callers and must only substitute after a successful missing
+read, never after catching a policy error.
+
+Public reads require absent/public `x-weaver.visibility` and `sensitive !== true`.
+Ancestor restrictions and eligible composition branches cannot be declassified
+by a child. Unknown or denied aggregate children are pruned while public siblings
+remain. Arrays preserve positions. Secret references and unresolved mount
+references are never emitted or dereferenced. Pre-resolved aliases require source
+proof from both raw and effective graphs. Each raw contributor is classified
+independently, so a public override cannot expose a lower-layer reference.
+
+Output graphs and inspection DTOs are detached and frozen. Inspection uses the
+existing configuration-service discriminants and engine provenance, including
+undefined winners for composite objects. Serializing a DTO does not authenticate
+a reader, context, or snapshot. Legacy server reads retain their existing policy;
+this API does not introduce a global registered-read gate into them.
+
+### Structural reuse ledger
+
+The read walker privately imports `allows`, `objectMembers`, `arrayMembers`, and
+`validBranch` from the single structural-write witness. They are not public root
+exports. Read traversal is iterative and uses the real engine branch validator;
+it does not invoke recursive `schemaWriteSupport` or copy a member resolver.
+The witness retains own declaration/tuple lookup, descriptor-first input admission,
+candidate-conditioned branches, array classification and cycle behavior. Internal
+scratch uses native arrays rather than a parallel array-operations library.
+
+The original extraction and its historical digest remain recorded at their earlier
+Git/issue revisions. Current forward changes are not certified as those original
+bytes: safety-span reversal, export-prefix normalization and exact-line-count hash
+reconstruction have been removed. Original behavioral fixtures and the server's
+sole-delegate ownership test remain; ordinary declaration, malformed own path,
+accessor, composition and projection regressions establish current correctness.
+
+An operation-local anchor routing trie captures one detached schema per canonical
+anchor/environment through the supplied reader. Contexts intern structural policy,
+ancestor restriction, candidate, and raw source boundaries; shared values never
+grant access merely because another path allowed the same object. The registry
+still owns registration and longest-anchor authority. No host grants, mutation
+admission, persistence, mount evaluator, or secret backend is added here.
+### Native registered-read contracts
+
+The context and callable-shape schemas use co-located native Zod object contracts
+after descriptor-first admission. `parse`/`safeParse`, input/output types and method
+signatures retain their meaning; `.out` exposes the native object contract (unwrap
+the readonly context first). Context identity uses the configuration-types schema,
+not a duplicate validator or identity data-projection pass. Shape validation never
+invokes capabilities, authenticates a reader, or turns a DTO into an issued
+snapshot. Native Zod runs under standard JavaScript prototypes; executable ambient
+prototype modification and Proxy reflection are not a supported sandbox boundary.

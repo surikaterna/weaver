@@ -5,14 +5,46 @@ import { fixture, requireTool } from "./packed-consumer-helper.mjs";
 
 const ts = requireTool("typescript");
 const text = `
-import { createCanonicalSchemaRegistry, schemaWriteSupport, structuralSupportSchema,
+import { createCanonicalSchemaRegistry, createRegisteredReadProjection, registeredReadProjectionContextSchema,
+  registeredReadProjectionSchema, type RegisteredReadProjection, schemaWriteSupport, structuralSupportSchema,
   type StructuralSupport, type CanonicalSchemaRegistryReader } from '@weaver-conf/config-registry';
 import { createRegistryAdapter } from '@weaver-conf/config-registry/internal/server-adapter';
-import { validateEffectiveConfiguration, validatePartialConfiguration } from '@weaver-conf/config-engine';
+import { resolveConfigurationSnapshot, validateEffectiveConfiguration, validatePartialConfiguration } from '@weaver-conf/config-engine';
+import { canonicalConfigurationPathSchema, hydratedConfigurationInspectionSchema } from '@weaver-conf/config-types';
+import * as types from '@weaver-conf/config-types';
+import * as engine from '@weaver-conf/config-engine';
+import type { z } from 'zod';
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+type Assert<T extends true> = T;
+type IdentifierInput = Assert<Equal<z.input<typeof types.serviceIdSchema>, string>>;
+type RelativeOutput = Assert<Equal<z.output<typeof types.relativeConfigurationPathSchema>, readonly [string, ...string[]]>>;
+type CanonicalOutput = Assert<Equal<z.output<typeof types.canonicalConfigurationPathSchema>, types.CanonicalConfigurationPath>>;
+types.serviceIdSchema.min(2); types.providerIdSchema.regex(/panel/);
+types.relativeConfigurationPathSchema.out.unwrap().rest(types.providerIdSchema);
+types.configurationServiceIdentitySchema.out.unwrap().pick({ environment: true });
+types.configurationServiceIdentitySchema.out.unwrap().omit({ scopePath: true });
+types.configurationServiceIdentitySchema.out.unwrap().extend({ revision: types.hydratedConfigurationReaderSchema.out.shape.revision });
+types.hydratedConfigurationInspectionSchema.out.unwrap().safeExtend({ revision: types.hydratedConfigurationReaderSchema.out.shape.revision });
+engine.resolutionOriginSchema.out.unwrap().shape.rank.finite();
+engine.canonicalConfigPathSchema.out.unwrap().shape.storageKey.min(1);
+registeredReadProjectionSchema.out.pick({ entries: true });
+registeredReadProjectionContextSchema.out.unwrap().shape.revision.min(1);
 const registry: CanonicalSchemaRegistryReader = createCanonicalSchemaRegistry({ defaultEnvironment: 'dev' });
 const adapter = createRegistryAdapter({ defaultEnvironment: 'dev' });
+const context = registeredReadProjectionContextSchema.parse({ identity: { environment: 'dev', scopePath: [] }, revision: 'r' });
+const projection: RegisteredReadProjection = createRegisteredReadProjection(registry,
+  resolveConfigurationSnapshot({ configuredRanks: [0], layers: [], ceilings: [] }), context);
+const path = canonicalConfigurationPathSchema.parse('/example');
+projection.entries(); projection.getNamespace(path); projection.get(path); projection.getAtLayer('base', path);
+hydratedConfigurationInspectionSchema.parse(projection.inspect(path)); registeredReadProjectionSchema.parse(projection);
 const result: StructuralSupport = schemaWriteSupport({ type: 'boolean' }, [], true, true, false);
 structuralSupportSchema.parse(result);
+const tupleSupport: StructuralSupport = schemaWriteSupport(
+  { type: 'array', items: [{ type: 'boolean' }] }, ['1'], true, [], []);
+const branchSupport: StructuralSupport = schemaWriteSupport(
+  { type: 'object', anyOf: [{ type: 'object', properties: { enabled: { type: 'boolean' } }, required: ['enabled'] }] },
+  ['enabled'], true, { enabled: true }, {});
+structuralSupportSchema.parse(tupleSupport); structuralSupportSchema.parse(branchSupport);
 // @ts-expect-error Structural support is not a governed writer.
 registry.set('enabled', true);
 // @ts-expect-error The support result must preserve boolean fields.

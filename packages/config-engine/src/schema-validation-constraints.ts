@@ -1,4 +1,5 @@
 import { deepEqual } from "./deep-equal";
+import { ownField } from "./schema-validation-own-data";
 import {
   addBoundedError,
   addError,
@@ -20,15 +21,14 @@ export function validateValueConstraints(state: ValidationState): void {
 }
 
 function validateConstAndEnum(state: ValidationState): void {
-  if (
-    state.schema.const !== undefined &&
-    !constraintEqual(state.value, state.schema.const)
-  ) {
+  const constant = ownField(state.schema, "const");
+  const enumeration = ownField(state.schema, "enum");
+  if (constant !== undefined && !constraintEqual(state.value, constant)) {
     addError(state, "invalid-value", "Value does not match const constraint");
   }
   if (
-    state.schema.enum !== undefined &&
-    !state.schema.enum.some((item) => constraintEqual(item, state.value))
+    enumeration !== undefined &&
+    !enumeration.some((item) => constraintEqual(item, state.value))
   ) {
     addError(state, "invalid-value", "Value is not in the allowed enum values");
   }
@@ -44,25 +44,21 @@ function constraintEqual(left: unknown, right: unknown): boolean {
 function validateStringConstraints(state: ValidationState): void {
   const value = state.value;
   if (typeof value !== "string") return;
-  if (
-    state.schema.minLength !== undefined ||
-    state.schema.maxLength !== undefined
-  ) {
+  const minimum = ownField(state.schema, "minLength");
+  const maximum = ownField(state.schema, "maxLength");
+  const pattern = ownField(state.schema, "pattern");
+  if (minimum !== undefined || maximum !== undefined) {
     const length = countCodePoints(value);
-    addBoundedError(state, "minLength", length, state.schema.minLength, ">=");
-    addBoundedError(state, "maxLength", length, state.schema.maxLength, "<=");
+    addBoundedError(state, "minLength", length, minimum, ">=");
+    addBoundedError(state, "maxLength", length, maximum, "<=");
   }
-  if (state.schema.pattern === undefined) return;
-  const regex = compileSchemaPattern(
-    state.schema.pattern,
-    state.path,
-    state.context,
-  );
+  if (pattern === undefined) return;
+  const regex = compileSchemaPattern(pattern, state.path, state.context);
   if (regex?.test(value) === false) {
     addError(
       state,
       "invalid-value",
-      `String must match pattern ${JSON.stringify(state.schema.pattern)}`,
+      `String must match pattern ${JSON.stringify(pattern)}`,
     );
   }
 }
@@ -76,33 +72,26 @@ function countCodePoints(value: string): number {
 function validateNumberConstraints(state: ValidationState): void {
   const value = state.value;
   if (typeof value !== "number") return;
-  if (state.schema.minimum !== undefined)
-    addBoundedError(state, "minimum", value, state.schema.minimum, ">=");
-  if (state.schema.maximum !== undefined)
-    addBoundedError(state, "maximum", value, state.schema.maximum, "<=");
-  if (state.schema.exclusiveMinimum !== undefined) {
-    addBoundedError(
-      state,
-      "exclusiveMinimum",
-      value,
-      state.schema.exclusiveMinimum,
-      ">",
-    );
+  const minimum = ownField(state.schema, "minimum");
+  const maximum = ownField(state.schema, "maximum");
+  const exclusiveMinimum = ownField(state.schema, "exclusiveMinimum");
+  const exclusiveMaximum = ownField(state.schema, "exclusiveMaximum");
+  if (minimum !== undefined)
+    addBoundedError(state, "minimum", value, minimum, ">=");
+  if (maximum !== undefined)
+    addBoundedError(state, "maximum", value, maximum, "<=");
+  if (exclusiveMinimum !== undefined) {
+    addBoundedError(state, "exclusiveMinimum", value, exclusiveMinimum, ">");
   }
-  if (state.schema.exclusiveMaximum !== undefined) {
-    addBoundedError(
-      state,
-      "exclusiveMaximum",
-      value,
-      state.schema.exclusiveMaximum,
-      "<",
-    );
+  if (exclusiveMaximum !== undefined) {
+    addBoundedError(state, "exclusiveMaximum", value, exclusiveMaximum, "<");
   }
-  if (state.schema.multipleOf !== undefined) validateMultipleOf(state, value);
+  if (ownField(state.schema, "multipleOf") !== undefined)
+    validateMultipleOf(state, value);
 }
 
 function validateMultipleOf(state: ValidationState, value: number): void {
-  const divisor = state.schema.multipleOf;
+  const divisor = ownField(state.schema, "multipleOf");
   if (divisor === undefined) return;
   if (!Number.isFinite(divisor) || divisor <= 0) {
     addError(state, "invalid-schema", "multipleOf must be positive and finite");

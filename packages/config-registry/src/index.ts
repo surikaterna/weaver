@@ -1,5 +1,12 @@
 export { schemaRegistrationAuditMetadataSchema } from "@weaver-conf/config-types";
 export { createCanonicalSchemaRegistry } from "./canonical-schema-registry";
+export {
+  type RegisteredReadProjection,
+  type RegisteredReadProjectionContext,
+  registeredReadProjectionContextSchema,
+  registeredReadProjectionSchema,
+} from "./registered-read-contracts";
+export { createRegisteredReadProjection } from "./registered-read-projection";
 export type {
   CanonicalSchemaRegistry,
   CanonicalSchemaRegistryOptions,

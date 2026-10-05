@@ -7,7 +7,7 @@ Weaver should move from key/value-oriented schema registration toward a path-anc
 | Area | AS-IS | TO-BE |
 |------|-------|-------|
 | Addressing | APIs and docs mix `key`, `namespace`, `prefix`, and `serviceId`; `namespace` often acts like a path prefix. | Use canonical slash paths for registration and registered operations. The client method `namespace<T>(path)` is only a compile-time typed local-state view over the existing storage-prefix grammar; it is not a schema or registration authority. `serviceId` maps to `/<serviceId>`. |
-| Schema unit | Schemas are mostly registered against fully qualified keys or service-like identifiers. | External services register object schemas at root paths derived from `serviceId`, such as `/lynx`. |
+| Schema unit | Schemas are mostly registered against fully qualified keys or service-like identifiers. | External services register object schemas at root paths derived from `serviceId`, such as `/example-service`. |
 | Extension model | Plugin-oriented naming leaks into generic configuration contracts. | Use generic `fragment`; plugin is one fragment provider type. Services declare fragment slots that accept independently registered fragment schemas. |
 | Identity | Registration identity and accountability are not separated; `ownerId` can imply authorization even when usage is closer to declaration source identity. | Use `owner` only for accountable contact metadata, `providerId` for declaration source identity, and authenticated `subject` for authorization. Do not include `ownerId` in the target model. |
 | Writes | HTTP, SCOMP, and clients primarily expose single key/path writes, including dot-key forms. | Writes and patches may target registered objects or members below them, but each layer persists the resulting object at the registered anchor, not flattened key/value leaves. Dot-key APIs are not part of the target model. |
@@ -22,9 +22,9 @@ This document is intended for ARB review and implementation planning. It describ
 
 Terminology for new contracts:
 
-- **`serviceId`**: Stable external service identifier that maps to a derived root config path. For example, serviceId `lynx` maps to `/lynx`.
-- **`path`**: Canonical term for a config tree location, expressed as slash-separated examples in this document such as `/lynx/plugins`. Request paths may be derived; response and metadata paths must show the derived canonical value.
-- **Service-relative slot path**: A slash path under the derived service root, such as `/plugins` for service `lynx`. It is not global-root-relative; Weaver resolves it to canonical path `/lynx/plugins` in metadata and responses.
+- **`serviceId`**: Stable external service identifier that maps to a derived root config path. For example, serviceId `example-service` maps to `/example-service`.
+- **`path`**: Canonical term for a config tree location, expressed as slash-separated examples in this document such as `/example-service/plugins`. Request paths may be derived; response and metadata paths must show the derived canonical value.
+- **Service-relative slot path**: A slash path under the derived service root, such as `/plugins` for service `example-service`. It is not global-root-relative; Weaver resolves it to canonical path `/example-service/plugins` in metadata and responses.
 - **`namespace`**: In registration contracts this legacy term is removed in favor of canonical slash paths. In the client accessor `namespace<TConfig>(path)`, it names only a typed local-state view and has no schema authority.
 - **`fragment`**: Independently registered schema unit below a service-declared extension point. A plugin is one possible fragment provider type, but the schema model should not be plugin-specific.
 - **Fragment slot / extension point**: A service-declared service-relative or canonical path that accepts independently registered fragment schemas.
@@ -40,12 +40,12 @@ Example registration shape:
 
 | Path | Declared by | Meaning |
 |------|-------------|---------|
-| `/lynx` | Service `lynx` | Root object for the Lynx service configuration. |
-| `/lynx/plugins` | Service `lynx` | Fragment slot that allows independently registered plugin or non-plugin fragments. |
-| `/lynx/plugins/analytics` | Fragment provider `analytics` | Object schema for the analytics fragment. |
-| `/lynx/plugins/ghost.settings.panel` | Fragment provider `ghost.settings.panel` | Object schema where `ghost.settings.panel` is a literal path segment. |
+| `/example-service` | Service `example-service` | Root object for the example service configuration. |
+| `/example-service/plugins` | Service `example-service` | Fragment slot that allows independently registered plugin or non-plugin fragments. |
+| `/example-service/plugins/analytics` | Fragment provider `analytics` | Object schema for the analytics fragment. |
+| `/example-service/plugins/example.settings.panel` | Fragment provider `example.settings.panel` | Object schema where `example.settings.panel` is a literal path segment. |
 
-The literal segment example is intentional: `/lynx/plugins/ghost.settings.panel` means the third segment is exactly `ghost.settings.panel`, not three nested segments. Current dot-path grammar and bracket notation such as `lynx.plugins[ghost.settings.panel]` should not shape the target model. Keep them only in transitional adapters if an active branch cannot move directly to slash paths.
+The literal segment example is intentional: `/example-service/plugins/example.settings.panel` means the third segment is exactly `example.settings.panel`, not three nested segments. Current dot-path grammar and bracket notation such as `app.plugins[example.settings.panel]` should not shape the target model. Keep them only in transitional adapters if an active branch cannot move directly to slash paths.
 
 ### Object Writes and Patches
 
@@ -53,7 +53,7 @@ At registered paths, writes persist object values:
 
 ```json
 {
-  "path": "/lynx/plugins/analytics",
+  "path": "/example-service/plugins/analytics",
   "layer": "tenant:acme",
   "value": {
     "enabled": true,
@@ -62,9 +62,9 @@ At registered paths, writes persist object values:
 }
 ```
 
-The write target is the object at `/lynx/plugins/analytics`. Weaver should not require callers to flatten this into leaf writes such as `lynx.plugins.analytics.enabled` and `lynx.plugins.analytics.sampleRate`.
+The write target is the object at `/example-service/plugins/analytics`. Weaver should not require callers to flatten this into leaf writes such as `app.plugins.analytics.enabled` and `app.plugins.analytics.sampleRate`.
 
-Client SDKs and APIs may also expose precise patches below a registered object, such as replacing `/lynx/plugins/analytics/sampleRate` or applying a property patch under `/lynx/plugins/analytics`. Those patch targets reduce clobbering between callers, but they do not change persistence shape: the layer stores the resulting object at the registered anchor. Weaver should validate the patch input against the relevant member schema, then validate the resulting layer object and effective merged object before fetch, deploy, or runtime use.
+Client SDKs and APIs may also expose precise patches below a registered object, such as replacing `/example-service/plugins/analytics/sampleRate` or applying a property patch under `/example-service/plugins/analytics`. Those patch targets reduce clobbering between callers, but they do not change persistence shape: the layer stores the resulting object at the registered anchor. Weaver should validate the patch input against the relevant member schema, then validate the resulting layer object and effective merged object before fetch, deploy, or runtime use.
 
 ### Enforcement Priority
 
@@ -126,7 +126,7 @@ Cleanup recommendation:
 
 Leaf schemas are useful inside an object schema, but the registry unit should be the object at a concrete path. This aligns registration with write and merge semantics.
 
-For `/lynx/plugins/analytics`, the registered schema describes the object stored at that path:
+For `/example-service/plugins/analytics`, the registered schema describes the object stored at that path:
 
 ```json
 {
@@ -144,17 +144,17 @@ This model still allows property-level UI metadata and policy metadata through n
 
 ### 3. Add First-Class Fragment Slots
 
-Services should explicitly declare which child paths accept independently registered fragments. Slot declarations may use a service-relative slot path, such as `/plugins` for service `lynx`, or the canonical slot path `/lynx/plugins`. A fragment registration is valid only if it targets a declared slot and its `providerId` maps to one literal path segment below that slot.
+Services should explicitly declare which child paths accept independently registered fragments. Slot declarations may use a service-relative slot path, such as `/plugins` for service `example-service`, or the canonical slot path `/example-service/plugins`. A fragment registration is valid only if it targets a declared slot and its `providerId` maps to one literal path segment below that slot.
 
-Example declaration shape for service `lynx` in the default environment:
+Example declaration shape for service `example-service` in the default environment:
 
 ```json
 {
-  "serviceId": "lynx",
+  "serviceId": "example-service",
   "environment": "default",
   "owner": {
-    "name": "Lynx Platform",
-    "contact": "lynx-platform@example.com"
+    "name": "Example Platform Team",
+    "contact": "platform@example.com"
   },
   "schema": { "type": "object" },
   "fragmentSlots": [
@@ -170,13 +170,13 @@ Example fragment registration in the same environment:
 
 ```json
 {
-  "serviceId": "lynx",
-  "providerId": "ghost.settings.panel",
+  "serviceId": "example-service",
+  "providerId": "example.settings.panel",
   "slotPath": "/plugins",
   "environment": "default",
   "owner": {
-    "name": "Ghost Settings Team",
-    "contact": "ghost-settings@example.com"
+    "name": "Example Settings Team",
+    "contact": "settings@example.com"
   },
   "schema": { "type": "object" }
 }
@@ -187,8 +187,8 @@ The registry should reject a fragment registration when the slot does not exist 
 Path invariants for persisted registration metadata and responses:
 
 - The derived service path is `/${serviceId}`.
-- Request `slotPath` may be a service-relative slot path such as `/plugins` or the canonical slot path `/lynx/plugins`; both resolve against service `lynx` to canonical metadata path `/lynx/plugins`.
-- The derived fragment path is `${canonicalSlotPath}/${providerId}`, so provider `ghost.settings.panel` records `/lynx/plugins/ghost.settings.panel`.
+- Request `slotPath` may be a service-relative slot path such as `/plugins` or the canonical slot path `/example-service/plugins`; both resolve against service `example-service` to canonical metadata path `/example-service/plugins`.
+- The derived fragment path is `${canonicalSlotPath}/${providerId}`, so provider `example.settings.panel` records `/example-service/plugins/example.settings.panel`.
 
 Registry metadata location invariant:
 
@@ -227,7 +227,7 @@ This is an explicit amendment to a simpler “complete object per layer” desig
 | Workstream | Deliverable | Acceptance signal |
 |------------|-------------|-------------------|
 | Types and schemas | Introduce path-first registration request/result types with Zod schemas at package boundaries. | New contracts use derived paths in results/metadata; target contract types do not include `namespace` or independently settable service root paths. |
-| Path normalization | Add one normalization layer for canonical slash paths. | `/lynx/plugins/ghost.settings.panel` round-trips with `ghost.settings.panel` as one literal segment. |
+| Path normalization | Add one normalization layer for canonical slash paths. | `/example-service/plugins/example.settings.panel` round-trips with `example.settings.panel` as one literal segment. |
 | Contract removal | Remove namespace-derived registration, Zod conversion, and dot-key registration APIs. | Registration accepts only canonical service/fragment JSON Schema requests; generic client access has no registration side effect. |
 | Transitional adapters | Add scoped adapters only for named active branches that cannot switch immediately. | Any adapter normalizes to `path` before core logic and is not required for the target model. |
 
@@ -235,7 +235,7 @@ This is an explicit amendment to a simpler “complete object per layer” desig
 
 | Workstream | Deliverable | Acceptance signal |
 |------------|-------------|-------------------|
-| Registry storage | Store registrations by environment and canonical path. | `getSchema('/lynx/plugins/analytics')` resolves the fragment object schema for that path. |
+| Registry storage | Store registrations by environment and canonical path. | `getSchema('/example-service/plugins/analytics')` resolves the fragment object schema for that path. |
 | Fragment slots | Store service-declared fragment slots and validate fragment registrations against them. | Unknown slot and duplicate derived fragment path registrations are rejected. |
 | Metadata | Retain derived service path, canonical slot path, derived fragment path, `owner`, and `providerId`; keep authenticated `subject` in operation audit events rather than schema documents. | Registry can report declaring service, provider, slot path, fragment path, environment, and owner/contact while audit records capture the acting subject. |
 
@@ -243,7 +243,7 @@ This is an explicit amendment to a simpler “complete object per layer” desig
 
 | Workstream | Deliverable | Acceptance signal |
 |------------|-------------|-------------------|
-| Object writes and patches | Add or amend write commands so a registered path accepts an object value and optional member/property patches below that object. | Writing or patching `/lynx/plugins/analytics` persists the resulting layer object at that registered anchor. |
+| Object writes and patches | Add or amend write commands so a registered path accepts an object value and optional member/property patches below that object. | Writing or patching `/example-service/plugins/analytics` persists the resulting layer object at that registered anchor. |
 | Partial layer validation | Validate sparse layer objects and patch inputs against a derived partial/member schema. | Invalid field types and unknown properties are rejected at write/patch time. |
 | Effective validation | Validate merged effective objects after layer resolution. | Required fields and cross-field constraints are enforced on baseline/effective config before fetch, deploy, or runtime use. |
 | Error reporting | Return path-aware validation errors. | Errors identify the registered path and nested object member path. |
@@ -318,7 +318,7 @@ The package-boundary implementation should replace `unknown` with validated JSON
 | Decision | Recommendation |
 |----------|----------------|
 | Canonical external path syntax | Use slash paths in new contracts. Keep dot/bracket parsing only in explicitly scoped transitional adapters, if any. |
-| Fragment identifier character rules | Permit dots inside one literal path segment so `ghost.settings.panel` is valid below `/lynx/plugins`. |
+| Fragment identifier character rules | Permit dots inside one literal path segment so `example.settings.panel` is valid below `/example-service/plugins`. |
 | Leaf write compatibility | Do not include flattened leaf writes in the target model. Specific patches under a registered object are acceptable when they validate the patch and persist the resulting object at the registered anchor. |
 | Schema evolution policy | Treat the pre-1.0 move to path-anchored object schemas as an intentional breaking cleanup. Define post-cleanup evolution checks against path-anchored object schemas. |
 | Authorization enforcement timing | Use approved bootstrap/CI registration for MVP. Defer open runtime self-registration until workload identity, policy, audit, revocation, compatibility checks, and cache invalidation are designed. |

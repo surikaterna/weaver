@@ -1,4 +1,5 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
+import { ownField } from "./schema-validation-own-data";
 
 import {
   addContextError,
@@ -44,9 +45,10 @@ export function getCompositionBranches(
   keyword: CompositionKeyword,
 ): readonly ConfigurationPropertySchema[] {
   if (keyword === "not") {
-    return schema.not === undefined ? [] : [schema.not];
+    const branch = ownField(schema, "not");
+    return branch === undefined ? [] : [branch];
   }
-  const branches = schema[keyword];
+  const branches = ownField(schema, keyword);
   return Array.isArray(branches) ? branches : [];
 }
 
@@ -58,7 +60,7 @@ export function validateCompositionShape(
 ): boolean {
   for (const keyword of COMPOSITION_KEYWORDS) {
     if (!Object.hasOwn(schema, keyword)) continue;
-    const value = schema[keyword];
+    const value = ownField(schema, keyword);
     const valid =
       keyword === "not"
         ? validateNotShape(value, path, context, supportsSchema)
@@ -96,7 +98,8 @@ export function getMemoizedCompositionMatch(
   value: unknown,
   mode: ValidationMode,
 ): boolean | undefined {
-  return memo.get(schema)?.get(value)?.[mode];
+  const modes = memo.get(schema)?.get(value);
+  return modes?.[mode];
 }
 
 export function memoizeCompositionMatch(
@@ -126,7 +129,7 @@ export function isSupportedSchema(
   if (typeof type === "string") return isSupportedType(type);
   if (!Array.isArray(type) || type.length === 0) return false;
   for (let index = 0; index < type.length; index++) {
-    const member: unknown = type[index];
+    const member = ownDataValue(type, index);
     if (
       !Object.hasOwn(type, index) ||
       typeof member !== "string" ||
@@ -151,10 +154,7 @@ function isSupportedType(value: string): boolean {
 }
 
 function ownDataValue(value: object, key: PropertyKey): unknown {
-  const descriptor = Object.getOwnPropertyDescriptor(value, key);
-  return descriptor !== undefined && "value" in descriptor
-    ? descriptor.value
-    : undefined;
+  return Object.hasOwn(value, key) ? Reflect.get(value, key) : undefined;
 }
 
 function validateNotShape(
@@ -181,7 +181,10 @@ function validateBranchArrayShape(
     return invalidBranchArray(keyword, path, context);
   }
   for (let index = 0; index < value.length; index++) {
-    if (!Object.hasOwn(value, index) || !supportsSchema(value[index])) {
+    if (
+      !Object.hasOwn(value, index) ||
+      !supportsSchema(ownDataValue(value, index))
+    ) {
       addContextError(context, "invalid-schema", path, {
         message: `${keyword} branch ${String(index)} must be a schema object with a supported non-empty type`,
       });

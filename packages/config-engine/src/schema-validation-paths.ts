@@ -1,4 +1,5 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
+import { ownEntries, ownField } from "./schema-validation-own-data";
 
 import {
   allowsType,
@@ -43,17 +44,13 @@ export function collectMemberSchemas(
   context: ValidationContext,
 ): ConfigurationPropertySchema[] {
   const schemas: ConfigurationPropertySchema[] = [];
-  const properties = Object.hasOwn(schema, "properties")
-    ? schema.properties
-    : undefined;
+  const properties = ownField(schema, "properties");
   const declared =
     properties !== undefined && Object.hasOwn(properties, key)
-      ? properties[key]
+      ? ownField(properties, key)
       : undefined;
   if (declared !== undefined) schemas.push(declared);
-  const patterns = Object.hasOwn(schema, "patternProperties")
-    ? schema.patternProperties
-    : undefined;
+  const patterns = ownField(schema, "patternProperties");
   if (patterns !== undefined) {
     collectPatternSchemas(patterns, key, path, context, schemas);
   }
@@ -64,9 +61,9 @@ export function itemSchema(
   schema: ConfigurationPropertySchema,
   index: number,
 ): ConfigurationPropertySchema | undefined {
-  const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
+  const items = ownField(schema, "items");
   if (items === undefined) return undefined;
-  return isSchemaArray(items) ? items[index] : items;
+  return isSchemaArray(items) ? ownField(items, index) : items;
 }
 
 function resolveNextSchemas(
@@ -77,7 +74,8 @@ function resolveNextSchemas(
 ): ConfigurationPropertySchema[] {
   const resolved: ConfigurationPropertySchema[] = [];
   for (const projected of directAndAllOfSchemas(schema)) {
-    resolved.push(...resolveDirectSchema(projected, segment, path, errors));
+    for (const member of resolveDirectSchema(projected, segment, path, errors))
+      resolved.push(member);
     if (errors.length > 0) return [];
   }
   return resolved;
@@ -117,12 +115,10 @@ function directAndAllOfSchemas(
     if (completed.has(current)) continue;
     completed.add(current);
     projected.push(current);
-    const branches = Object.hasOwn(current, "allOf")
-      ? current.allOf
-      : undefined;
+    const branches = ownField(current, "allOf");
     if (!Array.isArray(branches)) continue;
     for (let index = branches.length - 1; index >= 0; index--) {
-      const branch = branches[index];
+      const branch = ownField(branches, index);
       if (branch !== undefined) pending.push(branch);
     }
   }
@@ -138,9 +134,7 @@ function resolveObjectMemberSchema(
   const context: ValidationContext = { mode: "partial", errors };
   const schemas = collectMemberSchemas(schema, key, path, context);
   if (schemas.length > 0) return schemas;
-  const additional = Object.hasOwn(schema, "additionalProperties")
-    ? schema.additionalProperties
-    : undefined;
+  const additional = ownField(schema, "additionalProperties");
   if (additional === true) return [];
   if (additional === undefined || additional === false) {
     errors.push(
@@ -172,10 +166,10 @@ function resolveArrayMemberSchema(
     );
     return [];
   }
-  const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
+  const items = ownField(schema, "items");
   if (items === undefined) return [];
   if (!isSchemaArray(items)) return [items];
-  const item = items[index];
+  const item = ownField(items, index);
   return item === undefined ? [] : [item];
 }
 
@@ -186,7 +180,7 @@ function collectPatternSchemas(
   context: ValidationContext,
   schemas: ConfigurationPropertySchema[],
 ): void {
-  for (const [pattern, nestedSchema] of Object.entries(patterns)) {
+  for (const [pattern, nestedSchema] of ownEntries(patterns)) {
     const regex = compileSchemaPattern(pattern, path, context);
     if (regex?.test(key) === true) schemas.push(nestedSchema);
   }

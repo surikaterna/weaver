@@ -1,4 +1,5 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
+import { ownEntries, ownField } from "./schema-validation-own-data";
 
 type GraphFrame =
   | { readonly kind: "enter"; readonly value: object }
@@ -8,12 +9,10 @@ export function collectConstraintRoots(
   schema: ConfigurationPropertySchema,
   roots: unknown[],
 ): void {
-  if (Object.hasOwn(schema, "default") && isObjectValue(schema.default))
-    roots.push(schema.default);
-  if (Object.hasOwn(schema, "const") && isObjectValue(schema.const))
-    roots.push(schema.const);
-  if (Object.hasOwn(schema, "enum") && isObjectValue(schema.enum))
-    roots.push(schema.enum);
+  for (const key of ["default", "const", "enum"] as const) {
+    const value = ownField(schema, key);
+    if (isObjectValue(value)) roots.push(value);
+  }
 }
 
 export function hasObjectCycle(roots: readonly unknown[]): boolean {
@@ -46,9 +45,9 @@ export function hasObjectCycle(roots: readonly unknown[]): boolean {
 }
 
 function pushObjectChildren(value: object, pending: GraphFrame[]): void {
-  const children = Object.values(value);
+  const children = ownEntries(value);
   for (let index = children.length - 1; index >= 0; index--) {
-    const child = children[index];
+    const child = children[index]?.[1];
     if (isObjectValue(child)) pending.push({ kind: "enter", value: child });
   }
 }

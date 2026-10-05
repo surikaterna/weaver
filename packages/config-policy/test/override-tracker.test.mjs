@@ -18,7 +18,7 @@ function makeTempPath() {
 function makeRecord(overrides = {}) {
   return {
     id: "override-1",
-    key: "ghost.app.maxConnections",
+    key: "example.app.maxConnections",
     actor: "ops-admin",
     reason: "Production incident #1234",
     layer: "tenant",

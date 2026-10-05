@@ -27,7 +27,7 @@ async function captureCallbacks(sandbox, stage, original, cleanupFails) {
     if (specifier.startsWith("node:")) return moduleOf(await import(specifier));
     return moduleOf({ browserGraphs: undefined, fixture: undefined, installConsumer: undefined,
       run: undefined, withConsumer: undefined, strictDeclarations: undefined,
-      exercise: "", internalExports: [], rootExports: [] });
+      exercise: "", readProjectionExercise: "", ancestorProjectionExercise: "", exerciseDomainBoundaries: () => {}, internalExports: [], rootExports: [] });
   });
   await actual.evaluate();
   return { callbacks, allocated };

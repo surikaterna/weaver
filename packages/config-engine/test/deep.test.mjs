@@ -37,13 +37,13 @@ test("deepGet: deeply nested", () => {
 });
 
 test("deepGet: bracket notation (compound segment)", () => {
-  const obj = { lynx: { plugins: { "ghost.settings.panel": { retentionDays: 30 } } } };
-  expect(deepGet(obj, "lynx.plugins[ghost.settings.panel].retentionDays")).toBe(30);
+  const obj = { app: { plugins: { "example.settings.panel": { retentionDays: 30 } } } };
+  expect(deepGet(obj, "app.plugins[example.settings.panel].retentionDays")).toBe(30);
 });
 
 test("deepGet: bracket notation subtree", () => {
-  const obj = { lynx: { plugins: { "ghost.settings.panel": { retentionDays: 30, enabled: true } } } };
-  expect(deepGet(obj, "lynx.plugins[ghost.settings.panel]")).toEqual({ retentionDays: 30, enabled: true });
+  const obj = { app: { plugins: { "example.settings.panel": { retentionDays: 30, enabled: true } } } };
+  expect(deepGet(obj, "app.plugins[example.settings.panel]")).toEqual({ retentionDays: 30, enabled: true });
 });
 
 test("deepGet: null along path returns undefined", () => {
@@ -88,9 +88,9 @@ test("deepSet: deeply nested creation", () => {
 });
 
 test("deepSet: bracket notation", () => {
-  const obj = { lynx: { plugins: {} } };
-  deepSet(obj, "lynx.plugins[ghost.settings.panel].retentionDays", 30);
-  expect(obj.lynx.plugins["ghost.settings.panel"].retentionDays).toBe(30);
+  const obj = { app: { plugins: {} } };
+  deepSet(obj, "app.plugins[example.settings.panel].retentionDays", 30);
+  expect(obj.app.plugins["example.settings.panel"].retentionDays).toBe(30);
 });
 
 test("deepSet: preserves siblings", () => {
@@ -150,9 +150,9 @@ test("deepRemove: single segment", () => {
 });
 
 test("deepRemove: bracket notation", () => {
-  const obj = { lynx: { plugins: { "ghost.settings.panel": { retentionDays: 30 } } } };
-  deepRemove(obj, "lynx.plugins[ghost.settings.panel].retentionDays");
-  expect(obj.lynx.plugins["ghost.settings.panel"]).toEqual({});
+  const obj = { app: { plugins: { "example.settings.panel": { retentionDays: 30 } } } };
+  deepRemove(obj, "app.plugins[example.settings.panel].retentionDays");
+  expect(obj.app.plugins["example.settings.panel"]).toEqual({});
 });
 
 test("deepRemove: returns false for empty parent chain", () => {

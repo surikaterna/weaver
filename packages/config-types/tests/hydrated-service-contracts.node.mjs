@@ -21,7 +21,7 @@ const identity = { environment: "dev", scopePath: [
   { scopeId: "region", value: "eu:west" },
   { scopeId: "tenant", value: "a,b" },
 ] };
-const path = "/ghost/literal.dot/🪄/e\u0301";
+const path = "/example/literal.dot/🪄/e\u0301";
 const error = (code) => ({ code, message: "failed" });
 
 test("literal path contracts retain codepoints and reject escapes", () => {
@@ -110,7 +110,7 @@ test("executable schemas check shape only without invocation or leaked root", ()
   const ready = { ...reads, revision: "r", mode: "live", degradedProviders: [] };
   assert.equal(reader.safeParse(ready).success, true);
   assert.equal(root.safeParse({ ...ready, getForScope: fn, preloadScope: fn, set: fn, remove: fn, reloadProvider: fn, flush: fn, dispose: fn }).success, true);
-  const confined = { ...reads, namespace: "/ghost", withScope: fn, dispose: fn };
+  const confined = { ...reads, namespace: "/example", withScope: fn, dispose: fn };
   assert.equal(scoped.safeParse(confined).success, true);
   assert.equal(service.safeParse({ ...confined, getFromNamespace: fn, pendingRestart: false, onRestartRequired: fn, acknowledgeRestart: fn }).success, true);
   for (const field of ["root", "client", "transport", "session", "set", "remove", "forView"]) {

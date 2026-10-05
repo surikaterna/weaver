@@ -1,11 +1,11 @@
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
-
 import {
   hasComposition,
   isSupportedSchema,
 } from "./schema-validation-composition";
 import { collectConstraintRoots } from "./schema-validation-constraint-graph";
 import { validateSchemaNode } from "./schema-validation-definitions";
+import { ownEntries, ownField } from "./schema-validation-own-data";
 import {
   addContextError,
   allowsType,
@@ -20,9 +20,7 @@ export function hasOnlyTypeLeafChildren(
 ): boolean {
   if (!mapHasOnlyTypeLeaves(schema, "properties", leaves)) return false;
   if (!mapHasOnlyTypeLeaves(schema, "patternProperties", leaves)) return false;
-  const additional = Object.hasOwn(schema, "additionalProperties")
-    ? schema.additionalProperties
-    : undefined;
+  const additional = ownField(schema, "additionalProperties");
   if (
     additional !== undefined &&
     typeof additional !== "boolean" &&
@@ -33,7 +31,7 @@ export function hasOnlyTypeLeafChildren(
   if (additional !== undefined && typeof additional !== "boolean") {
     leaves?.add(additional);
   }
-  const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
+  const items = ownField(schema, "items");
   if (items === undefined) return true;
   if (!isSchemaArray(items)) {
     const leaf = isTypeLeafSchema(items);
@@ -41,9 +39,12 @@ export function hasOnlyTypeLeafChildren(
     return leaf;
   }
   for (let index = 0; index < items.length; index++) {
-    if (!Object.hasOwn(items, index) || !isTypeLeafSchema(items[index]))
+    if (
+      !Object.hasOwn(items, index) ||
+      !isTypeLeafSchema(ownField(items, index))
+    )
       return false;
-    const item = items[index];
+    const item = ownField(items, index);
     if (item !== undefined) leaves?.add(item);
   }
   return true;
@@ -54,19 +55,13 @@ export function hasSchemaChildren(
   composed: boolean,
 ): boolean {
   if (composed) return true;
-  const properties = Object.hasOwn(schema, "properties")
-    ? schema.properties
-    : undefined;
+  const properties = ownField(schema, "properties");
   if (hasSchemaMapChildren(properties)) return true;
-  const patterns = Object.hasOwn(schema, "patternProperties")
-    ? schema.patternProperties
-    : undefined;
+  const patterns = ownField(schema, "patternProperties");
   if (hasSchemaMapChildren(patterns)) return true;
-  const additional = Object.hasOwn(schema, "additionalProperties")
-    ? schema.additionalProperties
-    : undefined;
+  const additional = ownField(schema, "additionalProperties");
   if (additional !== undefined && typeof additional !== "boolean") return true;
-  const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
+  const items = ownField(schema, "items");
   return items !== undefined && (!Array.isArray(items) || items.length > 0);
 }
 
@@ -127,8 +122,9 @@ function collectTerminalMapChildren(
   key: "properties" | "patternProperties",
   children: TerminalChild[],
 ): void {
-  if (!Object.hasOwn(schema, key) || schema[key] === undefined) return;
-  for (const [name, value] of Object.entries(schema[key])) {
+  const map = ownField(schema, key);
+  if (map === undefined) return;
+  for (const [name, value] of ownEntries(map)) {
     children.push(
       terminalChild(
         value,
@@ -142,9 +138,7 @@ function collectTerminalAdditionalChild(
   schema: ConfigurationPropertySchema,
   children: TerminalChild[],
 ): void {
-  const additional = Object.hasOwn(schema, "additionalProperties")
-    ? schema.additionalProperties
-    : undefined;
+  const additional = ownField(schema, "additionalProperties");
   if (additional !== undefined && typeof additional !== "boolean") {
     children.push(
       terminalChild(
@@ -159,7 +153,7 @@ function collectTerminalItemChildren(
   schema: ConfigurationPropertySchema,
   children: TerminalChild[],
 ): void {
-  const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
+  const items = ownField(schema, "items");
   if (items === undefined) return;
   if (!Array.isArray(items)) {
     children.push(
@@ -171,7 +165,7 @@ function collectTerminalItemChildren(
     return;
   }
   for (let index = 0; index < items.length; index++) {
-    const value = Object.hasOwn(items, index) ? items[index] : undefined;
+    const value = ownField(items, index);
     children.push(
       terminalChild(
         value,
@@ -184,13 +178,16 @@ function collectTerminalItemChildren(
 function terminalChild(value: unknown, invalidMessage: string): TerminalChild {
   return isSupportedSchema(value)
     ? { schema: value, invalidMessage }
-    : { invalidMessage };
+    : { schema: undefined, invalidMessage };
 }
 
 function hasSchemaMapChildren(
   map: Readonly<Record<string, ConfigurationPropertySchema>> | undefined,
 ): boolean {
-  return map !== undefined && Object.keys(map).length > 0;
+  if (map === undefined) return false;
+  if (map === null || typeof map !== "object" || Array.isArray(map))
+    return true;
+  return Object.keys(map).length > 0;
 }
 
 export function validateTypeLeafChildren(
@@ -211,9 +208,7 @@ export function validateTypeLeafChildren(
     )
   )
     return false;
-  const additional = Object.hasOwn(schema, "additionalProperties")
-    ? schema.additionalProperties
-    : undefined;
+  const additional = ownField(schema, "additionalProperties");
   if (
     additional !== undefined &&
     typeof additional !== "boolean" &&
@@ -233,8 +228,9 @@ function mapHasOnlyTypeLeaves(
   key: "properties" | "patternProperties",
   leaves?: WeakSet<ConfigurationPropertySchema>,
 ): boolean {
-  if (!Object.hasOwn(schema, key) || schema[key] === undefined) return true;
-  for (const child of Object.values(schema[key])) {
+  const map = ownField(schema, key);
+  if (map === undefined) return true;
+  for (const [, child] of ownEntries(map)) {
     if (!isTypeLeafSchema(child)) return false;
     leaves?.add(child);
   }
@@ -259,9 +255,9 @@ function validateMapLeaves(
   supportsSchema: (value: unknown) => boolean,
 ): boolean {
   if (!Object.hasOwn(schema, key)) return true;
-  const map = schema[key];
+  const map = ownField(schema, key);
   if (map === undefined) return true;
-  for (const [name, child] of Object.entries(map)) {
+  for (const [name, child] of ownEntries(map)) {
     if (!supportsSchema(child)) {
       return invalidSchema(
         path,
@@ -279,7 +275,7 @@ function validateItemLeaves(
   context: ValidationContext,
   supportsSchema: (value: unknown) => boolean,
 ): boolean {
-  const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
+  const items = ownField(schema, "items");
   if (items === undefined) return true;
   if (!isSchemaArray(items)) {
     if (supportsSchema(items)) return true;
@@ -290,7 +286,10 @@ function validateItemLeaves(
     );
   }
   for (let index = 0; index < items.length; index++) {
-    if (!Object.hasOwn(items, index) || !supportsSchema(items[index])) {
+    if (
+      !Object.hasOwn(items, index) ||
+      !supportsSchema(ownField(items, index))
+    ) {
       return invalidSchema(
         path,
         context,

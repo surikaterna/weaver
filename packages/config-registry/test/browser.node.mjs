@@ -5,10 +5,11 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createContext, runInContext } from "node:vm";
 import { build } from "esbuild";
+import { rootExports, internalExports } from "./operation-support-fixture.mjs";
 
 const expected = {
-  root: ["canonicalSchemaRegistryOptionsSchema", "createCanonicalSchemaRegistry", "registeredSchemaAnchorSchema", "schemaRegistrationAuditMetadataSchema", "schemaRegistrationContextSchema", "schemaRegistrationRequestSchema", "schemaRegistrationResultSchema", "schemaWriteSupport", "structuralSupportSchema"],
-  internal: ["SchemaIdentityPages", "buildIdentityIndex", "cloneState", "createEmptyState", "createRegistryAdapter", "schemaKey", "registryStateSchema", "schemaEntrySchema"],
+  root: rootExports,
+  internal: internalExports,
 };
 const smoke = `
   if (typeof process !== 'undefined' || typeof Buffer !== 'undefined' || typeof require !== 'undefined') throw Error('Node globals');

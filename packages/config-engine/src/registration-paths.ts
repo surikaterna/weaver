@@ -5,6 +5,7 @@ import {
   slotPathSchema,
 } from "@weaver-conf/config-types";
 import { z } from "zod";
+import { copySnapshotData } from "./descriptor-copy";
 import { assertSafePathSegment, buildPath, parsePath } from "./path";
 
 export const WEAVER_INTERNAL_ROOT = "/_weaver";
@@ -26,15 +27,21 @@ export interface CanonicalConfigPath {
   readonly storageKey: string;
 }
 
-export const canonicalConfigPathSchema: z.ZodType<CanonicalConfigPath> = z
-  .strictObject({
-    path: z.string(),
-    segments: z.array(z.string()).readonly(),
-    storageKey: z.string(),
-  })
-  .superRefine(validateCanonicalConfigPath);
+export const canonicalConfigPathSchema = z.preprocess(
+  (input) => copySnapshotData(input, true),
+  z
+    .strictObject({
+      path: z.string(),
+      segments: z.array(z.string()).readonly(),
+      storageKey: z.string(),
+    })
+    .superRefine(validateCanonicalConfigPath)
+    .readonly(),
+);
 
 export function parseCanonicalConfigPath(path: string): CanonicalConfigPath {
+  if (typeof path !== "string")
+    throw createWeaverError("VALIDATION_ERROR", "Path must be a string");
   if (!path.startsWith("/")) invalidPath(path, "must start with /");
   if (path.length > 1 && path.includes("//")) {
     invalidPath(path, "contains empty segments");
@@ -47,18 +54,26 @@ export function parseCanonicalConfigPath(path: string): CanonicalConfigPath {
 export function canonicalConfigPathFromSegments(
   segments: readonly string[],
 ): CanonicalConfigPath {
-  for (const segment of segments) validateCanonicalSegment(segment);
-  const path = segments.length === 0 ? "/" : `/${segments.join("/")}`;
+  const copied = copySnapshotData(segments);
+  if (!ownStringSegments(copied))
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Path segments must be own strings",
+    );
+  for (const segment of copied) validateCanonicalSegment(segment);
+  const path = copied.length === 0 ? "/" : `/${copied.join("/")}`;
   return canonicalConfigPathSchema.parse({
     path,
-    segments: [...segments],
-    storageKey: buildPath(segments),
+    segments: copied,
+    storageKey: buildPath(copied),
   });
 }
 
 export function canonicalConfigPathFromStorageKey(
   storageKey: string,
 ): CanonicalConfigPath {
+  if (typeof storageKey !== "string")
+    throw createWeaverError("VALIDATION_ERROR", "Storage key must be a string");
   if (storageKey.length === 0) return canonicalConfigPathFromSegments([]);
   return canonicalConfigPathFromSegments(parsePath(storageKey));
 }
@@ -132,6 +147,11 @@ export function deriveFragmentPath(
 }
 
 function validateServiceId(serviceId: string): void {
+  if (typeof serviceId !== "string")
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Service identifier must be a string",
+    );
   assertSafePathSegment(serviceId);
   if (!serviceIdSchema.safeParse(serviceId).success) {
     throw createWeaverError(
@@ -142,6 +162,11 @@ function validateServiceId(serviceId: string): void {
 }
 
 function validateProviderId(providerId: string): void {
+  if (typeof providerId !== "string")
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Provider identifier must be a string",
+    );
   assertSafePathSegment(providerId);
   if (!providerIdSchema.safeParse(providerId).success) {
     throw createWeaverError(
@@ -178,17 +203,25 @@ function validateCanonicalConfigPath(
     for (const segment of value.segments) validateCanonicalSegment(segment);
     const expectedPath =
       value.segments.length === 0 ? "/" : `/${value.segments.join("/")}`;
-    if (value.path !== expectedPath) {
+    if (value.path !== expectedPath)
       context.addIssue({ code: "custom", message: "Canonical path mismatch" });
-    }
-    if (value.storageKey !== buildPath(value.segments)) {
+    if (value.storageKey !== buildPath(value.segments))
       context.addIssue({ code: "custom", message: "Storage key mismatch" });
-    }
-  } catch (error: unknown) {
-    context.addIssue({
-      code: "custom",
-      message:
-        error instanceof Error ? error.message : "Invalid canonical path",
-    });
+  } catch {
+    context.addIssue({ code: "custom", message: "Invalid canonical path" });
   }
+}
+
+function ownStringSegments(value: unknown): value is string[] {
+  if (!Array.isArray(value)) return false;
+  for (let index = 0; index < value.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (
+      !descriptor ||
+      !Object.hasOwn(descriptor, "value") ||
+      typeof descriptor.value !== "string"
+    )
+      return false;
+  }
+  return true;
 }

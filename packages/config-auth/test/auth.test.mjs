@@ -39,17 +39,17 @@ const testAuth = withAuth({
 
 test("canRead: public visibility allows all roles", () => {
   const ctx = { userId: "u1", tenantId: "t1", roles: ["user"] };
-  expect(testAuth.canRead(ctx, "ghost.app.theme", { type: "string", "x-weaver": { visibility: "public" } })).toBe(true);
+  expect(testAuth.canRead(ctx, "example.app.theme", { type: "string", "x-weaver": { visibility: "public" } })).toBe(true);
 });
 
 test("canRead: no schema allows read", () => {
   const ctx = { userId: "u1", tenantId: "t1", roles: ["user"] };
-  expect(testAuth.canRead(ctx, "ghost.app.theme", undefined)).toBe(true);
+  expect(testAuth.canRead(ctx, "example.app.theme", undefined)).toBe(true);
 });
 
 test("canRead: missing visibility defaults to public", () => {
   const ctx = { userId: "u1", tenantId: "t1", roles: ["user"] };
-  expect(testAuth.canRead(ctx, "ghost.app.theme", { type: "string" })).toBe(true);
+  expect(testAuth.canRead(ctx, "example.app.theme", { type: "string" })).toBe(true);
 });
 
 test("canRead: admin visibility requires admin+ roles", () => {
@@ -147,30 +147,30 @@ test("canWrite: dynamic scope layers deny regular user", () => {
 test("filterVisibleKeys: returns only readable keys", () => {
   const ctx = { userId: "u1", tenantId: "t1", roles: ["user"] };
   const entries = {
-    "ghost.app.theme": "dark",
-    "ghost.app.secret": "hidden",
-    "ghost.app.visible": true,
+    "example.app.theme": "dark",
+    "example.app.secret": "hidden",
+    "example.app.visible": true,
   };
   const schemaMap = new Map([
-    ["ghost.app.theme", { type: "string", "x-weaver": { visibility: "public" } }],
-    ["ghost.app.secret", { type: "string", "x-weaver": { visibility: "internal" } }],
-    ["ghost.app.visible", { type: "boolean", "x-weaver": { visibility: "public" } }],
+    ["example.app.theme", { type: "string", "x-weaver": { visibility: "public" } }],
+    ["example.app.secret", { type: "string", "x-weaver": { visibility: "internal" } }],
+    ["example.app.visible", { type: "boolean", "x-weaver": { visibility: "public" } }],
   ]);
 
   const result = testAuth.filterVisibleKeys(ctx, entries, schemaMap);
-  expect("ghost.app.theme" in result).toBeTruthy();
-  expect(!("ghost.app.secret" in result)).toBeTruthy();
-  expect("ghost.app.visible" in result).toBeTruthy();
+  expect("example.app.theme" in result).toBeTruthy();
+  expect(!("example.app.secret" in result)).toBeTruthy();
+  expect("example.app.visible" in result).toBeTruthy();
   expect(Object.keys(result).length).toBe(2);
 });
 
 test("filterVisibleKeys: keys without schema are visible", () => {
   const ctx = { userId: "u1", tenantId: "t1", roles: ["user"] };
-  const entries = { "ghost.app.unknown": "value" };
+  const entries = { "example.app.unknown": "value" };
   const schemaMap = new Map();
 
   const result = testAuth.filterVisibleKeys(ctx, entries, schemaMap);
-  expect("ghost.app.unknown" in result).toBeTruthy();
+  expect("example.app.unknown" in result).toBeTruthy();
 });
 
 // --- session-mode tests (moved from config-engine) ---
@@ -193,54 +193,54 @@ const godModeCtx = (overrides = {}) => ({
 
 test("session-mode: allowed (explicit) permits session layer write", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "allowed" } };
-  expect(testAuth.canWrite(sessionCtx(), "session", "ghost.app.theme", schema)).toBe(true);
+  expect(testAuth.canWrite(sessionCtx(), "session", "example.app.theme", schema)).toBe(true);
 });
 
 test("session-mode: undefined (default) permits session layer write", () => {
   const schema = { type: "string" };
-  expect(testAuth.canWrite(sessionCtx(), "session", "ghost.app.theme", schema)).toBe(true);
+  expect(testAuth.canWrite(sessionCtx(), "session", "example.app.theme", schema)).toBe(true);
 });
 
 test("session-mode: no schema permits session layer write", () => {
-  expect(testAuth.canWrite(sessionCtx(), "session", "ghost.app.theme", undefined)).toBe(true);
+  expect(testAuth.canWrite(sessionCtx(), "session", "example.app.theme", undefined)).toBe(true);
 });
 
 test("session-mode: blocked rejects session layer write unconditionally", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "blocked" } };
-  expect(testAuth.canWrite(sessionCtx(), "session", "ghost.app.theme", schema)).toBe(false);
+  expect(testAuth.canWrite(sessionCtx(), "session", "example.app.theme", schema)).toBe(false);
 });
 
 test("session-mode: blocked rejects even with god-mode", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "blocked" } };
-  expect(testAuth.canWrite(godModeCtx(), "session", "ghost.app.theme", schema)).toBe(false);
+  expect(testAuth.canWrite(godModeCtx(), "session", "example.app.theme", schema)).toBe(false);
 });
 
 test("session-mode: restricted rejects session write without god-mode", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "restricted" } };
-  expect(testAuth.canWrite(sessionCtx(), "session", "ghost.app.theme", schema)).toBe(false);
+  expect(testAuth.canWrite(sessionCtx(), "session", "example.app.theme", schema)).toBe(false);
 });
 
 test("session-mode: restricted allows session write with god-mode", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "restricted" } };
-  expect(testAuth.canWrite(godModeCtx(), "session", "ghost.app.theme", schema)).toBe(true);
+  expect(testAuth.canWrite(godModeCtx(), "session", "example.app.theme", schema)).toBe(true);
 });
 
 test("session-mode: restricted rejects with non-god-mode session type", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "restricted" } };
   const ctx = sessionCtx({ sessionMode: "debug" });
-  expect(testAuth.canWrite(ctx, "session", "ghost.app.theme", schema)).toBe(false);
+  expect(testAuth.canWrite(ctx, "session", "example.app.theme", schema)).toBe(false);
 });
 
 test("session-mode: blocked key can still be written to tenant layer", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "blocked" } };
   const ctx = { userId: "u1", tenantId: "t1", roles: ["tenant-admin"] };
-  expect(testAuth.canWrite(ctx, "tenant", "ghost.app.theme", schema)).toBe(true);
+  expect(testAuth.canWrite(ctx, "tenant", "example.app.theme", schema)).toBe(true);
 });
 
 test("session-mode: restricted key can be written to user layer without god-mode", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "restricted" } };
   const ctx = { userId: "u1", tenantId: "t1", roles: ["user"] };
-  expect(testAuth.canWrite(ctx, "user", "ghost.app.theme", schema)).toBe(true);
+  expect(testAuth.canWrite(ctx, "user", "example.app.theme", schema)).toBe(true);
 });
 
 test("session-mode: existing layer policy still works", () => {

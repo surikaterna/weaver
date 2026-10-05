@@ -11,16 +11,16 @@ function entry(ownerId, schema) {
 describe("generateSinglePropertySchema", () => {
   it("maps string type", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.theme",
-      entry("ghost.shell", { type: "string" }),
+      "example.shell.theme",
+      entry("example.shell", { type: "string" }),
     );
     expect(result.type).toBe("string");
   });
 
   it("maps number type with min/max", () => {
     const result = generateSinglePropertySchema(
-      "ghost.map.zoom",
-      entry("ghost.map", { type: "number", minimum: 1, maximum: 20 }),
+      "example.map.zoom",
+      entry("example.map", { type: "number", minimum: 1, maximum: 20 }),
     );
     expect(result.type).toBe("number");
     expect(result.minimum).toBe(1);
@@ -29,56 +29,56 @@ describe("generateSinglePropertySchema", () => {
 
   it("maps boolean type", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.enabled",
-      entry("ghost.shell", { type: "boolean" }),
+      "example.shell.enabled",
+      entry("example.shell", { type: "boolean" }),
     );
     expect(result.type).toBe("boolean");
   });
 
   it("maps object type", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.layout",
-      entry("ghost.shell", { type: "object" }),
+      "example.shell.layout",
+      entry("example.shell", { type: "object" }),
     );
     expect(result.type).toBe("object");
   });
 
   it("maps array type", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.plugins",
-      entry("ghost.shell", { type: "array" }),
+      "example.shell.plugins",
+      entry("example.shell", { type: "array" }),
     );
     expect(result.type).toBe("array");
   });
 
   it("preserves description", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.theme",
-      entry("ghost.shell", { type: "string", description: "UI theme" }),
+      "example.shell.theme",
+      entry("example.shell", { type: "string", description: "UI theme" }),
     );
     expect(result.description).toBe("UI theme");
   });
 
   it("preserves default value", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.theme",
-      entry("ghost.shell", { type: "string", default: "dark" }),
+      "example.shell.theme",
+      entry("example.shell", { type: "string", default: "dark" }),
     );
     expect(result.default).toBe("dark");
   });
 
   it("preserves enum values", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.theme",
-      entry("ghost.shell", { type: "string", enum: ["dark", "light"] }),
+      "example.shell.theme",
+      entry("example.shell", { type: "string", enum: ["dark", "light"] }),
     );
     expect(result.enum).toEqual(["dark", "light"]);
   });
 
   it("preserves nested JSON Schema structures", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.layout",
-      entry("ghost.shell", {
+      "example.shell.layout",
+      entry("example.shell", {
         type: "object",
         required: ["panels"],
         properties: {
@@ -112,8 +112,8 @@ describe("generateSinglePropertySchema", () => {
 
   it("preserves union JSON schema type arrays", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.sidebarWidth",
-      entry("ghost.shell", {
+      "example.shell.sidebarWidth",
+      entry("example.shell", {
         type: ["integer", "null"],
         minimum: 10,
       }),
@@ -139,8 +139,8 @@ describe("generateSinglePropertySchema", () => {
     };
     const before = JSON.stringify(schema);
     const result = generateSinglePropertySchema(
-      "ghost.shell.choice",
-      entry("ghost.shell", schema),
+      "example.shell.choice",
+      entry("example.shell", schema),
     );
 
     expect(result.properties.choice).toMatchObject({
@@ -154,8 +154,8 @@ describe("generateSinglePropertySchema", () => {
 
   it("populates x-weaver extension object", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.theme",
-      entry("ghost.shell", {
+      "example.shell.theme",
+      entry("example.shell", {
         type: "string",
         "x-weaver": {
           changePolicy: "full-pipeline",
@@ -165,7 +165,7 @@ describe("generateSinglePropertySchema", () => {
       }),
     );
     expect(result["x-weaver"]).toEqual({
-      namespace: "ghost.shell",
+      namespace: "example.shell",
       changePolicy: "full-pipeline",
       visibility: "public",
       reloadBehavior: "hot",
@@ -174,8 +174,8 @@ describe("generateSinglePropertySchema", () => {
 
   it("omits optional fields when not present in schema", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.theme",
-      entry("ghost.shell", { type: "string" }),
+      "example.shell.theme",
+      entry("example.shell", { type: "string" }),
     );
     expect(result.description).toBe(undefined);
     expect(result.default).toBe(undefined);
@@ -183,53 +183,53 @@ describe("generateSinglePropertySchema", () => {
     expect(result.minimum).toBe(undefined);
     expect(result.maximum).toBe(undefined);
     expect(result["x-weaver"].changePolicy).toBe(undefined);
-    expect(result["x-weaver"].namespace).toBe("ghost.shell");
+    expect(result["x-weaver"].namespace).toBe("example.shell");
   });
 
   it("emits sensitive field in x-weaver when present", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.secret",
-      entry("ghost.shell", { type: "string", "x-weaver": { sensitive: true } }),
+      "example.shell.secret",
+      entry("example.shell", { type: "string", "x-weaver": { sensitive: true } }),
     );
     expect(result["x-weaver"].sensitive).toBe(true);
   });
 
   it("emits maxOverrideLayer in x-weaver when present", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.key",
-      entry("ghost.shell", { type: "string", "x-weaver": { maxOverrideLayer: "user" } }),
+      "example.shell.key",
+      entry("example.shell", { type: "string", "x-weaver": { maxOverrideLayer: "user" } }),
     );
     expect(result["x-weaver"].maxOverrideLayer).toBe("user");
   });
 
   it("emits writeRestriction in x-weaver when present", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.key",
-      entry("ghost.shell", { type: "string", "x-weaver": { writeRestriction: ["admin", "platform"] } }),
+      "example.shell.key",
+      entry("example.shell", { type: "string", "x-weaver": { writeRestriction: ["admin", "platform"] } }),
     );
     expect(result["x-weaver"].writeRestriction).toEqual(["admin", "platform"]);
   });
 
   it("emits sessionMode in x-weaver when present", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.key",
-      entry("ghost.shell", { type: "string", "x-weaver": { sessionMode: "ephemeral" } }),
+      "example.shell.key",
+      entry("example.shell", { type: "string", "x-weaver": { sessionMode: "ephemeral" } }),
     );
     expect(result["x-weaver"].sessionMode).toBe("ephemeral");
   });
 
   it("emits expressionAllowed in x-weaver when present", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.key",
-      entry("ghost.shell", { type: "string", "x-weaver": { expressionAllowed: true } }),
+      "example.shell.key",
+      entry("example.shell", { type: "string", "x-weaver": { expressionAllowed: true } }),
     );
     expect(result["x-weaver"].expressionAllowed).toBe(true);
   });
 
   it("omits undefined extension fields from x-weaver", () => {
     const result = generateSinglePropertySchema(
-      "ghost.shell.key",
-      entry("ghost.shell", { type: "string" }),
+      "example.shell.key",
+      entry("example.shell", { type: "string" }),
     );
     const xw = result["x-weaver"];
     expect(Object.prototype.hasOwnProperty.call(xw, "sensitive")).toBe(false);
@@ -245,14 +245,14 @@ describe("generateSinglePropertySchema", () => {
 describe("generateJsonSchema", () => {
   it("composes multiple schemas into a valid JSON Schema document", () => {
     const schemas = new Map();
-    schemas.set("ghost.shell.theme", {
-      ownerId: "ghost.shell",
-      fullyQualifiedKey: "ghost.shell.theme",
+    schemas.set("example.shell.theme", {
+      ownerId: "example.shell",
+      fullyQualifiedKey: "example.shell.theme",
       schema: { type: "string", default: "dark", description: "UI theme" },
     });
-    schemas.set("ghost.map.zoom", {
-      ownerId: "ghost.map",
-      fullyQualifiedKey: "ghost.map.zoom",
+    schemas.set("example.map.zoom", {
+      ownerId: "example.map",
+      fullyQualifiedKey: "example.map.zoom",
       schema: { type: "number", minimum: 1, maximum: 20, default: 5 },
     });
 
@@ -262,8 +262,8 @@ describe("generateJsonSchema", () => {
     expect(doc.type).toBe("object");
     expect(doc.additionalProperties).toBe(false);
     expect(Object.keys(doc.properties).length).toBe(2);
-    expect(doc.properties["ghost.shell.theme"].type).toBe("string");
-    expect(doc.properties["ghost.map.zoom"].type).toBe("number");
+    expect(doc.properties["example.shell.theme"].type).toBe("string");
+    expect(doc.properties["example.map.zoom"].type).toBe("number");
   });
 
   it("uses custom title when provided", () => {

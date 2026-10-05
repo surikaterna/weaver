@@ -111,7 +111,7 @@ export function resolveConfigurationWithCeiling(
       filteredEntries[key] = layerEntry.entries[key];
     }
 
-    return { layer: layerEntry.layer, entries: filteredEntries };
+    return { ...layerEntry, entries: filteredEntries };
   });
 
   return resolveConfiguration({ layers: filteredLayers });

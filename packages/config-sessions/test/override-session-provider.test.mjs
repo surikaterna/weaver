@@ -142,19 +142,19 @@ test("provider implements ConfigurationStorageProvider (read/write/remove)", asy
   expect(provider.writable).toBe(true);
 
   // Write
-  const writeResult = await provider.write("ghost.app.theme", "dark");
+  const writeResult = await provider.write("example.app.theme", "dark");
   expect(writeResult.success).toBe(true);
 
   // Read
   const data = await provider.load();
-  expect(data.entries["ghost.app.theme"]).toBe("dark");
+  expect(data.entries["example.app.theme"]).toBe("dark");
 
   // Remove
-  const removeResult = await provider.remove("ghost.app.theme");
+  const removeResult = await provider.remove("example.app.theme");
   expect(removeResult.success).toBe(true);
 
   const dataAfter = await provider.load();
-  expect(dataAfter.entries["ghost.app.theme"]).toBe(undefined);
+  expect(dataAfter.entries["example.app.theme"]).toBe(undefined);
 
   controller.dispose();
 });

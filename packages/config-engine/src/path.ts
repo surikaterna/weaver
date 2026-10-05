@@ -4,6 +4,7 @@ import {
   createWeaverError,
   isReservedPathSegment,
 } from "@weaver-conf/config-types";
+import { ownDataValue } from "./own-data";
 
 export function assertSafePathSegment(segment: string): void {
   if (isReservedPathSegment(segment)) {
@@ -27,6 +28,8 @@ interface PathParserState {
  * Brackets protect dots from being treated as separators.
  */
 export function parsePath(path: string): readonly string[] {
+  if (typeof path !== "string")
+    throw createWeaverError("VALIDATION_ERROR", "Path must be a string");
   if (path.length === 0) {
     throw createWeaverError("VALIDATION_ERROR", "Path must not be empty");
   }
@@ -48,7 +51,7 @@ function parseNextCharacter(state: PathParserState): void {
 }
 
 function parseBracketCharacter(state: PathParserState): void {
-  const character = state.path[state.index];
+  const character = state.path.charAt(state.index);
   if (character === "[") {
     invalidAt(state, "Nested brackets");
   }
@@ -75,7 +78,7 @@ function closeBracket(state: PathParserState): void {
 
 function consumePostBracketSeparator(state: PathParserState): void {
   if (state.index >= state.path.length) return;
-  const character = state.path[state.index];
+  const character = state.path.charAt(state.index);
   if (character === "[") return;
   if (character !== ".") {
     invalidAt(state, "Expected '.' or '[' after ']'");
@@ -85,7 +88,7 @@ function consumePostBracketSeparator(state: PathParserState): void {
 }
 
 function parsePlainCharacter(state: PathParserState): void {
-  const character = state.path[state.index];
+  const character = state.path.charAt(state.index);
   if (character === "]") invalidAt(state, "Unmatched ']'");
   if (character === "[") {
     openBracket(state);
@@ -103,7 +106,8 @@ function openBracket(state: PathParserState): void {
   if (state.current.length > 0) pushCurrentSegment(state);
   state.inBracket = true;
   state.index++;
-  if (state.path[state.index] === "[") invalidAt(state, "Nested brackets");
+  if (state.path.charAt(state.index) === "[")
+    invalidAt(state, "Nested brackets");
 }
 
 function closePlainSegment(state: PathParserState): void {
@@ -159,8 +163,20 @@ function invalidAt(state: PathParserState, reason: string): never {
  */
 export function buildPath(segments: readonly string[]): string {
   let result = "";
-
-  for (const [i, seg] of segments.entries()) {
+  if (!Array.isArray(segments)) {
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Path segments must be own plain data",
+    );
+  }
+  for (let i = 0; i < segments.length; i++) {
+    const seg = ownDataValue(segments, i);
+    if (typeof seg !== "string") {
+      throw createWeaverError(
+        "VALIDATION_ERROR",
+        "Path segments must be own strings",
+      );
+    }
     assertSafePathSegment(seg);
     const compound = isCompoundSegment(seg);
 

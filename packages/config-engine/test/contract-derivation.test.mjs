@@ -13,10 +13,10 @@ describe("deriveContractFromPackageJson", () => {
 
   it("derives correct namespace from dotted package name", () => {
     const result = deriveContractFromPackageJson({
-      name: "ghost.vessel-view",
+      name: "example.vessel-view",
       version: "2.0.0",
     });
-    expect(result.namespace).toBe("ghost.vesselView");
+    expect(result.namespace).toBe("example.vesselView");
   });
 
   it("derives correct namespace from unscoped name", () => {

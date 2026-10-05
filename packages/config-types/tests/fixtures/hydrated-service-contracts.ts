@@ -19,7 +19,7 @@ declare const scoped: HydratedScopedConfigurationService;
 declare const service: HydratedServiceConfigurationService;
 declare const legacy: ConfigurationService;
 const path: CanonicalConfigurationPath =
-  canonicalConfigurationPathSchema.parse("/ghost/value");
+  canonicalConfigurationPathSchema.parse("/example/value");
 const relative: RelativeConfigurationPath =
   relativeConfigurationPathSchema.parse(["literal.dot"]);
 const snapshot: HydratedConfigurationInspection = root.inspect(path);

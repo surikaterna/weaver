@@ -3,8 +3,20 @@ import type {
   ConfigurationPropertySchema,
 } from "@weaver-conf/config-types";
 
-import { parsePath } from "./path";
 import { getCachedRegex, isSafePattern } from "./regex-cache";
+import {
+  makeError,
+  materializeValidationPath,
+} from "./schema-validation-error-paths";
+import { ownField } from "./schema-validation-own-data";
+
+export {
+  appendValidationPath,
+  createValidationPath,
+  makeError,
+  materializeValidationPath,
+  toPathSegmentsResult,
+} from "./schema-validation-error-paths";
 
 export type SchemaValidationPathSegment = string | number;
 
@@ -71,37 +83,6 @@ export interface PathSegmentsResult {
   error?: SchemaValidationError | undefined;
 }
 
-export function createValidationPath(
-  base: readonly SchemaValidationPathSegment[],
-): ValidationPath {
-  return { kind: "validation-path", base };
-}
-
-export function appendValidationPath(
-  parent: ValidationPath,
-  segment: SchemaValidationPathSegment,
-): ValidationPath {
-  return { kind: "validation-path", base: parent.base, parent, segment };
-}
-
-export function materializeValidationPath(
-  path: ValidationErrorPath,
-): readonly SchemaValidationPathSegment[] {
-  if (!isValidationPath(path)) return path;
-  const suffix: SchemaValidationPathSegment[] = [];
-  let cursor = path;
-  while (cursor.parent !== undefined) {
-    if (cursor.segment !== undefined) suffix.push(cursor.segment);
-    cursor = cursor.parent;
-  }
-  suffix.reverse();
-  return cursor.base.length === 0 ? suffix : [...cursor.base, ...suffix];
-}
-
-function isValidationPath(path: ValidationErrorPath): path is ValidationPath {
-  return !Array.isArray(path);
-}
-
 export function addError(
   state: ValidationState,
   code: SchemaValidationErrorCode,
@@ -132,21 +113,6 @@ export function addContextError(
   context.errors.push(
     makeError(code, materializeValidationPath(path), details.message, details),
   );
-}
-
-export function makeError(
-  code: SchemaValidationErrorCode,
-  segments: readonly SchemaValidationPathSegment[],
-  message: string,
-  details?: Pick<SchemaValidationError, "expected" | "actual">,
-): SchemaValidationError {
-  return {
-    code,
-    path: formatPath(segments),
-    segments: [...segments],
-    message,
-    ...details,
-  };
 }
 
 export function addBoundedError(
@@ -210,10 +176,9 @@ export function getEffectiveValue(
   value: unknown,
   mode: ValidationMode,
 ): unknown {
-  return mode === "effective" &&
-    value === undefined &&
-    schema.default !== undefined
-    ? schema.default
+  const fallback = ownField(schema, "default");
+  return mode === "effective" && value === undefined && fallback !== undefined
+    ? fallback
     : value;
 }
 
@@ -221,89 +186,45 @@ export function matchesAnyType(
   value: unknown,
   schema: ConfigurationPropertySchema,
 ): boolean {
-  const types = schema.type;
+  const types = ownField(schema, "type");
+  if (types === undefined) return false;
   if (!isSchemaTypeArray(types)) return matchesType(value, types);
-  return types.some((type) => matchesType(value, type));
+  for (let index = 0; index < types.length; index++) {
+    const type = ownField(types, index);
+    if (type !== undefined && matchesType(value, type)) return true;
+  }
+  return false;
 }
 
 export function allowsType(
   schema: ConfigurationPropertySchema,
   type: ConfigurationJsonSchemaType,
 ): boolean {
-  const types = schema.type;
-  return isSchemaTypeArray(types) ? types.includes(type) : types === type;
+  const types = ownField(schema, "type");
+  if (types === undefined) return false;
+  if (!isSchemaTypeArray(types)) return types === type;
+  for (let index = 0; index < types.length; index++) {
+    if (ownField(types, index) === type) return true;
+  }
+  return false;
 }
 
 export function getTypes(
   schema: ConfigurationPropertySchema,
 ): readonly ConfigurationJsonSchemaType[] {
-  return isSchemaTypeArray(schema.type) ? schema.type : [schema.type];
+  const types = ownField(schema, "type");
+  if (types === undefined) return [];
+  return isSchemaTypeArray(types) ? types : [types];
 }
 
 export function describeTypes(schema: ConfigurationPropertySchema): string {
-  return isSchemaTypeArray(schema.type) ? schema.type.join(" | ") : schema.type;
+  return getTypes(schema).join(" | ");
 }
 
 export function describeValue(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;
-}
-
-export function toPathSegmentsResult(
-  path: string | readonly SchemaValidationPathSegment[] | undefined,
-  errorSegments: readonly SchemaValidationPathSegment[] = [],
-): PathSegmentsResult {
-  if (path === undefined) return { segments: [] };
-  if (typeof path !== "string") {
-    return toArrayPathSegmentsResult(path, errorSegments);
-  }
-
-  try {
-    return { segments: parsePath(path) };
-  } catch (error: unknown) {
-    return {
-      segments: [],
-      error: makeError(
-        "invalid-path",
-        errorSegments,
-        `Invalid path: ${errorMessage(error)}`,
-      ),
-    };
-  }
-}
-
-function toArrayPathSegmentsResult(
-  path: readonly unknown[],
-  errorSegments: readonly SchemaValidationPathSegment[],
-): PathSegmentsResult {
-  const segments: SchemaValidationPathSegment[] = [];
-  for (const [index, segment] of path.entries()) {
-    if (isValidPathSegment(segment)) {
-      segments.push(segment);
-      continue;
-    }
-
-    return {
-      segments,
-      error: makeError(
-        "invalid-path",
-        [...errorSegments, ...segments],
-        `Invalid path segment at index ${String(index)}: expected string or finite number`,
-      ),
-    };
-  }
-  return { segments };
-}
-
-function isValidPathSegment(
-  segment: unknown,
-): segment is SchemaValidationPathSegment {
-  return typeof segment === "string" || isFiniteNumber(segment);
-}
-
-function isFiniteNumber(segment: unknown): segment is number {
-  return typeof segment === "number" && Number.isFinite(segment);
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -355,10 +276,6 @@ function matchesType(
   return typeof value === type;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function isSchemaTypeArray(
   value: ConfigurationJsonSchemaType | readonly ConfigurationJsonSchemaType[],
 ): value is readonly ConfigurationJsonSchemaType[] {
@@ -374,19 +291,4 @@ function boundPasses(
   if (operator === "<=") return actual <= expected;
   if (operator === ">") return actual > expected;
   return actual < expected;
-}
-
-function formatPath(segments: readonly SchemaValidationPathSegment[]): string {
-  let path = "$";
-  for (const segment of segments) {
-    path += formatSegment(segment);
-  }
-  return path;
-}
-
-function formatSegment(segment: SchemaValidationPathSegment): string {
-  if (typeof segment === "number") return `[${String(segment)}]`;
-  return /^[A-Za-z_$][\w$-]*$/.test(segment)
-    ? `.${segment}`
-    : `[${JSON.stringify(segment)}]`;
 }

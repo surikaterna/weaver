@@ -67,21 +67,19 @@ export const hydratedConfigurationInspectionSchema = serviceDataBoundary(
       if (
         inspection.effective.state === "missing" &&
         inspection.effectiveLayer !== undefined
-      ) {
+      )
         context.addIssue({
           code: "custom",
           message: "Missing values have no effective layer",
         });
-      }
       const pairs = inspection.contributions.map(({ layer, providerId }) =>
         JSON.stringify([layer, providerId]),
       );
-      if (new Set(pairs).size !== pairs.length) {
+      if (new Set(pairs).size !== pairs.length)
         context.addIssue({
           code: "custom",
           message: "Duplicate layer/provider contribution",
         });
-      }
     })
     .readonly(),
 );
@@ -102,13 +100,9 @@ export const configurationEffectiveChangeSchema = serviceDataBoundary(
 
 export const configurationServiceWriteOptionsSchema = serviceDataBoundary(
   z
-    .strictObject({
-      layer: nonempty,
-      ifRevision: nonempty.optional(),
-    })
+    .strictObject({ layer: nonempty, ifRevision: nonempty.optional() })
     .readonly(),
 );
-
 const strictErrorSchema = z.strictObject(weaverErrorSchema.shape).readonly();
 export const configurationServiceWriteResultSchema = serviceDataBoundary(
   z
@@ -137,7 +131,7 @@ export const configurationServiceWriteResultSchema = serviceDataBoundary(
     ),
 );
 
-/** Callable shape only: no invocation, argument proof, authorization or capability authenticity. */
+/** Callable shape only; parsing does not execute or authenticate capabilities. */
 function callable<T>() {
   return z.custom<T>((value) => typeof value === "function");
 }

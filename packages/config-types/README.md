@@ -104,3 +104,25 @@ All core types have corresponding Zod schemas exported from `schemas-core` and `
 ## License
 
 MIT
+## Native contracts and caller-data admission
+
+Paths and identifiers use native Zod string schemas. Service DTOs and capabilities
+use native object, union and readonly tuple schemas behind descriptor-first
+admission. Zod owns the domain rules; no parallel domain-validator framework is
+required. `parse`/`safeParse`, schema input/output types, brands, ordered scopes,
+nonempty relative tuples and callable signatures retain their original meaning.
+For guarded schemas, the native contract is available through `.out`; unwrap a
+readonly schema before using `.shape`, `.extend`, `.pick` or `.omit`. Refinements
+still apply; use Zod's `safeExtend` when extending an object with cross-field rules.
+
+Admission rejects own accessors without invoking them, rejects boundary-specific
+cycles/exotic containers/symbols, preserves acyclic sharing, and never freezes a
+borrowed input. Ordinary data arrays may retain holes; structural metadata arrays
+must be dense. Snapshot data and service data retain their distinct reserved-key
+and executable-data rules. Callable checks do not execute or authenticate a
+capability. The engine's `parsePath`/`buildPath` remains the storage codec.
+
+These are caller-data contracts under standard JavaScript prototypes, not a
+sandbox for executable modification of ambient Object/Array prototypes or Proxy
+reflection. Native Zod compilation, issue arrays and output construction are
+ordinary trusted implementation machinery.

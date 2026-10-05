@@ -1,6 +1,12 @@
 import { validateEffectiveConfiguration } from "@weaver-conf/config-engine";
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 import { z } from "zod";
+import {
+  denseMetadata,
+  ownField,
+  ownValue,
+  preflightWitness,
+} from "./structural-witness-own-data";
 
 type Schema = ConfigurationPropertySchema;
 
@@ -26,34 +32,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function allows(schema: Schema, type: "object" | "array"): boolean {
-  return Array.isArray(schema.type)
-    ? schema.type.includes(type)
-    : schema.type === type;
+export function allows(schema: Schema, type: "object" | "array"): boolean {
+  const declaredType = ownField(schema, "type");
+  if (Array.isArray(declaredType)) denseMetadata(declaredType);
+  return Array.isArray(declaredType)
+    ? declaredType.includes(type)
+    : declaredType === type;
 }
 
 function child(value: unknown, key: string): unknown {
-  if (Array.isArray(value)) return value[Number(key)];
-  return isRecord(value) && Object.hasOwn(value, key) ? value[key] : undefined;
+  if (Array.isArray(value)) return ownValue(value, Number(key));
+  return isRecord(value) ? ownValue(value, key) : undefined;
 }
 
-function validBranch(schema: Schema, candidate: unknown): boolean {
+export function validBranch(schema: Schema, candidate: unknown): boolean {
   return validateEffectiveConfiguration(schema, candidate).valid;
 }
 
-function objectMembers(schema: Schema, key: string): Schema[] {
+export function objectMembers(schema: Schema, key: string): Schema[] {
   const members: Schema[] = [];
-  if (schema.properties && Object.hasOwn(schema.properties, key)) {
-    const declared = schema.properties[key];
+  const properties = ownField(schema, "properties");
+  if (properties && Object.hasOwn(properties, key)) {
+    const declared = ownField(properties, key);
     if (declared) members.push(declared);
   }
   for (const [pattern, member] of Object.entries(
-    schema.patternProperties ?? {},
+    ownField(schema, "patternProperties") ?? {},
   )) {
     if (matchesPattern(pattern, key)) members.push(member);
   }
   if (members.length > 0) return members;
-  const additional = schema.additionalProperties;
+  const additional = ownField(schema, "additionalProperties");
   return additional !== null && typeof additional === "object"
     ? [additional]
     : [];
@@ -67,13 +76,13 @@ function matchesPattern(pattern: string, key: string): boolean {
   }
 }
 
-function arrayMembers(schema: Schema, key: string): Schema[] {
+export function arrayMembers(schema: Schema, key: string): Schema[] {
   if (!/^(?:0|[1-9][0-9]*)$/.test(key)) return [];
   const index = Number(key);
   if (!Number.isSafeInteger(index) || index > 4_294_967_294) return [];
-  const items = schema.items;
+  const items = ownField(schema, "items");
   if (!items) return [];
-  const member = Array.isArray(items) ? items[index] : items;
+  const member = Array.isArray(items) ? ownField(items, index) : items;
   return member ? [member] : [];
 }
 
@@ -199,13 +208,11 @@ function walkSupport(
     previous,
     ancestors,
   );
-  const all = schema.allOf ? [...new Set(schema.allOf)].map(combine) : [];
-  const any = schema.anyOf
-    ?.filter((branch) => validBranch(branch, candidate))
-    .map(combine);
-  const one = schema.oneOf
-    ?.filter((branch) => validBranch(branch, candidate))
-    .map(combine);
+  const allOf = compositionBranches(schema, "allOf");
+  const all = allOf ? [...new Set(allOf)].map(combine) : [];
+  const valid = (branch: Schema) => validBranch(branch, candidate);
+  const any = compositionBranches(schema, "anyOf")?.filter(valid).map(combine);
+  const one = compositionBranches(schema, "oneOf")?.filter(valid).map(combine);
   ancestors.delete(schema);
   const witnesses = [direct, ...all];
   const declared =
@@ -222,6 +229,15 @@ function walkSupport(
   };
 }
 
+function compositionBranches(
+  schema: Schema,
+  key: "allOf" | "anyOf" | "oneOf",
+): readonly Schema[] | undefined {
+  const branches = ownField(schema, key);
+  if (branches !== undefined) denseMetadata(branches);
+  return branches;
+}
+
 export function schemaWriteSupport(
   schema: Schema,
   path: readonly string[],
@@ -229,6 +245,7 @@ export function schemaWriteSupport(
   fullCandidate: unknown,
   previous: unknown,
 ): StructuralSupport {
+  preflightWitness(schema, path, incoming, fullCandidate, previous);
   return walkSupport(
     schema,
     path,

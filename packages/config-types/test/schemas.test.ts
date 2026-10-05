@@ -313,12 +313,12 @@ describe("schema registration request schemas", () => {
 
   it("strips legacy subjects from persisted registration metadata", () => {
     const result = schemaRegistrationMetadataSchema.safeParse({
-      serviceId: "lynx",
-      servicePath: "/lynx",
+      serviceId: "app",
+      servicePath: "/app",
       environment: "default",
-      providerId: "lynx",
-      owner: { name: "Lynx", contact: "lynx@example.com" },
-      audit: { subject: "svc:lynx", actor: "api" },
+      providerId: "app",
+      owner: { name: "application", contact: "app@example.com" },
+      audit: { subject: "svc:app", actor: "api" },
     });
 
     expect(result.success).toBe(true);
@@ -326,13 +326,13 @@ describe("schema registration request schemas", () => {
   });
 
   it("enforces registration identifier and slot path lexical contracts", () => {
-    for (const id of ["lynx", "checkout-api"]) {
+    for (const id of ["app", "checkout-api"]) {
       expect(serviceIdSchema.safeParse(id).success).toBe(true);
     }
     for (const id of ["_weaver", "Upper", "bad/id", "constructor"]) {
       expect(serviceIdSchema.safeParse(id).success).toBe(false);
     }
-    for (const id of ["ghost.settings.panel", "Ghost_2", "provider-id"]) {
+    for (const id of ["example.settings.panel", "Example_2", "provider-id"]) {
       expect(providerIdSchema.safeParse(id).success).toBe(true);
     }
     for (const id of ["bad/id", " bad", "prototype", "provider[dot]"]) {
@@ -354,16 +354,16 @@ describe("schema registration request schemas", () => {
   });
 
   it("validates public canonical paths with the same segment rules", () => {
-    for (const path of ["/lynx", "/lynx/plugin.keys", "/lynx/plugins/"]) {
+    for (const path of ["/app", "/app/plugin.keys", "/app/plugins/"]) {
       expect(publicConfigPathSchema.safeParse(path).success).toBe(true);
     }
     for (const path of [
       "/",
-      "lynx",
+      "app",
       "/_weaver/registry",
-      "/lynx//plugins",
-      "/lynx/[plugin.keys]",
-      "/lynx/constructor",
+      "/app//plugins",
+      "/app/[plugin.keys]",
+      "/app/constructor",
     ]) {
       expect(publicConfigPathSchema.safeParse(path).success).toBe(false);
     }
@@ -371,11 +371,11 @@ describe("schema registration request schemas", () => {
 
   it("rejects service-prefixed slot paths", () => {
     const request = {
-      serviceId: "lynx",
+      serviceId: "app",
       environment: "default",
-      owner: { name: "Lynx", contact: "lynx@example.com" },
+      owner: { name: "application", contact: "app@example.com" },
       schema: { type: "object" },
-      fragmentSlots: [{ slotPath: "/lynx/plugins", accepts: "object" }],
+      fragmentSlots: [{ slotPath: "/app/plugins", accepts: "object" }],
     };
     expect(
       serviceSchemaRegistrationRequestSchema.safeParse(request).success,
@@ -383,8 +383,8 @@ describe("schema registration request schemas", () => {
     expect(
       fragmentSchemaRegistrationRequestSchema.safeParse({
         ...request,
-        providerId: "ghost.settings.panel",
-        slotPath: "/lynx/plugins",
+        providerId: "example.settings.panel",
+        slotPath: "/app/plugins",
       }).success,
     ).toBe(false);
   });
@@ -438,10 +438,10 @@ describe("schema registration request schemas", () => {
   it("accepts fragment registration and rejects independent fragment path", () => {
     const valid = fragmentSchemaRegistrationRequestSchema.safeParse({
       serviceId: "example-service",
-      providerId: "ghost.settings.panel",
+      providerId: "example.settings.panel",
       slotPath: "/plugins",
       environment: "default",
-      owner: { name: "Ghost", contact: "ghost@example.com" },
+      owner: { name: "Example Team", contact: "example@example.com" },
       schema: { type: "object" },
       schemaVersion: "0.4.0",
     });
@@ -450,12 +450,12 @@ describe("schema registration request schemas", () => {
     expect(
       fragmentSchemaRegistrationRequestSchema.safeParse({
         serviceId: "example-service",
-        providerId: "ghost.settings.panel",
+        providerId: "example.settings.panel",
         slotPath: "/plugins",
         environment: "default",
-        owner: { name: "Ghost", contact: "ghost@example.com" },
+        owner: { name: "Example Team", contact: "example@example.com" },
         schema: { type: "object" },
-        path: "/example-service/plugins/ghost.settings.panel",
+        path: "/example-service/plugins/example.settings.panel",
       }).success,
     ).toBe(false);
   });
@@ -480,31 +480,31 @@ describe("schema registration request schemas", () => {
       expect(
         fragmentSchemaRegistrationRequestSchema.safeParse({
           serviceId: "example-service",
-          providerId: "ghost.settings.panel",
+          providerId: "example.settings.panel",
           slotPath: "/plugins",
           environment,
-          owner: { name: "Ghost", contact: "ghost@example.com" },
+          owner: { name: "Example Team", contact: "example@example.com" },
           schema: { type: "object" },
         }).success,
       ).toBe(false);
       expect(
         schemaRegistrationMetadataSchema.safeParse({
-          serviceId: "lynx",
-          servicePath: "/lynx",
+          serviceId: "app",
+          servicePath: "/app",
           environment,
-          providerId: "lynx",
-          owner: { name: "Lynx", contact: "lynx@example.com" },
+          providerId: "app",
+          owner: { name: "application", contact: "app@example.com" },
         }).success,
       ).toBe(false);
       expect(
         fragmentSlotRegistrationMetadataSchema.safeParse({
-          serviceId: "lynx",
-          servicePath: "/lynx",
+          serviceId: "app",
+          servicePath: "/app",
           slotPath: "/plugins",
-          canonicalSlotPath: "/lynx/plugins",
+          canonicalSlotPath: "/app/plugins",
           environment,
-          providerId: "lynx",
-          owner: { name: "Lynx", contact: "lynx@example.com" },
+          providerId: "app",
+          owner: { name: "application", contact: "app@example.com" },
           accepts: "object",
         }).success,
       ).toBe(false);
@@ -514,9 +514,9 @@ describe("schema registration request schemas", () => {
   it("rejects non-object and ambiguous service schema roots", () => {
     for (const schema of invalidRootSchemas) {
       const result = serviceSchemaRegistrationRequestSchema.safeParse({
-        serviceId: "lynx",
+        serviceId: "app",
         environment: "default",
-        owner: { name: "Lynx", contact: "lynx@example.com" },
+        owner: { name: "application", contact: "app@example.com" },
         schema,
         fragmentSlots: [],
       });
@@ -528,11 +528,11 @@ describe("schema registration request schemas", () => {
   it("rejects non-object and ambiguous fragment schema roots", () => {
     for (const schema of invalidRootSchemas) {
       const result = fragmentSchemaRegistrationRequestSchema.safeParse({
-        serviceId: "lynx",
-        providerId: "ghost.settings.panel",
+        serviceId: "app",
+        providerId: "example.settings.panel",
         slotPath: "/plugins",
         environment: "default",
-        owner: { name: "Ghost", contact: "ghost@example.com" },
+        owner: { name: "Example Team", contact: "example@example.com" },
         schema,
       });
 

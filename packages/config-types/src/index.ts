@@ -330,6 +330,7 @@ export type {
   HydratedScopedConfigurationService,
   HydratedServiceConfigurationService,
 } from "./service-capabilities";
+export { captureServiceData } from "./service-data-boundary";
 export type {
   CanonicalConfigurationPath,
   RelativeConfigurationPath,

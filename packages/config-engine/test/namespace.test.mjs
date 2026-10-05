@@ -6,17 +6,17 @@ import {
 } from "../src/namespace.ts";
 
 test("qualifyKey combines namespace + relative key", () => {
-  const result = qualifyKey("ghost.vesselView", "map.defaultZoom");
-  expect(result).toBe("ghost.vesselView.map.defaultZoom");
+  const result = qualifyKey("example.vesselView", "map.defaultZoom");
+  expect(result).toBe("example.vesselView.map.defaultZoom");
 });
 
 test("qualifyKey with single-segment relative key", () => {
-  const result = qualifyKey("ghost.vesselView", "theme");
-  expect(result).toBe("ghost.vesselView.theme");
+  const result = qualifyKey("example.vesselView", "theme");
+  expect(result).toBe("example.vesselView.theme");
 });
 
 test("deriveNamespace converts kebab-case plugin IDs", () => {
-  expect(deriveNamespace("ghost.vessel-view")).toBe("ghost.vesselView");
+  expect(deriveNamespace("example.vessel-view")).toBe("example.vesselView");
 });
 
 test("deriveNamespace handles scoped package names", () => {
@@ -28,56 +28,56 @@ test("deriveNamespace strips -plugin suffix from scoped names", () => {
 });
 
 test("deriveNamespace passes through already-correct format", () => {
-  expect(deriveNamespace("ghost.vesselView")).toBe("ghost.vesselView");
+  expect(deriveNamespace("example.vesselView")).toBe("example.vesselView");
 });
 
 test("validateKeyFormat accepts valid 3-segment key", () => {
-  const result = validateKeyFormat("ghost.vesselView.theme");
+  const result = validateKeyFormat("example.vesselView.theme");
   expect(result.valid).toBe(true);
 });
 
 test("validateKeyFormat accepts valid 4-segment key", () => {
-  const result = validateKeyFormat("ghost.vesselView.map.defaultZoom");
+  const result = validateKeyFormat("example.vesselView.map.defaultZoom");
   expect(result.valid).toBe(true);
 });
 
 test("validateKeyFormat accepts valid 5-segment key", () => {
-  const result = validateKeyFormat("ghost.vesselView.views.vesselGrid.pageSize");
+  const result = validateKeyFormat("example.vesselView.views.vesselGrid.pageSize");
   expect(result.valid).toBe(true);
 });
 
 test("validateKeyFormat accepts valid 2-segment key", () => {
-  const result = validateKeyFormat("ghost.vesselView");
+  const result = validateKeyFormat("example.vesselView");
   expect(result.valid).toBe(true);
 });
 
 test("validateKeyFormat accepts valid 6-segment key", () => {
-  const result = validateKeyFormat("ghost.vesselView.a.b.c.d");
+  const result = validateKeyFormat("example.vesselView.a.b.c.d");
   expect(result.valid).toBe(true);
 });
 
 test("validateKeyFormat rejects segments starting with numbers", () => {
-  const result = validateKeyFormat("ghost.vesselView.1invalid");
+  const result = validateKeyFormat("example.vesselView.1invalid");
   expect(result.valid).toBe(false);
   expect(result.error).toBeTruthy();
 });
 
 test("validateKeyFormat rejects empty segments", () => {
-  const result = validateKeyFormat("ghost..map");
+  const result = validateKeyFormat("example..map");
   expect(result.valid).toBe(false);
   expect(result.error).toBeTruthy();
 });
 
 test("validateKeyFormat rejects segments with special characters", () => {
-  const result = validateKeyFormat("ghost.vessel-view.map");
+  const result = validateKeyFormat("example.vessel-view.map");
   expect(result.valid).toBe(false);
   expect(result.error).toBeTruthy();
 });
 
 test("extractNamespace returns first two segments", () => {
-  expect(extractNamespace("ghost.vesselView.map.zoom")).toBe("ghost.vesselView");
+  expect(extractNamespace("example.vesselView.map.zoom")).toBe("example.vesselView");
 });
 
 test("extractNamespace with 3-segment key", () => {
-  expect(extractNamespace("ghost.vesselView.theme")).toBe("ghost.vesselView");
+  expect(extractNamespace("example.vesselView.theme")).toBe("example.vesselView");
 });
