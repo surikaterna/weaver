@@ -46,8 +46,10 @@ function selectBinding(
     (binding) => binding.id === selection.providerId,
   );
   const binding = bindings[0];
-  const slots = configuration.layers.filter((slot) =>
-    slot.providerIds.includes(selection.providerId),
+  const slots = configuration.layers.filter(
+    (slot) =>
+      slot.kind !== "session" &&
+      slot.providerIds.includes(selection.providerId),
   );
   const slot = slots[0];
   if (

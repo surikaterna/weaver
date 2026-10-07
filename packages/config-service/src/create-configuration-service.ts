@@ -10,6 +10,10 @@ import {
   createHostAuthority,
 } from "./authority/host-authority";
 import { persistSeed } from "./authority/registry-storage";
+import {
+  disposeSessions,
+  stopSessionTimers,
+} from "./authority/session-lifecycle";
 import { validateFactory } from "./factory-validation";
 import { acknowledgeRestart, flushHost } from "./host-lifecycle";
 import { type LoadedContribution, loadContributions } from "./hydration";
@@ -43,6 +47,7 @@ export async function createConfigurationService(
   );
   const state: RootState = {
     factory,
+    sessions: new Map(),
     providers,
     ready: new Map(),
     views: new Map(),
@@ -77,8 +82,10 @@ async function failInitialization(
   error: unknown,
 ): Promise<never> {
   state.disposed = true;
+  stopSessionTimers(state);
   const failedWatches = (await state.stopWatching?.()) ?? [];
   await state.queue.settled();
+  disposeSessions(state);
   state.events.clear();
   state.ready.clear();
   state.views.clear();
@@ -161,9 +168,11 @@ function rootMethods(
 function dispose(state: RootState): Promise<Result<undefined, WeaverError>> {
   if (state.disposal) return state.disposal;
   state.disposed = true;
+  stopSessionTimers(state);
   state.events.clear();
   const stopped = state.stopWatching?.() ?? Promise.resolve([]);
   state.disposal = state.queue.settled().then(async () => {
+    disposeSessions(state);
     const failed = [
       ...(await stopped),
       ...(await closeResources(state.providers)),

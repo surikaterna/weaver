@@ -1,5 +1,9 @@
 import type { AuthConfig } from "@weaver-conf/config-auth";
 import {
+  sessionDurationSchema,
+  sessionTimerSchema,
+} from "@weaver-conf/config-sessions";
+import {
   type ConfigurationAuthorityAuditRecord,
   type ConfigurationAuthorityController,
   configurationHostAuthoritySchema,
@@ -34,6 +38,16 @@ function callable<T>() {
 }
 const hostShape = z
   .strictObject({
+    sessions: z
+      .strictObject({
+        defaultDurationMs: sessionDurationSchema,
+        maxDurationMs: sessionDurationSchema,
+        maxActiveSessions: z.number().int().positive().safe(),
+        timer: sessionTimerSchema.optional(),
+      })
+      .refine((value) => value.defaultDurationMs <= value.maxDurationMs)
+      .readonly()
+      .optional(),
     registry: registrySchema.optional(),
     hostAuthority: configurationHostAuthoritySchema,
     authConfig: z.custom<AuthConfig>((value) => value !== undefined),
@@ -66,6 +80,9 @@ function captureHost(input: unknown): unknown {
   }
   return {
     ...fields,
+    ...(fields.sessions === undefined
+      ? {}
+      : { sessions: captureSessions(fields.sessions) }),
     ...(fields.registry === undefined
       ? {}
       : { registry: captureData(fields.registry) }),
@@ -83,6 +100,16 @@ function captureHost(input: unknown): unknown {
     ...(fields.writers === undefined
       ? {}
       : { writers: captureData(fields.writers) }),
+  };
+}
+function captureSessions(input: unknown): unknown {
+  const fields = ownRecord(input);
+  const { timer, ...data } = fields;
+  return {
+    ...ownRecord(captureData(data)),
+    ...(timer === undefined
+      ? {}
+      : { timer: capturePort(timer, ["setTimeout", "clearTimeout"]) }),
   };
 }
 /** Trusted composition shapes, never principal verification or capability minting. */

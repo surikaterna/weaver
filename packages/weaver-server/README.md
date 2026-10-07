@@ -32,7 +32,11 @@ const server = await bootstrap({
 - `WeaverConfigService` — Central service for reads, writes, and resolution
 - `SchemaRegistry` — Namespace schema registration and validation
 - `ScopeManager` — Scope provisioning and hierarchy management
-- `SessionManager` — Override session lifecycle (create, expire, audit)
+- Override sessions use the canonical `config-service` host controller's
+  `forSessions(capability)` port and ordinary `forMutations(capability).apply`
+  with a checked session selector. The former unwired `SessionManager` export
+  and its independent map/sweep are removed; no default network session endpoint
+  is introduced by this migration.
 - `PromotionEngine` — Promotes values between layers with approval workflows
 - `RollbackService` — Reverts configuration to previous revisions
 

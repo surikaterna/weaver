@@ -20,7 +20,7 @@ export function captureMutations(
   assertLive(state);
   if (
     !auth ||
-    !state.factory.writers.size ||
+    (!state.factory.writers.size && !state.factory.host.sessions) ||
     state.writeFence ||
     state.schemaFence
   )
@@ -37,13 +37,14 @@ export function captureMutations(
       throw createWeaverError("WRITE_UNAVAILABLE", "Mutations are fenced");
     if (registry.current(token).snapshot !== principal)
       throw createWeaverError("FORBIDDEN", "Mutation authority changed");
-    if (principal.session)
-      throw createWeaverError(
-        "POLICY_VIOLATION",
-        "Session mutations are unavailable",
-      );
   };
-  return Object.freeze({ commands: captured.data, principal, auth, check });
+  return Object.freeze({
+    commands: captured.data,
+    principal,
+    auth,
+    check,
+    token,
+  });
 }
 
 export function validateMutationSelection(

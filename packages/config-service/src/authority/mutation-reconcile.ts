@@ -7,6 +7,7 @@ import { type LoadedContribution, loadContributions } from "../hydration";
 import type { RootState } from "../root-state";
 import type { MutationPlan } from "./mutation-plan";
 import { initialPublication, publish, stagePublication } from "./publication";
+import { disposeSessions } from "./session-lifecycle";
 import { fenceWrites } from "./write-outcome";
 
 export async function reconcileMutations(
@@ -30,6 +31,7 @@ export async function reconcileMutations(
       state.schemaFence = Object.freeze(
         touched.map((plan) => plan.target.selection.captured.binding.id),
       );
+      disposeSessions(state);
       return;
     }
     if (observed.some((item) => item.failed || !item.layer)) return;

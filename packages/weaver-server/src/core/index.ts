@@ -53,13 +53,6 @@ export {
   parseScopeQuery,
 } from "./scope-utils";
 export type {
-  OverrideSessionInfo,
-  OverrideSessionRequest,
-  SessionManager,
-  SessionManagerOptions,
-} from "./session-manager";
-export { createSessionManager } from "./session-manager";
-export type {
   WebhookHandler,
   WebhookHandlerOptions,
 } from "./webhook-handler";

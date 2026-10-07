@@ -127,6 +127,18 @@ function validateHost(
   host: ConfigurationServiceHostOptions,
   options: ConfigurationServiceOptions,
 ): void {
+  const sessions = options.layers.filter((slot) => slot.kind === "session");
+  if (
+    sessions.length > 1 ||
+    Boolean(sessions.length) !== Boolean(host.sessions)
+  )
+    invalidHost();
+  if (
+    sessions.length &&
+    (host.authConfig.sessionLayer !== sessions[0]?.layer ||
+      host.authConfig.elevatedSessionMode !== "emergency-override")
+  )
+    invalidHost();
   if (host.registry?.initial !== undefined && options.schemas.length)
     invalidHost();
   if (host.authConfig)

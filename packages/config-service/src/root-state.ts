@@ -5,6 +5,7 @@ import {
 } from "@weaver-conf/config-types";
 import { validateAuthLayers } from "./authority/authority-contract-capture";
 import type { createHostAuthority } from "./authority/host-authority";
+import type { SessionReference } from "./authority/session-bindings";
 import type { validateFactory } from "./factory-validation";
 import type { LoadedContribution } from "./hydration";
 import type { PendingIdentity } from "./identity-hydration";
@@ -16,6 +17,7 @@ import type { PreparedView } from "./view-snapshots";
 
 export interface RootState {
   readonly factory: ReturnType<typeof validateFactory>;
+  readonly sessions: Map<string, SessionReference>;
   ready: Map<string, IdentitySnapshot>;
   views: Map<string, PreparedView>;
   readonly pending: Map<string, PendingIdentity>;

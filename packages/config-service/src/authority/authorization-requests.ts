@@ -87,9 +87,6 @@ export function selectGrant(
   request: AuthorizationRequest,
   layers: readonly string[],
 ): void {
-  if (
-    snapshot.session ||
-    !snapshot.grants.some((grant) => grantAllows(grant, request, layers))
-  )
+  if (!snapshot.grants.some((grant) => grantAllows(grant, request, layers)))
     forbidden();
 }

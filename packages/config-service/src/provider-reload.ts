@@ -110,6 +110,7 @@ async function observe(
     throw createWeaverError("SERVER_DEGRADED", "Provider observation failed");
   if (!metadataMatches(state, [loaded])) {
     state.schemaFence = Object.freeze([target.selection.captured.binding.id]);
+    disposeSessions(state);
     throw createWeaverError(
       "SERVER_DEGRADED",
       "Observed registry differs from owned metadata",
@@ -183,3 +184,5 @@ function stageObserved(
     state.factory.adapter.revision,
   );
 }
+
+import { disposeSessions } from "./authority/session-lifecycle";

@@ -24,6 +24,7 @@ import {
 import { covers, evidencePath } from "./authorization-requests";
 import { compileMutationPath } from "./mutation-capture";
 import type { MutationPlan } from "./mutation-plan";
+import { checkedSessionMutation } from "./session-mutations";
 
 type Requests = Map<string, ConfigurationAuthorizationRequest>;
 
@@ -32,7 +33,10 @@ export async function admitMutationPolicy(
   ticket: MutationTicket,
   plan: MutationPlan,
 ): Promise<ConfigurationAuthorizationRequest> {
-  if (state.factory.host.authConfig?.sessionLayer === plan.command.layer)
+  if (
+    state.factory.host.authConfig?.sessionLayer === plan.command.layer &&
+    !plan.session
+  )
     throw createWeaverError(
       "POLICY_VIOLATION",
       "Session mutations are unavailable",
@@ -55,8 +59,10 @@ export async function admitMutationPolicy(
     [...requests.values()].some((request) => request.sensitive),
   );
   requests.set(plan.command.path, logical);
-  for (const request of requests.values())
+  for (const request of requests.values()) {
     await authorizeMutation(state, ticket, request);
+    if (plan.session) checkedSessionMutation(state, ticket, plan.command);
+  }
   return logical;
 }
 
@@ -208,6 +214,12 @@ function checkEvidence(
   const access = {
     userId: ticket.principal.principalId,
     roles: ticket.principal.roles,
+    ...(plan.session?.emergency
+      ? {
+          sessionMode: "emergency-override",
+          overrideReason: plan.session.controller.getSession()?.reason,
+        }
+      : {}),
   };
   const schemas = new Set([
     ...item.before.ancestors,

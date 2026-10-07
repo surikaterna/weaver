@@ -97,7 +97,7 @@ dispatch is not rollback.
 
 Without explicit writer opt-in, writes reject `WRITE_UNAVAILABLE`,
 even for writable providers. Root reload and flush are host lifecycle operations;
-after disposal these return `DISPOSED`. Ceiling integration, sessions and transport
+after disposal these return `DISPOSED`. Ceiling integration and transport
 feeds remain successor work, not alpha/product readiness claims. Production
 imports no filesystem, storage aggregate or server package. Node hosts may inject
 the public filesystem provider and explicitly map its construction-time environment
@@ -130,7 +130,7 @@ unknown policy layers and nonempty write constraints reject at initialization.
 Only the host's `onAuthorityReady(controller)` callback receives the controller,
 after successful hydration. It provides `mint`, `revoke`, `replace`,
 `forIdentity(token, { identity, namespace, viewId? })`, `forMutations(token)` and
-`forSchemas(token)`. Tokens are empty, frozen objects
+`forSchemas(token)` and `forSessions(token)`. Tokens are empty, frozen objects
 authenticated by membership in one root-local WeakMap. Serialization, copying,
 cross-root reuse and structural schema validation cannot grant authority. The
 root-independent capability schema rejects every value; the owning runtime uses
@@ -161,8 +161,8 @@ Preparation conservatively requires all configured layers. Public aggregates use
 the same pruned projection as individual reads, with host authorization for their
 declared paths. Unauthorized aggregate branches are omitted; direct denied reads
 throw and inspection redacts. Arrays are all-or-nothing, never compacted, sparse,
-or filled with artificial nulls. Internal paths remain inaccessible. Session-bearing grants cannot read
-through these ports. Unknown declared-path failures and canonical redaction are
+or filled with artificial nulls. Internal paths remain inaccessible. Session lifecycle
+permissions add no read privilege; ordinary grants still govern these ports. Unknown declared-path failures and canonical redaction are
 not suppressed by defaults. No secret reference or raw schema data is exposed.
 
 `forIdentity(...).validate(relativeSegments)` synchronously validates an exact registered
@@ -319,8 +319,9 @@ host/policy checks finish before any provider effect. Before/after branch eviden
 retains stricter old policies and destructive descendant restrictions. Patch policy
 does not require authority over unchanged siblings carried in its anchor payload.
 Sensitive writes require explicit sensitive grants, roles and host approval, without
-implicitly granting sensitive reads. References, direct internal/instance storage paths, sessions, promotion and
-emergency policies remain unavailable. Ceiling metadata still rejects at startup.
+implicitly granting sensitive reads. References, direct internal/instance storage paths
+and promotion remain unavailable. Checked root-owned sessions can satisfy the existing
+emergency change policy, never schema admission or visibility. Ceiling metadata still rejects at startup.
 
 Canonical admission validates the full raw candidate layer and prospective effective
 configuration for every loaded identity sharing the selected binding, using the same
@@ -453,3 +454,74 @@ errors. Readiness callback failure fences queued work and cleans every acquired
 owned hook after settlement, preserving sanitized primary errors; borrowed hooks
 are never closed. Keep host/controller references private: this is not a sandbox
 against arbitrary same-realm code with access to the composition root.
+
+## Shared ephemeral sessions
+
+Add exactly one `{ kind: "session", layer: "incident" }` slot at the desired position
+in `options.layers` (the name is host-defined). It has no provider IDs. Supply
+`host.sessions = { defaultDurationMs, maxDurationMs, maxActiveSessions, timer? }`;
+durations are positive integer milliseconds at most 2,147,483,647. Configure
+`authConfig.sessionLayer` to that same name and explicitly set
+`authConfig.elevatedSessionMode = "emergency-override"`. No implicit session slot,
+unlimited lifetime, elevated default or generic provider registration is created.
+
+The host mints immutable principal `sessionPermissions`: `read`, `activate`,
+`extend`, `deactivate`, `emergency`, `manage`. These are independent of
+`schemaPermissions`, roles and ordinary complete configuration grants. Every
+operation also needs the exact environment, ordered scope tuple, namespace, layer
+and view grant and current host approval. Management across creator tokens needs
+explicit `manage` plus the operation permission and complete scoped grants.
+A new token with the same principal name does not inherit ownership.
+
+```ts
+const sessions = controller.forSessions(capability);
+const started = await sessions.activate({
+  identity, namespace, reason: "Investigate incident", durationMs: 60_000,
+  emergency: false,
+});
+if (started.ok) {
+  await controller.forMutations(capability).apply([{
+    identity, namespace, path: enabledPath, layer: "incident",
+    sessionId: started.value.id, operation: "set", value: false,
+  }]);
+  const metadata = sessions.get(started.value.id); // synchronous, no values/tokens
+  const active = sessions.list();                 // authorized active entries only
+  await sessions.extend({ sessionId: started.value.id, durationMs: 120_000 });
+  await sessions.deactivate({ sessionId: started.value.id });
+}
+```
+
+The five-method port has no data writer or provider getter. `sessionId` on `apply`
+is only a selector: wrong root/creator/tuple/view/layer, missing selectors and
+selectors on persistent layers reject before effects. Actor comes from the issued
+capability, never activation input. Metadata includes reason, creator, timestamps
+and an advisory follow-up deadline 24 hours after activation, not overrides or
+durable-audit claims. Lifecycle host callbacks use `session-activate`,
+`session-extend`, `session-deactivate` and synchronous `session-read` requests.
+Automatic expiry, revocation and disposal are not vetoable authorization requests;
+their host audit records carry the root-generated deactivation `cause`.
+
+Sessions are **shared configuration** for the exact target, not private preferences.
+All otherwise authorized readers observe them without a reader session selector.
+Within the configured slot, later activation wins; extension does not reorder.
+Removal reveals the next session then ordinary layers. View paths use the existing
+compiler, schema and resolver. Emergency sessions can satisfy only supported
+session/change-policy restrictions. All other grants, roles, visibility, reference
+taint, admission and promotion restrictions remain; ceilings are still unsupported.
+
+The existing `config-sessions` controller owns each entry store, lease and timer.
+Root state holds references and immutable confinement facts only. Creator expiry
+caps the lease. Deadline/revocation immediately ends eligibility for **new dispatch**,
+but effective fallback is a serialized publication on the existing queue. If an
+accepted operation is awaiting provider IO, readers retain the last published
+generation until it settles and fallback publishes. Accepted effects retain honest
+receipts; expiry is not rollback or hard-real-time value removal. Session changes
+use the same reader event/restart path, with `cause: "session"` for lifecycle changes;
+empty activation/extension emits no effective-value event.
+
+Write uncertainty stays sticky: activation, extension and new writes reject, while
+internal cleanup/manual removal may publish fallback from retained observations.
+Schema uncertainty discards owned sessions without exposing payload or clearing the
+fence. Disposal cancels timers before draining accepted work, then clears owned
+controllers without disposing borrowed ordinary providers. Sessions never persist
+into backing files or survive root recreation. No HTTP/SSE/SCOMP endpoint is added.

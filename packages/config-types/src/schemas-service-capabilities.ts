@@ -103,7 +103,14 @@ const changeCommon = {
   path: configurationNamespaceSchema,
   previousRevision: nonempty,
   revision: nonempty,
-  cause: z.enum(["mutation", "schema", "reload", "external", "reconcile"]),
+  cause: z.enum([
+    "mutation",
+    "schema",
+    "reload",
+    "external",
+    "reconcile",
+    "session",
+  ]),
 };
 export const configurationReaderChangeSchema = serviceDataBoundary(
   z.discriminatedUnion("kind", [

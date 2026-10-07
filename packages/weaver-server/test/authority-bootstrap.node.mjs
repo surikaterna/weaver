@@ -211,3 +211,13 @@ test("storage failures are sanitized and not retried", async () => {
   });
   assert.deepEqual(provider.calls, ["load"]);
 });
+test("session slots never supply persistent registry bindings", async () => {
+  const provider = new ReceiverProvider(), input = configuration(provider);
+  input.layers.push({ kind: "session", layer: "incident" });
+  const load = captureAuthorityRegistryLoader(input, selection);
+  assert.deepEqual(provider.calls, []);
+  assert.throws(() => captureAuthorityRegistryLoader(input, { providerId: "ephemeral", layer: "incident" }), { code: "VALIDATION_ERROR" });
+  assert.deepEqual(provider.calls, []);
+  await load();
+  assert.deepEqual(provider.calls, ["load"]);
+});

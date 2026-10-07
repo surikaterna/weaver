@@ -162,6 +162,7 @@ async function execute(
     state.schemaFence = Object.freeze([
       plan.storage?.target.selection.captured.binding.id ?? "registry",
     ]);
+    disposeSessions(state);
     await auditWrite(state, ticket, "unknown");
     return {
       success: false,
@@ -193,3 +194,5 @@ function preparePublication(
   rejectCeilings(request.schema);
   return stageSchemaPublication(state, prepared);
 }
+
+import { disposeSessions } from "./session-lifecycle";

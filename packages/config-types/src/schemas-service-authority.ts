@@ -7,6 +7,7 @@ import {
   configurationViewIdSchema,
 } from "./schemas-service-paths";
 import { schemaAuthorizationRequestSchema } from "./schemas-service-schema-authority";
+import { sessionAuthorizationRequestSchema } from "./schemas-service-sessions";
 import type {
   ConfigurationAuthorityCapability,
   ConfigurationAuthorityController,
@@ -44,11 +45,17 @@ export const trustedPrincipalSnapshotSchema = serviceDataBoundary(
         .array(z.enum(["read", "register"]))
         .readonly()
         .optional(),
-      session: z
-        .strictObject({
-          mode: z.string().min(1),
-          overrideReason: z.string().min(1),
-        })
+      sessionPermissions: z
+        .array(
+          z.enum([
+            "read",
+            "activate",
+            "extend",
+            "deactivate",
+            "emergency",
+            "manage",
+          ]),
+        )
         .readonly()
         .optional(),
       expiresAt: z.number().finite().optional(),
@@ -79,6 +86,7 @@ export const configurationAuthorizationRequestSchema = serviceDataBoundary(
         namespace: canonicalConfigurationPathSchema,
         path: canonicalConfigurationPathSchema,
         mutation: z.enum(["set", "remove", "patch"]),
+        sessionId: z.string().uuid().optional(),
       })
       .readonly(),
   ]),
@@ -86,6 +94,7 @@ export const configurationAuthorizationRequestSchema = serviceDataBoundary(
 export const authorizationRequestSchema = z.union([
   configurationAuthorizationRequestSchema,
   schemaAuthorizationRequestSchema,
+  sessionAuthorizationRequestSchema,
 ]);
 export const configurationAuthorityAuditRecordSchema = serviceDataBoundary(
   z
@@ -120,5 +129,6 @@ export const configurationAuthorityControllerSchema = serviceDataBoundary(
     forIdentity: callable<ConfigurationAuthorityController["forIdentity"]>(),
     forSchemas: callable<ConfigurationAuthorityController["forSchemas"]>(),
     forMutations: callable<ConfigurationAuthorityController["forMutations"]>(),
+    forSessions: callable<ConfigurationAuthorityController["forSessions"]>(),
   }),
 );

@@ -19,7 +19,7 @@ export function readerLayers(
   return state.factory.options.layers
     .filter(
       (slot) =>
-        slot.kind === "fixed" || selection.identity.scopePath.length > 0,
+        slot.kind !== "scope" || selection.identity.scopePath.length > 0,
     )
     .map((slot) => slot.layer);
 }
@@ -36,9 +36,8 @@ export function captureReaderSelection(
   if (!parsed.success) return forbidden();
   const selection = parsed.data;
   if (
-    principal.session ||
     selection.identity.environment !==
-      state.factory.options.identity.environment
+    state.factory.options.identity.environment
   )
     return forbidden();
   const layers = readerLayers(state, selection);

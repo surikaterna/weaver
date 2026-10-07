@@ -1,94 +1,89 @@
 # @weaver-conf/config-sessions
 
-> Override session provider with expiration, audit logging, and ephemeral storage for Weaver.
-
-## Installation
-
-```bash
-pnpm add @weaver-conf/config-sessions
-```
-
-## Overview
-
-`@weaver-conf/config-sessions` provides time-bounded override sessions for the Weaver configuration system. An override session allows temporary configuration changes that automatically expire after a configurable duration. All session lifecycle events (activate, deactivate, extend, expire) can be audited via a callback.
-
-The session controller manages an ephemeral in-memory storage provider that integrates directly into `createConfigurationService()`. When a session expires, all overrides are automatically cleared. This is the runtime backing for `Layers.Ephemeral("session")` in a Weaver layer stack.
-
-## Usage
-
-### Creating and using an override session
+Time-bounded, ephemeral storage with one metadata owner and one expiration timer
+per controller. This is a trusted storage/lifecycle domain, **not** an authenticated
+application session manager. Supplying an actor or owning this standalone controller
+does not issue any configuration-service capability.
 
 ```typescript
-import { defineWeaver, Layers, replaceOnly } from "@weaver-conf/config-types";
 import { createOverrideSessionProvider } from "@weaver-conf/config-sessions";
-import { createConfigurationService } from "@weaver-conf/config-providers";
 
-const weaver = defineWeaver([
-  Layers.Static("core"),
-  Layers.Static("tenant"),
-  Layers.Ephemeral("session", { merge: replaceOnly }),
-] as const);
-
-const sessionController = createOverrideSessionProvider({
-  layer: "session",
-  defaultDurationMs: 4 * 60 * 60 * 1000, // 4 hours
-  onAudit: (entry) => console.log(`[audit] ${entry.action}:`, entry.sessionId),
+const controller = createOverrideSessionProvider({
+  layer: "incident-overrides",
+  defaultDurationMs: 60_000,
+  maxDurationMs: 300_000,
+  onAudit(entry) { console.log(entry.action, entry.sessionId); },
 });
-
-const service = await createConfigurationService({
-  providers: [coreProvider, tenantProvider],
-  weaverConfig: weaver,
-  session: sessionController,
-});
+controller.activate({ activatedBy: "trusted-host", reason: "Investigate incident" });
+await controller.provider.write("app.feature.enabled", true);
+// load().entries is { app: { feature: { enabled: true } } }, not a flat key map.
+controller.extend(120_000); // deadline is now + duration, not old deadline + duration
+controller.deactivate();
+controller.dispose();
 ```
 
-### Session lifecycle
+## Clock, lease and queued expiry
 
-```typescript
-// Activate a session
-const session = sessionController.activate({
-  reason: "Emergency: investigating production issue",
-  durationMs: 2 * 60 * 60 * 1000, // 2 hours
-});
-// session: { id, activatedAt, expiresAt, isActive, overrides, ... }
+`now` defaults to `Date.now`. An optional `timer` implements only
+`setTimeout(callback, milliseconds)` and `clearTimeout(handle)`; class receivers
+are preserved. Tests can inject a clock and a manual timer without changing globals.
+Durations must be positive integers at most 2,147,483,647 milliseconds, and no
+greater than `maxDurationMs`. An optional immutable `expiresAtLimit` caps every
+activation/extension deadline (the root supplies creator capability expiry). The
+standalone default duration remains four hours. `cancelExpiry()` cancels the owned
+wakeup without clearing entries so a host can drain accepted work before disposal;
+it is not a way to extend eligibility past the deadline.
 
-// Write overrides through the config service
-service.set("app.security.rateLimitRps", 1000, "session");
+At the deadline, `isActive()` and snapshot `isActive` become false immediately.
+New writes, removes and extensions reject even if the timer has not run. Invalid
+or throwing clocks fail closed. Expired entries may still be present pending
+serialized cleanup: eligibility and published configuration are different facts.
 
-// Extend the session
-sessionController.extend(1 * 60 * 60 * 1000); // +1 hour
+Without `onExpiryRequested`, the timer commits cleanup directly. With this hook,
+the timer supplies `{ sessionId, expiresAt, lease }` and leaves entries unchanged.
+The trusted host queues its fallback staging, then calls `commitExpiry(intent)`.
+The method checks the exact lease and deadline; stale, early, replaced and repeated
+intents cannot clear a current session. An early timer wake rearms only the remaining
+delay. A failed expiry callback cannot grant eligibility or erase queued data.
+The hook is responsible for arranging eventual cleanup; there is no retry loop.
 
-// Check session state
-sessionController.isActive();   // true
-sessionController.getSession(); // current session snapshot
+This hook is the integration seam for a root's existing operation queue. No root
+session management port or new endpoint is supplied by this package. A root must
+perform its own capability/grant checks and publish fallback through its existing
+publication transaction. Already accepted provider operations are not rolled back
+by a later deadline.
 
-// Manually deactivate (clears all overrides)
-const result = sessionController.deactivate();
-// { sessionId, deactivatedAt, overridesCleared: 1, auditRecorded: true }
+## Storage and audit
 
-// Sessions also auto-expire after their duration
-```
+The provider uses the existing engine's storage path codec and `deepSet`/`deepRemove`.
+Bracket-protected literal dotted keys and Unicode keys remain addressable. Array
+values and nested objects are detached on input, load and session snapshots.
+Reserved paths and accessor-backed values reject without changing entries. Rejected
+writes return a failed native `WriteResult`, not an exception implying unknown effects.
+There is no persistence, required flush, external watch or recovery claim.
 
-### Cleanup
+Audit callbacks receive activate/extend/deactivate/expire events. Throws and rejected
+promises cannot interrupt cleanup or falsify a completed transition. The standalone
+legacy `auditRecorded` field acknowledges only a callback that returned `undefined`
+synchronously; it is false for absent, throwing or asynchronous callbacks and **does
+not prove durable audit persistence**. `overridesCleared` counts top-level stored
+entries, not descendants. Disposal is terminal and idempotent.
 
-```typescript
-// Dispose clears timers and deactivates any active session
-sessionController.dispose();
-```
+## Native contracts
 
-## API Reference
+The factory exports `OverrideSessionController`, `OverrideSessionProviderOptions`,
+`SessionTimer`, `SessionExpiryIntent` and their native Zod schemas. Activation uses
+the existing `SessionActivationRequest`/`sessionActivationRequestSchema` from
+`config-types`; ignored `elevatedAuth` fields are rejected rather than treated as
+authority. Controller schemas check shape only; parsing never authenticates a host.
 
-| Export | Description |
-|---|---|
-| `createOverrideSessionProvider(options?)` | Create a session controller with ephemeral storage provider |
+## Migration
 
-### Types
-
-| Type | Description |
-|---|---|
-| `OverrideSessionController` | Controller: activate, deactivate, extend, getSession, isActive, provider, dispose |
-| `OverrideSessionProviderOptions` | Options: layer, id, defaultDurationMs, onAudit, timer |
-| `AuditEntry` | Audit event: action, sessionId, timestamp, details |
+Flat records such as `{ "app.feature": true }` are now nested `{ app: { feature: true } }`.
+Use bracket syntax for a literal dotted segment. Inactive writes no longer seed a
+future session. Expired sessions cannot be extended or resurrected. Native Node
+tests replace this package's prior implicit Vitest globals, retaining its lifecycle,
+storage, audit, default/custom duration, actor and cleanup assertions.
 
 ## License
 

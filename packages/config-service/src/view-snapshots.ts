@@ -85,6 +85,7 @@ export function stageViews(
   ready: ReadonlyMap<string, IdentitySnapshot>,
   registry: RegistryProjectionReader,
   strict: boolean,
+  validate = strict,
 ): Map<string, PreparedView> {
   const staged = new Map(views);
   for (const [key, previous] of views) {
@@ -92,7 +93,7 @@ export function stageViews(
     if (!base || previous.base === base) continue;
     const selection = previous.selection;
     try {
-      const snapshot = deriveView(base, selection, registry, strict);
+      const snapshot = deriveView(base, selection, registry, validate);
       staged.set(
         key,
         Object.freeze({ selection, base, status: "ready", snapshot }),

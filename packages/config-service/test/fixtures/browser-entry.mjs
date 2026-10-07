@@ -29,6 +29,7 @@ export async function exercise() {
 }
 
 export async function exerciseWrites() {
+  await exerciseSessions();
   await exercisePublication();
   await exerciseHost();
   exerciseMutationPreparation();
@@ -80,6 +81,33 @@ export async function exerciseWrites() {
     controller.revoke(schemaToken);
     let denied = false; try { schemas.snapshot(); } catch (error) { denied = error.code === "FORBIDDEN"; }
     if (!denied) throw Error("revoked schema token exposed metadata");
+  } finally { await root.dispose(); }
+}
+
+async function exerciseSessions() {
+  let controller;
+  const identity = { environment: "test", scopePath: [] };
+  const provider = { id: "base", layer: "base", writable: false,
+    async load() { return { entries: { example: { enabled: true } } }; },
+    async write() { throw Error("unexpected storage write"); }, async remove() { throw Error("unexpected storage remove"); } };
+  const root = await service.createConfigurationService({ identity,
+    schemas: [{ serviceId: "example", environment: "test", owner: { name: "host", contact: "host@example.org" }, fragmentSlots: [], schema: { type: "object", properties: { enabled: { type: "boolean" } } } }],
+    layers: [{ kind: "fixed", layer: "base", providerIds: [provider.id] }, { kind: "session", layer: "incident" }],
+    providers: [{ id: provider.id, layer: provider.layer, provider, environment: { kind: "common" }, operation: { kind: "load" }, ownership: { kind: "borrowed" } }],
+  }, {
+    sessions: { defaultDurationMs: 60000, maxDurationMs: 60000, maxActiveSessions: 2 },
+    authConfig: { weaverConfig: defineWeaver([Layers.Static("base"), Layers.Static("incident")]), sessionLayer: "incident", elevatedSessionMode: "emergency-override", visibilityRoles: { admin: new Set(), platform: new Set() }, layerWritePolicies: [{ layer: "incident", allowedRoles: ["editor"] }], dynamicScopeRoles: new Set() },
+    hostAuthority: { authorizeReadSync: () => "allowed", authorizeWrite: async () => "allowed" }, onAuthorityReady(value) { controller = value; },
+  });
+  try {
+    const token = controller.mint({ principalId: "verified", roles: ["editor"], sessionPermissions: ["read", "activate", "extend", "deactivate"], grants: [{ identity, namespace: "/example", operations: ["read", "inspect", "write"], layers: ["base", "incident"], views: [], sensitive: false }] });
+    const sessions = controller.forSessions(token), reader = controller.forIdentity(token, { identity, namespace: "/example" });
+    const activated = await sessions.activate({ identity, namespace: "/example", reason: "browser", emergency: false });
+    if (!activated.ok || sessions.list().length !== 1) throw Error("session activation failed");
+    const result = await controller.forMutations(token).apply([{ identity, namespace: "/example", layer: "incident", sessionId: activated.value.id, operation: "set", path: "/example/enabled", value: false }]);
+    if (!result.success || reader.get(["enabled"]) !== false) throw Error("session apply failed");
+    if (!(await sessions.extend({ sessionId: activated.value.id })).ok) throw Error("session extension failed");
+    if (!(await sessions.deactivate({ sessionId: activated.value.id })).ok || reader.get(["enabled"]) !== true) throw Error("session fallback failed");
   } finally { await root.dispose(); }
 }
 

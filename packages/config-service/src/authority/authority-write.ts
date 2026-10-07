@@ -7,13 +7,16 @@ import {
   type TrustedPrincipalSnapshot,
 } from "@weaver-conf/config-types";
 import type { LoadedContribution } from "../hydration";
+import type { IdentitySnapshot } from "../identity-snapshots";
 import { currentIdentity } from "../identity-state";
 import type { RootState } from "../root-state";
 import { invokeWriteHook } from "./authority-audit";
 import { selectGrant } from "./authorization-requests";
 import { validateMutationSelection } from "./mutation-capture";
+import { checkedSessionMutation } from "./session-mutations";
 
 export interface MutationTicket {
+  readonly token: unknown;
   readonly commands: readonly ConfigurationMutationCommand[];
   readonly principal: TrustedPrincipalSnapshot;
   readonly auth: AuthFunctions;
@@ -45,10 +48,36 @@ export function mutationTarget(
     );
   if (snapshot.degradedProviders.length)
     throw createWeaverError("SERVER_DEGRADED", "Configuration is degraded");
+  return selectMutationBinding(state, ticket, command, snapshot);
+}
+
+function selectMutationBinding(
+  state: RootState,
+  ticket: MutationTicket,
+  command: ConfigurationMutationCommand,
+  snapshot: IdentitySnapshot,
+): LoadedContribution {
   const slot = state.factory.options.layers.find(
     (item) => item.layer === command.layer,
   );
   if (!slot) throw createWeaverError("NOT_FOUND", "Mutation layer unavailable");
+  if (slot.kind === "session") {
+    const ref = checkedSessionMutation(state, ticket, command);
+    const target = snapshot.contributions.find(
+      (item) => item.selection.captured === ref.selection.captured,
+    );
+    if (!target?.layer)
+      throw createWeaverError(
+        "WRITE_UNAVAILABLE",
+        "Session contribution unavailable",
+      );
+    return target;
+  }
+  if (command.sessionId !== undefined)
+    throw createWeaverError(
+      "FORBIDDEN",
+      "Session selector requires session layer",
+    );
   if ((slot.kind === "fixed") !== (command.identity.scopePath.length === 0))
     throw createWeaverError("FORBIDDEN", "Mutation binding denied");
   const target = snapshot.contributions
@@ -71,6 +100,9 @@ export function mutationRequest(
     layer: command.layer,
     operation: "write",
     mutation: command.operation,
+    ...(command.sessionId === undefined
+      ? {}
+      : { sessionId: command.sessionId }),
     sensitive,
     ...(command.viewId === undefined ? {} : { viewId: command.viewId }),
   });

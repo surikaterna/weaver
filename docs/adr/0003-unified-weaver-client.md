@@ -65,6 +65,17 @@ ownership and revision-bounded restart acknowledgement use the same FIFO. Neithe
 reload nor acknowledgement clears uncertainty. These are core capabilities, not an
 HTTP/SSE/SCOMP feed or a migrated SDK cache; those integrations remain separate work.
 
+`weaver-0b81.8` integrates shared ephemeral contributions at an explicit configured
+session slot. The existing `config-sessions` domain remains the sole entry/metadata/
+lease/timer owner; root-local references and issued capabilities provide confinement.
+The only lifecycle port is `forSessions(capability)`; data still uses `apply` with
+a checked selector. Deadline/revocation cuts off new dispatch immediately while
+effective fallback waits on the same serialized publication queue. It is not a
+rollback of already accepted effects. Emergency membership never relaxes ordinary
+grants, visibility or schema admission, and ceilings remain separate work. Native
+feature tests replace the unwired server session map/sweeper before its removal;
+no compatibility facade or network endpoint is introduced.
+
 Browser clients need synchronous local reads and optional offline persistence. Backend
 services need layer-targeted writes, schema metadata, and restart detection. Both use
 the same transport-backed client, but a prior design also made local Zod declarations

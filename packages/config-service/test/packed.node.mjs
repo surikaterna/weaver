@@ -7,9 +7,10 @@ import { withConsumer } from "./fixtures/packed-consumer.mjs";
 import { strictDeclarations } from "./fixtures/packed-declarations.mjs";
 import { browserProof } from "./fixtures/packed-browser.mjs";
 import { filesystemProof } from "./fixtures/packed-filesystem.mjs";
+import { packedSessions } from "./fixtures/packed-sessions.mjs";
 
 test("real packed public ESM/CJS root, strict NodeNext/Bundler, full browser graph and injected filesystem", async () => {
-  await withConsumer(async (directory) => { await strictDeclarations(directory); await browserProof(directory); await filesystemProof(directory); });
+  await withConsumer(async (directory) => { await strictDeclarations(directory); await browserProof(directory); await filesystemProof(directory); await packedSessions(directory); });
 });
 test("consumer setup and callback failures preserve original errors and only clean allocated ownership", async () => {
   const parent = await mkdtemp(join(tmpdir(), "hydration-owned-"));

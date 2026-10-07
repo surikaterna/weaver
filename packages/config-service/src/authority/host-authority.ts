@@ -10,6 +10,8 @@ import { createReadCheck } from "./authority-read";
 import { createCapabilityRegistry } from "./capability-registry";
 import { createMutationAuthority } from "./governed-write";
 import { createSchemaAuthority } from "./schema-authority";
+import { createSessionAuthority } from "./session-authority";
+import { revokeSessions } from "./session-lifecycle";
 
 type Prepare = (
   identity: ConfigurationServiceIdentity,
@@ -21,6 +23,7 @@ export function createHostAuthority(state: RootState, prepare: Prepare) {
   const registry = createCapabilityRegistry(
     () => assertLive(state),
     host.now ?? Date.now,
+    (token) => revokeSessions(state, token),
   );
   const auth = withAuth(host.authConfig);
   const execution = {
@@ -39,6 +42,8 @@ export function createHostAuthority(state: RootState, prepare: Prepare) {
     forMutations: (token) =>
       createMutationAuthority(state, registry, auth, token),
     forSchemas: (token) => createSchemaAuthority(state, registry, token),
+    forSessions: (token) =>
+      createSessionAuthority(state, registry, token, auth),
     forIdentity: (token, selection) =>
       createConfigurationReader(execution, token, selection),
   });

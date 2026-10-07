@@ -13,6 +13,7 @@ import type {
   ConfigurationReaderSelection,
 } from "./service-readers";
 import type { ConfigurationSchemaAuthorityRequest } from "./service-schema-authority";
+import type { ConfigurationSessionAuthority } from "./service-sessions";
 
 export type AuthorityGrant = z.infer<typeof authorityGrantSchema>;
 export type TrustedPrincipalSnapshot = z.infer<
@@ -34,6 +35,9 @@ export interface ConfigurationAuthorityCapability {
 }
 
 export interface ConfigurationAuthorityController {
+  forSessions(
+    capability: ConfigurationAuthorityCapability,
+  ): ConfigurationSessionAuthority;
   forMutations(
     capability: ConfigurationAuthorityCapability,
   ): ConfigurationMutationAuthority;

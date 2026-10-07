@@ -1,374 +1,182 @@
-import { createOverrideSessionProvider } from "../src/override-session-provider.ts";
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { createOverrideSessionProvider } from "../dist/index.js";
+import { ManualClock } from "./manual-clock.mjs";
 
-// Fake timer that allows manual triggering of scheduled callbacks
-function createFakeTimer() {
-  let callback = null;
-  let scheduledMs = null;
-  let cleared = false;
-  let timeoutId = 1;
-
-  return {
-    impl: {
-      setTimeout(fn, ms) {
-        callback = fn;
-        scheduledMs = ms;
-        cleared = false;
-        return timeoutId++;
-      },
-      clearTimeout(_id) {
-        callback = null;
-        scheduledMs = null;
-        cleared = true;
-      },
-    },
-    fire() {
-      if (callback !== null && !cleared) {
-        const fn = callback;
-        callback = null;
-        fn();
-      }
-    },
-    get scheduledMs() {
-      return scheduledMs;
-    },
-    get wasCleared() {
-      return cleared;
-    },
-  };
+function fixture(options = {}) {
+  const clock = new ManualClock();
+  const audits = [];
+  const controller = createOverrideSessionProvider({
+    now: clock.now, timer: clock, onAudit: (entry) => { audits.push(entry); }, ...options,
+  });
+  return { controller, clock, audits };
 }
 
-test("activate creates session with correct metadata", () => {
-  const controller = createOverrideSessionProvider({
-    timer: createFakeTimer().impl,
-  });
-
+test("activation metadata, default actor, empty overrides, query and eligibility", () => {
+  const { controller, clock } = fixture();
+  assert.equal(controller.getSession(), null);
+  assert.equal(controller.isActive(), false);
   const session = controller.activate({ reason: "debugging" });
-
-  expect(session.id).toBeTruthy();
-  expect(session.activatedAt).toBeTruthy();
-  expect(session.expiresAt).toBeTruthy();
-  expect(session.activatedBy).toBe("system");
-  expect(session.reason).toBe("debugging");
-  expect(session.isActive).toBe(true);
-  expect(session.overrides).toEqual({});
-
+  assert.match(session.id, /^[0-9a-f-]{36}$/);
+  assert.equal(session.activatedAt, new Date(clock.time).toISOString());
+  assert.equal(session.expiresAt, new Date(clock.time + 14400000).toISOString());
+  assert.equal(session.activatedBy, "system");
+  assert.equal(session.reason, "debugging");
+  assert.equal(session.isActive, true);
+  assert.equal(controller.isActive(), true);
+  assert.deepEqual(session.overrides, {});
+  assert.deepEqual(controller.getSession(), session);
+  assert.equal(clock.delay, 14400000);
   controller.dispose();
 });
 
-test("activate rejects when session already active", () => {
-  const controller = createOverrideSessionProvider({
-    timer: createFakeTimer().impl,
-  });
-
-  controller.activate({ reason: "first" });
-
-  expect(() => controller.activate({ reason: "second" })).toThrow(
-    "Session already active",
-  );
-
+test("explicit actor and double activation rejection preserve current session", () => {
+  const { controller } = fixture();
+  const first = controller.activate({ activatedBy: "admin", reason: "test" });
+  assert.equal(first.activatedBy, "admin");
+  assert.throws(() => controller.activate({ reason: "again" }), /Session already active/);
+  assert.deepEqual(controller.getSession(), first);
   controller.dispose();
 });
 
-test("deactivate clears overrides and returns count", async () => {
-  const controller = createOverrideSessionProvider({
-    timer: createFakeTimer().impl,
-    onAudit: () => {},
-  });
+test("inactive deactivate and extend reject", () => {
+  const { controller } = fixture();
+  assert.throws(() => controller.deactivate(), /No active session/);
+  assert.throws(() => controller.extend(), /No active session/);
+});
 
+test("provider defaults and nested write/load/remove are the canonical storage dialect", async () => {
+  const { controller } = fixture();
   controller.activate({ reason: "test" });
-  await controller.provider.write("key1", "val1");
-  await controller.provider.write("key2", "val2");
-
-  const result = controller.deactivate();
-
-  expect(result.overridesCleared).toBe(2);
-  expect(result.sessionId).toBeTruthy();
-  expect(result.deactivatedAt).toBeTruthy();
-  expect(result.auditRecorded).toBe(true);
-
-  // Storage should be empty after deactivation
-  const data = await controller.provider.load();
-  expect(data.entries).toEqual({});
-});
-
-test("deactivate rejects when no active session", () => {
-  const controller = createOverrideSessionProvider({
-    timer: createFakeTimer().impl,
-  });
-
-  expect(() => controller.deactivate()).toThrow("No active session");
-});
-
-test("extend resets timer and updates expiresAt", () => {
-  const fakeTimer = createFakeTimer();
-  const controller = createOverrideSessionProvider({
-    timer: fakeTimer.impl,
-    defaultDurationMs: 60_000,
-  });
-
-  const original = controller.activate({ reason: "test" });
-  const originalExpires = new Date(original.expiresAt).getTime();
-
-  // Extend with a longer duration
-  const extended = controller.extend(120_000);
-  const extendedExpires = new Date(extended.expiresAt).getTime();
-
-  expect(extendedExpires > originalExpires).toBeTruthy();
-  expect(extended.id).toBe(original.id);
-
-  controller.dispose();
-});
-
-test("extend rejects when no active session", () => {
-  const controller = createOverrideSessionProvider({
-    timer: createFakeTimer().impl,
-  });
-
-  expect(() => controller.extend()).toThrow("No active session");
-});
-
-test("provider implements ConfigurationStorageProvider (read/write/remove)", async () => {
-  const controller = createOverrideSessionProvider({
-    timer: createFakeTimer().impl,
-  });
-
-  controller.activate({ reason: "test" });
-
   const { provider } = controller;
-
-  // Verify provider interface — defaults
-  expect(provider.id).toBe("override-session");
-  expect(provider.layer).toBe("session");
-  expect(provider.writable).toBe(true);
-
-  // Write
-  const writeResult = await provider.write("example.app.theme", "dark");
-  expect(writeResult.success).toBe(true);
-
-  // Read
-  const data = await provider.load();
-  expect(data.entries["example.app.theme"]).toBe("dark");
-
-  // Remove
-  const removeResult = await provider.remove("example.app.theme");
-  expect(removeResult.success).toBe(true);
-
-  const dataAfter = await provider.load();
-  expect(dataAfter.entries["example.app.theme"]).toBe(undefined);
-
+  assert.equal(provider.id, "override-session");
+  assert.equal(provider.layer, "session");
+  assert.equal(provider.writable, true);
+  assert.equal(typeof provider.write, "function");
+  assert.equal(typeof provider.remove, "function");
+  assert.equal((await provider.write("example.app.theme", "dark")).success, true);
+  assert.deepEqual((await provider.load()).entries, { example: { app: { theme: "dark" } } });
+  assert.equal((await provider.remove("example.app.theme")).success, true);
+  assert.deepEqual((await provider.load()).entries, { example: { app: {} } });
+  await provider.write("feature.x", true);
+  assert.equal((await provider.load()).entries.feature.x, true);
+  await provider.write("k", "v");
+  assert.equal((await provider.remove("k")).success, true);
+  assert.equal((await provider.load()).entries.k, undefined);
   controller.dispose();
 });
 
-test("session overrides are cleared on deactivate", async () => {
-  const controller = createOverrideSessionProvider({
-    timer: createFakeTimer().impl,
-  });
-
+test("custom provider ID and layer", () => {
+  const { controller } = fixture({ layer: "custom-session", id: "my-session-provider" });
   controller.activate({ reason: "test" });
+  assert.equal(controller.provider.id, "my-session-provider");
+  assert.equal(controller.provider.layer, "custom-session");
+  controller.dispose();
+});
+
+test("deactivate returns ID/time/count, clears storage and emits one audit", async () => {
+  const { controller, clock, audits } = fixture();
+  const session = controller.activate({ reason: "test" });
   await controller.provider.write("a", 1);
   await controller.provider.write("b", 2);
   await controller.provider.write("c", 3);
-
-  // Session should track overrides
-  const session = controller.getSession();
-  expect(session.overrides).toEqual({ a: 1, b: 2, c: 3 });
-
-  controller.deactivate();
-
-  // Provider storage should be empty
-  const data = await controller.provider.load();
-  expect(data.entries).toEqual({});
+  assert.deepEqual(controller.getSession().overrides, { a: 1, b: 2, c: 3 });
+  const result = controller.deactivate();
+  assert.equal(result.sessionId, session.id);
+  assert.equal(result.deactivatedAt, new Date(clock.time).toISOString());
+  assert.equal(result.overridesCleared, 3);
+  assert.equal(result.auditRecorded, true);
+  assert.equal(controller.isActive(), false);
+  assert.equal(controller.getSession(), null);
+  assert.deepEqual((await controller.provider.load()).entries, {});
+  assert.equal(clock.tasks.size, 0);
+  assert.deepEqual(audits.map((a) => a.action), ["activate", "deactivate"]);
 });
 
-test("auto-expire triggers deactivation after timer fires", async () => {
-  const fakeTimer = createFakeTimer();
-  const auditLog = [];
-  const controller = createOverrideSessionProvider({
-    timer: fakeTimer.impl,
-    defaultDurationMs: 5_000,
-    onAudit: (entry) => auditLog.push(entry),
-  });
-
-  controller.activate({ reason: "test" });
-  await controller.provider.write("key", "value");
-
-  expect(controller.isActive()).toBe(true);
-
-  // Fire the expiration timer
-  fakeTimer.fire();
-
-  expect(controller.isActive()).toBe(false);
-  expect(controller.getSession()).toBe(null);
-
-  // Storage should be cleared
-  const data = await controller.provider.load();
-  expect(data.entries).toEqual({});
-
-  // Should have emitted expire audit
-  const expireEvent = auditLog.find((e) => e.action === "expire");
-  expect(expireEvent).toBeTruthy();
-  expect(expireEvent.details.overridesCleared).toBe(1);
-});
-
-test("audit events emitted for activate/deactivate/extend/expire", async () => {
-  const fakeTimer = createFakeTimer();
-  const auditLog = [];
-  const controller = createOverrideSessionProvider({
-    timer: fakeTimer.impl,
-    defaultDurationMs: 5_000,
-    onAudit: (entry) => auditLog.push(entry),
-  });
-
-  // activate
-  controller.activate({ reason: "audit-test" });
-  expect(auditLog.length).toBe(1);
-  expect(auditLog[0].action).toBe("activate");
-  expect(auditLog[0].sessionId).toBeTruthy();
-  expect(auditLog[0].timestamp).toBeTruthy();
-
-  // extend
-  controller.extend(10_000);
-  expect(auditLog.length).toBe(2);
-  expect(auditLog[1].action).toBe("extend");
-
-  // deactivate
-  controller.deactivate();
-  expect(auditLog.length).toBe(3);
-  expect(auditLog[2].action).toBe("deactivate");
-
-  // Re-activate then expire
-  controller.activate({ reason: "expire-test" });
-  fakeTimer.fire();
-  expect(auditLog.length).toBe(5); // +activate, +expire
-  expect(auditLog[4].action).toBe("expire");
-});
-
-test("dispose clears timer and deactivates", async () => {
-  const fakeTimer = createFakeTimer();
-  const auditLog = [];
-  const controller = createOverrideSessionProvider({
-    timer: fakeTimer.impl,
-    onAudit: (entry) => auditLog.push(entry),
-  });
-
-  controller.activate({ reason: "test" });
-  await controller.provider.write("k", "v");
-
-  controller.dispose();
-
-  expect(controller.isActive()).toBe(false);
-  expect(controller.getSession()).toBe(null);
-
-  // Should have emitted deactivate audit
-  const deactivateEvent = auditLog.find((e) => e.action === "deactivate");
-  expect(deactivateEvent).toBeTruthy();
-
-  // Timer should not fire after dispose (fire should be no-op)
-  fakeTimer.fire();
-  expect(controller.isActive()).toBe(false);
-});
-
-test("custom durationMs in activation request", () => {
-  const fakeTimer = createFakeTimer();
-  const controller = createOverrideSessionProvider({
-    timer: fakeTimer.impl,
-    defaultDurationMs: 60_000,
-  });
-
-  controller.activate({ reason: "custom", durationMs: 30_000 });
-
-  expect(fakeTimer.scheduledMs).toBe(30_000);
-
-  controller.dispose();
-});
-
-test("getSession returns null when no session, returns session when active", () => {
-  const controller = createOverrideSessionProvider({
-    timer: createFakeTimer().impl,
-  });
-
-  expect(controller.getSession()).toBe(null);
-
-  controller.activate({ reason: "test" });
-
-  const session = controller.getSession();
-  expect(session !== null).toBeTruthy();
-  expect(session.reason).toBe("test");
-  expect(session.isActive).toBe(true);
-
-  controller.dispose();
-});
-
-test("default duration is 4 hours", () => {
-  const fakeTimer = createFakeTimer();
-  const controller = createOverrideSessionProvider({
-    timer: fakeTimer.impl,
-  });
-
-  controller.activate({ reason: "test" });
-
-  expect(fakeTimer.scheduledMs).toBe(4 * 60 * 60 * 1000);
-
-  controller.dispose();
-});
-
-test("deactivate returns auditRecorded false when no onAudit", () => {
-  const controller = createOverrideSessionProvider({
-    timer: createFakeTimer().impl,
-  });
-
+test("empty deactivation and absent audit report zero/false", () => {
+  const { controller } = fixture({ onAudit: undefined });
   controller.activate({ reason: "test" });
   const result = controller.deactivate();
-
-  expect(result.auditRecorded).toBe(false);
+  assert.equal(result.overridesCleared, 0);
+  assert.equal(result.auditRecorded, false);
 });
 
-test("provider load returns snapshot (not live reference)", async () => {
-  const controller = createOverrideSessionProvider({
-    timer: createFakeTimer().impl,
-  });
+test("custom activation duration, extension resets from now and defaults to current duration", () => {
+  const { controller, clock } = fixture({ defaultDurationMs: 60000 });
+  const original = controller.activate({ reason: "test", durationMs: 30000 });
+  assert.equal(clock.delay, 30000);
+  clock.time += 5000;
+  const extended = controller.extend(120000);
+  assert.equal(extended.id, original.id);
+  assert.ok(Date.parse(extended.expiresAt) > Date.parse(original.expiresAt));
+  assert.equal(Date.parse(extended.expiresAt), clock.time + 120000);
+  assert.equal(clock.delay, 120000);
+  assert.equal(clock.tasks.size, 1);
+  clock.time += 100;
+  assert.equal(Date.parse(controller.extend().expiresAt), clock.time + 120000);
+  assert.equal(clock.delay, 120000);
+  controller.dispose();
+});
 
+test("standalone deadline expiration clears values and records expire count", async () => {
+  const { controller, clock, audits } = fixture({ defaultDurationMs: 5000 });
   controller.activate({ reason: "test" });
   await controller.provider.write("key", "value");
-
-  const data1 = await controller.provider.load();
-  data1.entries.key = "mutated";
-
-  const data2 = await controller.provider.load();
-  expect(data2.entries.key).toBe("value");
-
-  controller.dispose();
+  clock.time += 5000;
+  assert.equal(controller.isActive(), false);
+  clock.fire();
+  assert.equal(controller.getSession(), null);
+  assert.deepEqual((await controller.provider.load()).entries, {});
+  const event = audits.find((a) => a.action === "expire");
+  assert.equal(event.details.overridesCleared, 1);
+  assert.equal(event.timestamp, new Date(clock.time).toISOString());
 });
 
-test("extend without duration uses current duration", () => {
-  const fakeTimer = createFakeTimer();
-  const controller = createOverrideSessionProvider({
-    timer: fakeTimer.impl,
-    defaultDurationMs: 60_000,
-  });
-
-  controller.activate({ reason: "test", durationMs: 30_000 });
-  expect(fakeTimer.scheduledMs).toBe(30_000);
-
-  // Extend without specifying duration should use the current (30s)
-  controller.extend();
-  expect(fakeTimer.scheduledMs).toBe(30_000);
-
-  controller.dispose();
+test("all four audit actions, actor, session IDs, timestamps and reactivation", () => {
+  const { controller, clock, audits } = fixture({ defaultDurationMs: 5000 });
+  const first = controller.activate({ activatedBy: "admin", reason: "audit-test" });
+  controller.extend(10000);
+  controller.deactivate();
+  const next = controller.activate({ reason: "expire-test" });
+  assert.notEqual(next.id, first.id);
+  clock.time += 5000;
+  clock.fire();
+  assert.deepEqual(audits.map((a) => a.action), ["activate", "extend", "deactivate", "activate", "expire"]);
+  assert.equal(audits[0].actor, "admin");
+  assert.equal(audits[0].sessionId, first.id);
+  assert.equal(audits[0].details.reason, "audit-test");
+  assert.ok(audits.every((a) => Number.isFinite(Date.parse(a.timestamp))));
 });
 
-test("custom layer and id options", () => {
-  const controller = createOverrideSessionProvider({
-    timer: createFakeTimer().impl,
-    layer: "custom-session",
-    id: "my-session-provider",
-  });
-
+test("dispose clears entries/timer, audits once and rejects reactivation", async () => {
+  const { controller, clock, audits } = fixture();
   controller.activate({ reason: "test" });
+  await controller.provider.write("k", "v");
+  controller.dispose();
+  controller.dispose();
+  clock.fire();
+  assert.equal(controller.isActive(), false);
+  assert.equal(controller.getSession(), null);
+  assert.equal(clock.tasks.size, 0);
+  assert.equal(clock.cancelled.length, 1);
+  assert.deepEqual((await controller.provider.load()).entries, {});
+  assert.deepEqual(audits.map((a) => a.action), ["activate", "deactivate"]);
+  assert.throws(() => controller.activate({ reason: "again" }), /disposed/);
+});
 
-  const { provider } = controller;
-  expect(provider.id).toBe("my-session-provider");
-  expect(provider.layer).toBe("custom-session");
-
+test("nested inputs, arrays, load and metadata snapshots are detached", async () => {
+  const { controller } = fixture();
+  controller.activate({ reason: "test" });
+  const value = { nested: [{ enabled: true }] };
+  await controller.provider.write("[literal.dot].日本語", value);
+  value.nested[0].enabled = false;
+  const first = await controller.provider.load();
+  first.entries["literal.dot"].日本語.nested.push("mutated");
+  controller.getSession().overrides["literal.dot"].日本語.nested[0].enabled = false;
+  assert.deepEqual((await controller.provider.load()).entries, {
+    "literal.dot": { 日本語: { nested: [{ enabled: true }] } },
+  });
+  assert.equal((await controller.provider.remove("[literal.dot].日本語")).success, true);
+  assert.deepEqual((await controller.provider.load()).entries, { "literal.dot": {} });
   controller.dispose();
 });

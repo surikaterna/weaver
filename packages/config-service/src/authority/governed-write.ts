@@ -85,9 +85,14 @@ async function execute(
         "before-dispatch",
       );
       ticket.check();
+      mutationTarget(state, ticket, command);
       plans.push(plan);
       draft = plan.after;
       index++;
+    }
+    for (const [position, plan] of plans.entries()) {
+      index = position;
+      mutationTarget(state, ticket, plan.command);
     }
   } catch (error) {
     const command = ticket.commands[index];

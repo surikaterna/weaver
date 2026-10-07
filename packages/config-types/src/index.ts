@@ -297,12 +297,10 @@ export * from "./schemas-service-readers";
 export * from "./schemas-service-schema-authority";
 // schemas-session.ts — Zod schemas for session types
 export {
-  godModeSessionSchema,
   overrideSessionSchema,
   sessionActivationRequestSchema,
   sessionDeactivationResultSchema,
   sessionLayerMetadataSchema,
-  sessionModeSchema,
   sessionTypeSchema,
 } from "./schemas-session";
 export type { ConfigDelta, ConfigSnapshot } from "./schemas-transport";
@@ -358,16 +356,15 @@ export type {
 export * from "./service-provider-write";
 export * from "./service-readers";
 export * from "./service-schema-authority";
+export * from "./service-sessions";
 // session.ts — Session layer types
 export type {
-  GodModeSession,
   OverrideSession,
   PropertySessionMode,
   SessionActivationRequest,
   SessionDeactivationResult,
   SessionLayer,
   SessionLayerMetadata,
-  SessionMode,
   SessionType,
 } from "./session";
 // type-utils.ts — Compile-time mapped types for typesafe config access

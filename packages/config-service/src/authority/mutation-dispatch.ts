@@ -5,7 +5,7 @@ import {
 } from "@weaver-conf/config-types";
 import type { RootState } from "../root-state";
 import { auditWrite } from "./authority-audit";
-import type { MutationTicket } from "./authority-write";
+import { type MutationTicket, mutationTarget } from "./authority-write";
 import type { MutationPlan } from "./mutation-plan";
 import { reconcileMutations } from "./mutation-reconcile";
 import { mutationError, mutationRevisions } from "./mutation-result";
@@ -64,6 +64,7 @@ async function dispatchOrdered(
   for (const [index, plan] of plans.entries()) {
     try {
       ticket.check();
+      mutationTarget(state, ticket, plan.command);
     } catch (error) {
       execution.error = mutationError(error);
       execution.effects[index] = "rejected";

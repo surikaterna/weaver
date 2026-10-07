@@ -85,6 +85,19 @@ const binding: ConfigurationServiceHostOptions = {
     const asynchronousValidation: Promise<types.ConfigurationValidationResponse> = port.validate();
     void validationResult; void asynchronousValidation;
     const mutations: types.ConfigurationMutationAuthority = controller.forMutations(token);
+    const sessions: types.ConfigurationSessionAuthority = controller.forSessions(token);
+    const activated: Promise<types.Result<types.ConfigurationSessionInfo, types.WeaverError>> = sessions.activate({ identity: options.identity, namespace, reason: "incident", emergency: false });
+    const infos: readonly types.ConfigurationSessionInfo[] = sessions.list();
+    const one: types.ConfigurationSessionInfo | null = sessions.get("opaque-selector");
+    const extended: Promise<types.Result<types.ConfigurationSessionInfo, types.WeaverError>> = sessions.extend({ sessionId: "opaque-selector" });
+    const deactivated: Promise<types.Result<types.ConfigurationSessionDeactivation, types.WeaverError>> = sessions.deactivate({ sessionId: "opaque-selector" });
+    // @ts-expect-error Session metadata is not a provider or payload capability.
+    one?.overrides;
+    // @ts-expect-error Lifecycle ports do not supply a second data writer.
+    sessions.setOverride("opaque-selector", "key", 1);
+    // @ts-expect-error Readers cannot issue lifecycle authority.
+    port.forSessions(token);
+    void activated; void infos; void extended; void deactivated;
     const write: Promise<types.ConfigurationMutationResult> = mutations.apply([{ identity: options.identity, namespace, path: namespace, layer: "base", operation: "set", value: { count: 1 } }]);
     // @ts-expect-error Captured query ports no longer have data writers.
     port.set(namespace, 1, { layer: "base" });
@@ -102,6 +115,12 @@ const binding: ConfigurationServiceHostOptions = {
   },
 };
 void hosted; void binding;
+type SessionInfo = Assert<Equal<z.output<typeof types.configurationSessionInfoSchema>, types.ConfigurationSessionInfo>>;
+type SessionPort = Assert<Equal<z.output<typeof types.configurationSessionAuthoritySchema>, types.ConfigurationSessionAuthority>>;
+// @ts-expect-error Deprecated mode alias is removed rather than retained as authority.
+type RetiredMode = types.SessionMode;
+// @ts-expect-error Deprecated session alias is removed.
+type RetiredSession = types.GodModeSession;
 type Admission = Assert<Equal<z.output<typeof admissionContextSchema>, AdmissionContext>>;
 type AdmissionInput = Assert<Equal<z.input<typeof admissionContextSchema>, unknown>>;
 type RegistryBoundary = Assert<Equal<z.output<typeof admissionRegistrySchema>, AdmissionRegistry>>;

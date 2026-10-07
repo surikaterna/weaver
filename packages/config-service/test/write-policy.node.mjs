@@ -208,9 +208,10 @@ test("session-bearing principals and explicitly configured session layers cannot
     const claims = principal(input);
     if (principalSession) claims.session = { mode: "emergency-override", overrideReason: "host reason" };
     else config.sessionLayer = "base";
-    const setup = await writable({ provider, input, claims, readerClaims: principal(input), host: { authConfig: config } });
+    const setup = await writable({ provider, input, claims: principal(input), host: { authConfig: config } });
     try {
-      assert.equal((await setup.mutations.apply(commands(input, { operation: "set", path: "/alpha/flag", value: "never" }))).error.code, "POLICY_VIOLATION");
+      if (principalSession) assert.throws(() => setup.controller.mint(claims), { code: "VALIDATION_ERROR" });
+      else assert.equal((await setup.mutations.apply(commands(input, { operation: "set", path: "/alpha/flag", value: "never" }))).error.code, "POLICY_VIOLATION");
       assert.equal(provider.writes, 0);
     } finally { await setup.root.dispose(); }
   }

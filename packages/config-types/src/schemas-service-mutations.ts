@@ -67,6 +67,7 @@ const selection = {
   path: canonicalConfigurationPathSchema,
   ifRevision: nonempty.optional(),
   viewId: configurationViewIdSchema.optional(),
+  sessionId: z.string().uuid().optional(),
 };
 export const configurationMutationCommandSchema = serviceDataBoundary(
   denseData.pipe(

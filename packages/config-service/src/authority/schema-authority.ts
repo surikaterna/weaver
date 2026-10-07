@@ -34,8 +34,7 @@ export function requireSchemaPermission(
 ): TrustedPrincipalSnapshot {
   assertLive(state);
   const principal = registry.current(token).snapshot;
-  if (principal.session || !principal.schemaPermissions?.includes(permission))
-    forbidden();
+  if (!principal.schemaPermissions?.includes(permission)) forbidden();
   return principal;
 }
 

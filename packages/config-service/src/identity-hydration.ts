@@ -66,13 +66,14 @@ function requireWaiter(guards: ReadonlySet<() => void>): void {
   );
 }
 
-async function hydrateIdentity(
+export async function hydrateIdentity(
   state: RootState,
   identity: ConfigurationServiceIdentity,
   guards: ReadonlySet<() => void>,
 ): Promise<void> {
   assertHydrationAvailable(state);
   requireWaiter(guards);
+  if (state.ready.has(identityKey(identity))) return;
   const selected = selectBindings(
     state.factory.options,
     state.factory.captured,

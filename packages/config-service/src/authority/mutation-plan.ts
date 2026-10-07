@@ -23,9 +23,11 @@ import {
   stagePublication,
 } from "./publication";
 import { prepareConfigMutation } from "./schema-admission";
+import type { SessionReference } from "./session-bindings";
 import { buildSchemaPatch } from "./value-patch";
 
 export interface MutationPlan {
+  readonly session?: SessionReference;
   readonly command: ConfigurationMutationCommand;
   readonly request: ConfigurationAuthorizationRequest;
   readonly target: LoadedContribution;
@@ -41,34 +43,32 @@ export function stageMutation(
   command: ConfigurationMutationCommand,
   selected: LoadedContribution,
 ): MutationPlan {
-  const snapshot = draft.ready.get(identityKey(command.identity));
-  const target = snapshot?.contributions.find(
-    (item) => item.selection.captured === selected.selection.captured,
-  );
-  const writer = state.factory.writers.get(selected.selection.captured);
-  if (!snapshot || !target?.layer || !writer)
+  const { snapshot, target, entries } = draftTarget(draft, command, selected);
+  const session =
+    command.sessionId === undefined
+      ? undefined
+      : state.sessions.get(command.sessionId);
+  const writer =
+    session?.writer ?? state.factory.writers.get(selected.selection.captured);
+  if (!writer)
     throw createWeaverError("WRITE_UNAVAILABLE", "Mutation target unavailable");
-  const effect = physicalMutation(state, command, target.layer.entries);
-  const prepared = prepareConfigMutation({
-    registry: state.factory.registry,
-    environment: command.identity.environment,
-    mutations: [effect],
-    layerBefore: target.layer.entries,
-    effectiveAfter: (entries) =>
-      resolveIdentitySnapshot(
-        replaceContributions(
-          snapshot.contributions,
-          new Map([[target.selection.captured, entries]]),
-        ),
-        state.factory.options.layers.map((_, rank) => rank),
-      ).entries,
-  });
-  if (!prepared.success)
-    throw createWeaverError(
-      weaverErrorCodeSchema.safeParse(prepared.result.error?.code).data ??
-        "VALIDATION_ERROR",
-      "Configuration candidate is invalid",
-    );
+  const effect = physicalMutation(state, command, entries);
+  const prepared = requirePrepared(
+    prepareConfigMutation({
+      registry: state.factory.registry,
+      environment: command.identity.environment,
+      mutations: [effect],
+      layerBefore: entries,
+      effectiveAfter: (entries) =>
+        resolveIdentitySnapshot(
+          replaceContributions(
+            snapshot.contributions,
+            new Map([[target.selection.captured, entries]]),
+          ),
+          state.factory.options.layers.map((_, rank) => rank),
+        ).entries,
+    }),
+  );
   const after = stagePublication(
     state,
     draft,
@@ -76,6 +76,7 @@ export function stageMutation(
   );
   return Object.freeze({
     command,
+    ...(session ? { session } : {}),
     request: mutationRequest(command),
     target,
     writer,
@@ -83,6 +84,30 @@ export function stageMutation(
     before: draft,
     after,
   });
+}
+
+function draftTarget(
+  draft: PublicationPlan,
+  command: ConfigurationMutationCommand,
+  selected: LoadedContribution,
+) {
+  const snapshot = draft.ready.get(identityKey(command.identity));
+  const target = snapshot?.contributions.find(
+    (item) => item.selection.captured === selected.selection.captured,
+  );
+  if (!snapshot || !target?.layer)
+    throw createWeaverError("WRITE_UNAVAILABLE", "Mutation target unavailable");
+  return { snapshot, target, entries: target.layer.entries };
+}
+
+function requirePrepared(prepared: ReturnType<typeof prepareConfigMutation>) {
+  if (!prepared.success)
+    throw createWeaverError(
+      weaverErrorCodeSchema.safeParse(prepared.result.error?.code).data ??
+        "VALIDATION_ERROR",
+      "Configuration candidate is invalid",
+    );
+  return prepared;
 }
 
 function physicalMutation(

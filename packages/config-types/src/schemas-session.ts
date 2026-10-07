@@ -4,9 +4,6 @@ import { z } from "zod";
 
 export const sessionTypeSchema = z.string();
 
-/** @deprecated Use `sessionTypeSchema` instead. */
-export const sessionModeSchema = sessionTypeSchema;
-
 export const sessionLayerMetadataSchema = z.strictObject({
   activatedBy: z.string(),
   activatedAt: z.number(),
@@ -25,19 +22,10 @@ export const overrideSessionSchema = z.strictObject({
   overrides: z.record(z.string(), z.unknown()),
 });
 
-/** @deprecated Use `overrideSessionSchema` instead. */
-export const godModeSessionSchema = overrideSessionSchema;
-
 export const sessionActivationRequestSchema = z.strictObject({
-  reason: z.string(),
-  durationMs: z.number().optional(),
-  elevatedAuth: z
-    .strictObject({
-      token: z.string(),
-      method: z.string(),
-    })
-    .optional(),
-  activatedBy: z.string().optional(),
+  reason: z.string().trim().min(1),
+  durationMs: z.number().int().positive().max(2147483647).optional(),
+  activatedBy: z.string().min(1).optional(),
 });
 
 export const sessionDeactivationResultSchema = z.strictObject({

@@ -276,7 +276,7 @@ test("unsupported session and partial operations cannot authorize inspection or 
   const { root, controller, input } = await hosted();
   try {
     const session = principal(input, { session: { mode: "emergency-override", overrideReason: "host request" } });
-    assert.throws(() => controller.forIdentity(controller.mint(session), { identity: input.identity, namespace: "/alpha" }), { code: "FORBIDDEN" });
+    assert.throws(() => controller.mint(session), { code: "VALIDATION_ERROR" });
     const claims = principal(input); claims.grants[0].operations = ["read"];
     const token = controller.mint(claims);
     const reader = controller.forIdentity(token, { identity: input.identity, namespace: "/alpha" });

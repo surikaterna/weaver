@@ -208,6 +208,9 @@ importers:
       '@weaver-conf/config-registry':
         specifier: workspace:^
         version: link:../config-registry
+      '@weaver-conf/config-sessions':
+        specifier: workspace:*
+        version: link:../config-sessions
       '@weaver-conf/config-types':
         specifier: workspace:^
         version: link:../config-types
@@ -221,9 +224,15 @@ importers:
 
   packages/config-sessions:
     dependencies:
+      '@weaver-conf/config-engine':
+        specifier: workspace:*
+        version: link:../config-engine
       '@weaver-conf/config-types':
         specifier: workspace:*
         version: link:../config-types
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
     devDependencies:
       typescript:
         specifier: ^5.8.3
