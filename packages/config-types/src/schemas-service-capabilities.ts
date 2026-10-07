@@ -1,15 +1,13 @@
 import { z } from "zod";
-import { weaverErrorSchema } from "./errors";
 import { scopeInstanceSchema } from "./schemas-layers";
 import { configReloadBehaviorSchema } from "./schemas-policy";
 import { registrationEnvironmentSchema } from "./schemas-registration-paths";
-import { canonicalConfigurationPathSchema } from "./schemas-service-paths";
-import type {
-  HydratedConfigurationReader,
-  HydratedConfigurationService,
-  HydratedScopedConfigurationService,
-  HydratedServiceConfigurationService,
-} from "./service-capabilities";
+import {
+  canonicalConfigurationPathSchema,
+  configurationNamespaceSchema,
+  configurationViewIdSchema,
+} from "./schemas-service-paths";
+import type { ConfigurationService } from "./service-capabilities";
 import { serviceDataBoundary } from "./service-data-boundary";
 
 const nonempty = z.string().min(1);
@@ -44,7 +42,12 @@ export const configurationInspectionValueSchema = serviceDataBoundary(
   ]),
 );
 
-const provenance = { layer: nonempty, providerId: nonempty };
+const provenance = {
+  layer: nonempty,
+  providerId: nonempty,
+  source: z.enum(["base", "view"]).optional(),
+  sourcePath: canonicalConfigurationPathSchema.optional(),
+};
 export const configurationLayerContributionSchema = serviceDataBoundary(
   z.discriminatedUnion("state", [
     z.strictObject({ ...missingShape, ...provenance }).readonly(),
@@ -56,11 +59,14 @@ export const configurationLayerContributionSchema = serviceDataBoundary(
 export const hydratedConfigurationInspectionSchema = serviceDataBoundary(
   z
     .strictObject({
-      path: canonicalConfigurationPathSchema,
+      path: configurationNamespaceSchema,
       identity: configurationServiceIdentitySchema,
       revision: nonempty,
       effective: configurationInspectionValueSchema,
       effectiveLayer: nonempty.optional(),
+      namespace: configurationNamespaceSchema.optional(),
+      viewId: configurationViewIdSchema.optional(),
+      effectiveSource: z.enum(["base", "view"]).optional(),
       contributions: z.array(configurationLayerContributionSchema).readonly(),
     })
     .superRefine((inspection, context) => {
@@ -72,8 +78,9 @@ export const hydratedConfigurationInspectionSchema = serviceDataBoundary(
           code: "custom",
           message: "Missing values have no effective layer",
         });
-      const pairs = inspection.contributions.map(({ layer, providerId }) =>
-        JSON.stringify([layer, providerId]),
+      const pairs = inspection.contributions.map(
+        ({ layer, providerId, sourcePath }) =>
+          JSON.stringify([layer, providerId, sourcePath]),
       );
       if (new Set(pairs).size !== pairs.length)
         context.addIssue({
@@ -84,51 +91,59 @@ export const hydratedConfigurationInspectionSchema = serviceDataBoundary(
     .readonly(),
 );
 
-export const configurationEffectiveChangeSchema = serviceDataBoundary(
+const changeSelection = z
+  .strictObject({
+    identity: configurationServiceIdentitySchema,
+    namespace: configurationNamespaceSchema,
+    viewId: configurationViewIdSchema.optional(),
+  })
+  .readonly();
+const changeCommon = {
+  selection: changeSelection,
+  path: configurationNamespaceSchema,
+  previousRevision: nonempty,
+  revision: nonempty,
+  cause: z.enum(["mutation", "schema", "reload", "external", "reconcile"]),
+};
+export const configurationReaderChangeSchema = serviceDataBoundary(
+  z.discriminatedUnion("kind", [
+    z
+      .strictObject({
+        ...changeCommon,
+        kind: z.literal("effective"),
+        previous: configurationInspectionValueSchema,
+        current: configurationInspectionValueSchema,
+        reloadBehavior: configReloadBehaviorSchema,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        ...changeCommon,
+        kind: z.literal("layer"),
+        layer: nonempty,
+        previous: z.array(configurationLayerContributionSchema).readonly(),
+        current: z.array(configurationLayerContributionSchema).readonly(),
+      })
+      .readonly(),
+    z
+      .strictObject({
+        ...changeCommon,
+        kind: z.literal("invalidation"),
+        reason: z.enum(["schema", "stale"]),
+      })
+      .readonly(),
+  ]),
+);
+export const configurationReaderChangeOptionsSchema = serviceDataBoundary(
+  z.strictObject({ layer: nonempty.optional() }).readonly(),
+);
+export const configurationRestartStateSchema = serviceDataBoundary(
   z
     .strictObject({
-      path: canonicalConfigurationPathSchema,
-      identity: configurationServiceIdentitySchema,
       revision: nonempty,
-      previous: configurationInspectionValueSchema,
-      current: configurationInspectionValueSchema,
-      cause: z.enum(["write", "remove", "reload", "external", "session"]),
-      reloadBehavior: configReloadBehaviorSchema,
+      pending: z.enum(["none", "restart-required", "rolling-restart"]),
     })
     .readonly(),
-);
-
-export const configurationServiceWriteOptionsSchema = serviceDataBoundary(
-  z
-    .strictObject({ layer: nonempty, ifRevision: nonempty.optional() })
-    .readonly(),
-);
-const strictErrorSchema = z.strictObject(weaverErrorSchema.shape).readonly();
-export const configurationServiceWriteResultSchema = serviceDataBoundary(
-  z
-    .discriminatedUnion("success", [
-      z
-        .strictObject({
-          success: z.literal(true),
-          layer: nonempty,
-          revision: nonempty,
-        })
-        .readonly(),
-      z
-        .strictObject({
-          success: z.literal(false),
-          error: strictErrorSchema,
-          outcome: z.enum(["rejected", "unknown"]),
-        })
-        .readonly(),
-    ])
-    .refine(
-      (result) =>
-        result.success ||
-        (result.outcome === "unknown") ===
-          (result.error.code === "WRITE_OUTCOME_UNKNOWN"),
-      { message: "Write outcome must agree with error code" },
-    ),
 );
 
 /** Callable shape only; parsing does not execute or authenticate capabilities. */
@@ -136,59 +151,14 @@ function callable<T>() {
   return z.custom<T>((value) => typeof value === "function");
 }
 
-const readerShape = {
-  identity: configurationServiceIdentitySchema,
-  revision: nonempty,
-  mode: z.enum(["live", "degraded"]),
-  degradedProviders: z.array(nonempty).readonly(),
-  get: callable<HydratedConfigurationReader["get"]>(),
-  getWithDefault: callable<HydratedConfigurationReader["getWithDefault"]>(),
-  getAtLayer: callable<HydratedConfigurationReader["getAtLayer"]>(),
-  getNamespace: callable<HydratedConfigurationReader["getNamespace"]>(),
-  inspect: callable<HydratedConfigurationReader["inspect"]>(),
-  onChange: callable<HydratedConfigurationReader["onChange"]>(),
-};
-export const hydratedConfigurationReaderSchema = serviceDataBoundary(
-  z.strictObject(readerShape),
-);
-export const hydratedConfigurationServiceSchema = serviceDataBoundary(
+export const configurationServiceSchema = serviceDataBoundary(
   z.strictObject({
-    ...readerShape,
-    getForScope: callable<HydratedConfigurationService["getForScope"]>(),
-    preloadScope: callable<HydratedConfigurationService["preloadScope"]>(),
-    set: callable<HydratedConfigurationService["set"]>(),
-    remove: callable<HydratedConfigurationService["remove"]>(),
-    reloadProvider: callable<HydratedConfigurationService["reloadProvider"]>(),
-    flush: callable<HydratedConfigurationService["flush"]>(),
-    dispose: callable<HydratedConfigurationService["dispose"]>(),
-  }),
-);
-
-const scopedShape = {
-  namespace: canonicalConfigurationPathSchema,
-  identity: configurationServiceIdentitySchema,
-  get: callable<HydratedScopedConfigurationService["get"]>(),
-  getWithDefault:
-    callable<HydratedScopedConfigurationService["getWithDefault"]>(),
-  getAtLayer: callable<HydratedScopedConfigurationService["getAtLayer"]>(),
-  getNamespace: callable<HydratedScopedConfigurationService["getNamespace"]>(),
-  inspect: callable<HydratedScopedConfigurationService["inspect"]>(),
-  onChange: callable<HydratedScopedConfigurationService["onChange"]>(),
-  withScope: callable<HydratedScopedConfigurationService["withScope"]>(),
-  dispose: callable<HydratedScopedConfigurationService["dispose"]>(),
-};
-export const hydratedScopedConfigurationServiceSchema = serviceDataBoundary(
-  z.strictObject(scopedShape),
-);
-export const hydratedServiceConfigurationServiceSchema = serviceDataBoundary(
-  z.strictObject({
-    ...scopedShape,
-    getFromNamespace:
-      callable<HydratedServiceConfigurationService["getFromNamespace"]>(),
-    pendingRestart: z.boolean(),
-    onRestartRequired:
-      callable<HydratedServiceConfigurationService["onRestartRequired"]>(),
-    acknowledgeRestart:
-      callable<HydratedServiceConfigurationService["acknowledgeRestart"]>(),
+    mode: z.enum(["live", "degraded"]),
+    degradedProviders: z.array(nonempty).readonly(),
+    restartState: configurationRestartStateSchema,
+    acknowledgeRestart: callable<ConfigurationService["acknowledgeRestart"]>(),
+    reloadProvider: callable<ConfigurationService["reloadProvider"]>(),
+    flush: callable<ConfigurationService["flush"]>(),
+    dispose: callable<ConfigurationService["dispose"]>(),
   }),
 );

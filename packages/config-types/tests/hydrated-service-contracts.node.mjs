@@ -5,15 +5,13 @@ import {
   canonicalConfigurationPathSchema as canonical,
   relativeConfigurationPathSchema as relative,
   configurationServiceIdentitySchema as identitySchema,
-  configurationServiceWriteOptionsSchema as options,
-  configurationServiceWriteResultSchema as result,
+  configurationMutationCommandSchema as commandSchema,
+  configurationMutationResultSchema as result,
   configurationInspectionValueSchema as value,
   hydratedConfigurationInspectionSchema as inspection,
-  configurationEffectiveChangeSchema as event,
-  hydratedConfigurationReaderSchema as reader,
-  hydratedConfigurationServiceSchema as root,
-  hydratedScopedConfigurationServiceSchema as scoped,
-  hydratedServiceConfigurationServiceSchema as service,
+  configurationReaderChangeSchema as event,
+  configurationReaderSchema as reader,
+  configurationServiceSchema as root,
   writeResultSchema,
 } from "../dist/index.js";
 
@@ -23,6 +21,7 @@ const identity = { environment: "dev", scopePath: [
 ] };
 const path = "/example/literal.dot/🪄/e\u0301";
 const error = (code) => ({ code, message: "failed" });
+const selection = { identity, namespace: "/example", path, operation: "set", value: 1, layer: "user" };
 
 test("literal path contracts retain codepoints and reject escapes", () => {
   assert.equal(canonical.parse(path), path);
@@ -32,7 +31,8 @@ test("literal path contracts retain codepoints and reject escapes", () => {
   for (const bad of ["/", "a", "/a/", "/a//b", "/.", "/a/..", "/a[b]", "/a/_weaver", "/__proto__", "/constructor", "/prototype"]) {
     assert.equal(canonical.safeParse(bad).success, false, bad);
   }
-  for (const bad of [[], [""], ["."], [".."], ["a/b"], ["[x]"], ["_weaver"], ["__proto__"], ["constructor"], ["prototype"]]) {
+  assert.deepEqual(relative.parse([]), []);
+  for (const bad of [[""], ["."], [".."], ["a/b"], ["[x]"], ["_weaver"], ["__proto__"], ["constructor"], ["prototype"]]) {
     assert.equal(relative.safeParse(bad).success, false, JSON.stringify(bad));
   }
 });
@@ -57,22 +57,24 @@ test("strict boundaries reject getters, hidden/symbol keys and prototypes before
   const proto = Object.assign(Object.create({ polluted: true }), { layer: "user" });
   const reserved = JSON.parse('{"layer":"user","__proto__":{}}');
   for (const bad of [accessor, hidden, proto, reserved, { layer: "user", [Symbol()]: true }, { layer: "user", actor: "plugin" }]) {
-    assert.equal(options.safeParse(bad).success, false);
+    const command = Object.defineProperties({ ...selection }, Object.getOwnPropertyDescriptors(bad));
+    if (Object.getPrototypeOf(bad) !== Object.prototype) Object.setPrototypeOf(command, Object.getPrototypeOf(bad));
+    assert.equal(commandSchema.safeParse(command).success, false);
   }
   const nested = { environment: "dev", scopePath: [{ scopeId: "tenant", get value() { calls++; return "x"; } }] };
   assert.equal(identitySchema.safeParse(nested).success, false);
   assert.equal(calls, 0);
   for (const forbidden of ["roles", "environment", "scopePath", "session"]) {
-    assert.equal(options.safeParse({ layer: "user", [forbidden]: "x" }).success, false);
+    assert.equal(commandSchema.safeParse({ ...selection, [forbidden]: "x" }).success, false);
   }
 });
 
 test("write results narrow success and enforce error/outcome consistency", () => {
   const good = [
-    { success: true, layer: "user", revision: "r1" },
-    { success: false, error: error("WRITE_ERROR"), outcome: "rejected" },
-    { success: false, error: error("DISPOSED"), outcome: "rejected" },
-    { success: false, error: error("WRITE_OUTCOME_UNKNOWN"), outcome: "unknown" },
+    { success: true, results: [{ index: 0, effect: "committed" }], revisions: [{ identity, revision: "r1" }] },
+    { success: false, error: error("WRITE_ERROR"), outcome: "rejected", results: [{ index: 0, effect: "rejected", error: error("WRITE_ERROR") }] },
+    { success: false, error: error("DISPOSED"), outcome: "rejected", results: [] },
+    { success: false, error: error("WRITE_OUTCOME_UNKNOWN"), outcome: "unknown", results: [{ index: 0, effect: "unknown", error: error("WRITE_OUTCOME_UNKNOWN") }] },
   ];
   for (const item of good) assert.deepEqual(result.parse(item), item);
   const bad = [
@@ -98,7 +100,7 @@ test("inspection/event states exclude redacted payloads and preserve provenance 
   assert.equal(inspection.safeParse({ ...snapshot, contributions: [contributions[0], contributions[0]] }).success, false);
   assert.equal(inspection.safeParse({ ...snapshot, effective: { state: "missing" }, effectiveLayer: "user" }).success, false);
   assert.equal(inspection.safeParse({ ...snapshot, contributions: [{ ...contributions[2], value: "secret" }] }).success, false);
-  const change = { path, identity, revision: "r1", previous: { state: "missing" }, current: { state: "value", value: 2 }, cause: "write", reloadBehavior: "hot" };
+  const change = { kind: "effective", path, selection: { identity, namespace: "/example" }, previousRevision: "r0", revision: "r1", previous: { state: "missing" }, current: { state: "value", value: 2 }, cause: "mutation", reloadBehavior: "hot" };
   assert.deepEqual(event.parse(change), change);
   assert.equal(event.safeParse({ ...change, current: { state: "redacted", value: "secret" } }).success, false);
 });
@@ -106,15 +108,13 @@ test("inspection/event states exclude redacted payloads and preserve provenance 
 test("executable schemas check shape only without invocation or leaked root", () => {
   let calls = 0;
   const fn = () => { calls++; };
-  const reads = { identity, get: fn, getWithDefault: fn, getAtLayer: fn, getNamespace: fn, inspect: fn, onChange: fn };
-  const ready = { ...reads, revision: "r", mode: "live", degradedProviders: [] };
+  const ready = { selection: { identity, namespace: "/example" }, revision: "r", prepare: fn, get: fn, snapshot: fn, inspect: fn, validate: fn, onChange: fn, withScope: fn, forView: fn, dispose: fn };
   assert.equal(reader.safeParse(ready).success, true);
-  assert.equal(root.safeParse({ ...ready, getForScope: fn, preloadScope: fn, set: fn, remove: fn, reloadProvider: fn, flush: fn, dispose: fn }).success, true);
-  const confined = { ...reads, namespace: "/example", withScope: fn, dispose: fn };
-  assert.equal(scoped.safeParse(confined).success, true);
-  assert.equal(service.safeParse({ ...confined, getFromNamespace: fn, pendingRestart: false, onRestartRequired: fn, acknowledgeRestart: fn }).success, true);
-  for (const field of ["root", "client", "transport", "session", "set", "remove", "forView"]) {
-    assert.equal(scoped.safeParse({ ...confined, [field]: fn }).success, false);
+  const rootShape = { mode: "live", degradedProviders: [], restartState: { revision: "r1", pending: "none" }, acknowledgeRestart: fn, reloadProvider: fn, flush: fn, dispose: fn };
+  assert.equal(root.safeParse(rootShape).success, true);
+  for (const field of ["set", "remove", "apply"]) assert.equal(root.safeParse({ ...rootShape, [field]: fn }).success, false);
+  for (const field of ["root", "client", "transport", "session", "set", "remove", "getWithDefault", "getAtLayer", "getNamespace"]) {
+    assert.equal(reader.safeParse({ ...ready, [field]: fn }).success, false);
   }
   assert.equal(reader.safeParse({ ...ready, get: 1 }).success, false);
   assert.equal(calls, 0);

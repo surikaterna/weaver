@@ -276,7 +276,7 @@ describe("SchemaRegistry", () => {
       environment: "dev",
     });
 
-    await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(/Persisted schema registry must be an object/);
+    await expect(createPersistentSchemaRegistry({ configService })).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: "Invalid registry persistence data" });
   });
 
   test("register rejects legacy target fields", async () => {

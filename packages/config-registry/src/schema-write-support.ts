@@ -1,6 +1,12 @@
-import { validateEffectiveConfiguration } from "@weaver-conf/config-engine";
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 import { z } from "zod";
+import {
+  allows,
+  arrayMembers,
+  type MemberEvidence,
+  objectMembers,
+  validBranch,
+} from "./schema-member-evidence";
 import {
   denseMetadata,
   ownField,
@@ -32,58 +38,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-export function allows(schema: Schema, type: "object" | "array"): boolean {
-  const declaredType = ownField(schema, "type");
-  if (Array.isArray(declaredType)) denseMetadata(declaredType);
-  return Array.isArray(declaredType)
-    ? declaredType.includes(type)
-    : declaredType === type;
-}
-
 function child(value: unknown, key: string): unknown {
   if (Array.isArray(value)) return ownValue(value, Number(key));
   return isRecord(value) ? ownValue(value, key) : undefined;
-}
-
-export function validBranch(schema: Schema, candidate: unknown): boolean {
-  return validateEffectiveConfiguration(schema, candidate).valid;
-}
-
-export function objectMembers(schema: Schema, key: string): Schema[] {
-  const members: Schema[] = [];
-  const properties = ownField(schema, "properties");
-  if (properties && Object.hasOwn(properties, key)) {
-    const declared = ownField(properties, key);
-    if (declared) members.push(declared);
-  }
-  for (const [pattern, member] of Object.entries(
-    ownField(schema, "patternProperties") ?? {},
-  )) {
-    if (matchesPattern(pattern, key)) members.push(member);
-  }
-  if (members.length > 0) return members;
-  const additional = ownField(schema, "additionalProperties");
-  return additional !== null && typeof additional === "object"
-    ? [additional]
-    : [];
-}
-
-function matchesPattern(pattern: string, key: string): boolean {
-  try {
-    return new RegExp(pattern).test(key);
-  } catch {
-    return false;
-  }
-}
-
-export function arrayMembers(schema: Schema, key: string): Schema[] {
-  if (!/^(?:0|[1-9][0-9]*)$/.test(key)) return [];
-  const index = Number(key);
-  if (!Number.isSafeInteger(index) || index > 4_294_967_294) return [];
-  const items = ownField(schema, "items");
-  if (!items) return [];
-  const member = Array.isArray(items) ? ownField(items, index) : items;
-  return member ? [member] : [];
 }
 
 function directSupport(
@@ -95,7 +52,7 @@ function directSupport(
   ancestors: Set<Schema>,
 ): StructuralSupport {
   if (path.length === 0)
-    return payloadSupport(schema, incoming, candidate, previous, ancestors);
+    return payloadSupport(schema, incoming, candidate, ancestors);
   const key = path[0];
   if (key === undefined) return unsupported;
   const object = allows(schema, "object");
@@ -110,20 +67,12 @@ function directSupport(
   )
     return { ...unsupported, ambiguous: true };
   const arrayIndex = Array.isArray(previous) || (array && !object);
-  if (arrayIndex && numeric && path.length > 0) {
-    const members = arrayMembers(schema, key);
-    return traverseMembers(
-      members,
-      path.slice(1),
-      incoming,
-      candidate,
-      previous,
-      key,
-      ancestors,
-      true,
-    );
-  }
-  const members = object ? objectMembers(schema, key) : [];
+  const indexed = arrayIndex && numeric;
+  const members = indexed
+    ? arrayMembers(schema, key)
+    : object
+      ? objectMembers(schema, key)
+      : { schemas: [], unconstrained: false };
   return traverseMembers(
     members,
     path.slice(1),
@@ -132,12 +81,14 @@ function directSupport(
     previous,
     key,
     ancestors,
-    false,
+    // Array ancestry constrains generic traversal even for a nonnumeric member
+    // whose prospective candidate would otherwise look like an object.
+    arrayIndex,
   );
 }
 
 function traverseMembers(
-  members: readonly Schema[],
+  members: MemberEvidence,
   path: readonly string[],
   incoming: unknown,
   candidate: unknown,
@@ -146,10 +97,13 @@ function traverseMembers(
   ancestors: Set<Schema>,
   arrayIndex: boolean,
 ): StructuralSupport {
-  let declared = false;
-  let nestedArray = arrayIndex;
-  let ambiguous = false;
-  for (const member of members) {
+  const open = members.unconstrained
+    ? unconstrainedSupport(path, child(candidate, key), child(previous, key))
+    : unsupported;
+  let declared = open.declared;
+  let nestedArray = arrayIndex || open.arrayIndex;
+  let ambiguous = open.ambiguous;
+  for (const member of members.schemas) {
     const result = walkSupport(
       member,
       path,
@@ -165,25 +119,54 @@ function traverseMembers(
   return { declared, arrayIndex: nestedArray, ambiguous };
 }
 
+function unconstrainedSupport(
+  path: readonly string[],
+  candidate: unknown,
+  previous: unknown,
+): StructuralSupport {
+  let arrayIndex = false;
+  let ambiguous = false;
+  for (const key of path) {
+    const numeric = /^(?:0|[1-9][0-9]*)$/.test(key);
+    arrayIndex ||= Array.isArray(previous) || Array.isArray(candidate);
+    ambiguous ||=
+      numeric &&
+      !isRecord(previous) &&
+      !Array.isArray(previous) &&
+      !isRecord(candidate) &&
+      !Array.isArray(candidate);
+    candidate = child(candidate, key);
+    previous = child(previous, key);
+  }
+  return { declared: true, arrayIndex, ambiguous };
+}
+
 function payloadSupport(
   schema: Schema,
   incoming: unknown,
   candidate: unknown,
-  previous: unknown,
   ancestors: Set<Schema>,
 ): StructuralSupport {
   if (!isRecord(incoming) && !Array.isArray(incoming))
     return { ...unsupported, declared: true };
+  const container = Array.isArray(incoming) ? "array" : "object";
+  // At a declared value boundary, kind mismatches belong to engine validation.
+  if (!allows(schema, container)) return { ...unsupported, declared: true };
+  // Payload members use the new container. Old-container ancestry remains in
+  // the outer logical-path walk and in the independent before/after policy proof.
+  // Records can inherit discriminator data; arrays replace their contents atomically.
+  const context =
+    isRecord(incoming) && isRecord(candidate) ? candidate : incoming;
   for (const [key, value] of Object.entries(incoming)) {
     const result = directSupport(
       schema,
       [key],
       value,
-      candidate,
-      previous,
+      context,
+      incoming,
       ancestors,
     );
-    if (!result.declared) return result;
+    if (!result.declared) return { ...result, arrayIndex: false };
   }
   return { ...unsupported, declared: true };
 }
@@ -198,19 +181,23 @@ function walkSupport(
 ): StructuralSupport {
   if (ancestors.has(schema)) return unsupported;
   ancestors.add(schema);
+  // An array replaces the value at this boundary; unrelated effective overlays
+  // cannot select its branches. Ancestor paths and partial records keep context.
+  const context =
+    path.length === 0 && Array.isArray(incoming) ? incoming : candidate;
   const combine = (branch: Schema) =>
-    walkSupport(branch, path, incoming, candidate, previous, ancestors);
+    walkSupport(branch, path, incoming, context, previous, ancestors);
   const direct = directSupport(
     schema,
     path,
     incoming,
-    candidate,
+    context,
     previous,
     ancestors,
   );
   const allOf = compositionBranches(schema, "allOf");
   const all = allOf ? [...new Set(allOf)].map(combine) : [];
-  const valid = (branch: Schema) => validBranch(branch, candidate);
+  const valid = (branch: Schema) => validBranch(branch, context);
   const any = compositionBranches(schema, "anyOf")?.filter(valid).map(combine);
   const one = compositionBranches(schema, "oneOf")?.filter(valid).map(combine);
   ancestors.delete(schema);

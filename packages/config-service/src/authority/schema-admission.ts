@@ -4,6 +4,7 @@ import {
   deepRemove,
   deepSet,
   parseCanonicalConfigPath,
+  projectConfigurationData,
   validateEffectiveConfiguration,
   validatePartialConfiguration,
 } from "@weaver-conf/config-engine";
@@ -73,9 +74,7 @@ function errorForSupport(
   const witness = schemaWriteSupport(
     anchor.schema,
     relative(anchor, path),
-    mutation.operation === "set"
-      ? (mutation.admissionValue ?? mutation.value)
-      : undefined,
+    logicalValue(mutation),
     deepGet(after, key),
     deepGet(before, key),
   );
@@ -92,9 +91,7 @@ function errorForSupport(
     const supportBefore = schemaWriteSupport(
       anchor.schema,
       relative(anchor, path),
-      mutation.operation === "set"
-        ? (mutation.admissionValue ?? mutation.value)
-        : undefined,
+      logicalValue(mutation),
       previous,
       previous,
     );
@@ -109,6 +106,13 @@ function errorForSupport(
     );
   }
   return null;
+}
+
+function logicalValue(mutation: Mutation): unknown {
+  if (mutation.operation !== "set") return undefined;
+  return Object.hasOwn(mutation, "admissionValue")
+    ? mutation.admissionValue
+    : mutation.value;
 }
 
 export function anchorValidation(
@@ -180,7 +184,17 @@ function layerCandidate(
   mutations: readonly Mutation[],
 ): Prepared {
   try {
-    const layerAfter: Record<string, unknown> = structuredClone(before);
+    const layerAfter = projectConfigurationData(
+      before,
+      {},
+      {
+        decide: () => "descend",
+        child: (context) => context,
+        mutableContainers: true,
+      },
+    );
+    if (!isEntries(layerAfter))
+      return denied("VALIDATION_ERROR", "Invalid layer candidate");
     for (const mutation of mutations) {
       if (mutation.operation === "set")
         deepSet(layerAfter, mutation.key, mutation.value);
@@ -193,6 +207,10 @@ function layerCandidate(
       "Configuration candidate cannot be cloned",
     );
   }
+}
+
+function isEntries(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function rejectExistingArrayIndices(

@@ -1,13 +1,34 @@
 import { parseCanonicalConfigPath } from "@weaver-conf/config-engine";
 import {
   type AuthorityGrant,
-  type AuthorizationRequest,
-  authorizationRequestSchema,
+  type ConfigurationAuthorizationRequest as AuthorizationRequest,
+  configurationAuthorizationRequestSchema as authorizationRequestSchema,
+  type CanonicalConfigurationPath,
   type ConfigurationServiceIdentity,
+  canonicalConfigurationPathSchema,
   type TrustedPrincipalSnapshot,
 } from "@weaver-conf/config-types";
 import { identityKey } from "../layer-stack";
 import { forbidden } from "./capability-registry";
+
+/** Opaque JSON member names are governed by their nearest addressable ancestor,
+ * never reinterpreted as slash paths or exposed as another addressing dialect. */
+export function evidencePath(
+  segments: readonly string[],
+): CanonicalConfigurationPath {
+  for (let length = segments.length; length > 0; length--) {
+    const prefix = segments.slice(0, length);
+    const parsed = canonicalConfigurationPathSchema.safeParse(
+      `/${prefix.join("/")}`,
+    );
+    if (
+      parsed.success &&
+      parseCanonicalConfigPath(parsed.data).segments.length === prefix.length
+    )
+      return parsed.data;
+  }
+  return forbidden();
+}
 
 export function covers(namespace: string, path: string): boolean {
   const prefix = parseCanonicalConfigPath(namespace).segments;
@@ -27,8 +48,9 @@ export function requestFor(
   identity: ConfigurationServiceIdentity,
   namespace: string,
   path: string,
-  operation: "read" | "inspect" | "write",
+  operation: "read" | "inspect",
   layer?: string,
+  viewId?: string,
 ): AuthorizationRequest {
   const parsed = authorizationRequestSchema.safeParse({
     identity,
@@ -37,6 +59,7 @@ export function requestFor(
     operation,
     sensitive: false,
     ...(layer === undefined ? {} : { layer }),
+    ...(viewId === undefined ? {} : { viewId }),
   });
   if (!parsed.success) return forbidden();
   return parsed.data;
@@ -48,12 +71,15 @@ export function grantAllows(
 ): boolean {
   return (
     identityMatches(grant.identity, request.identity) &&
-    grant.namespace === request.namespace &&
+    covers(grant.namespace, request.namespace) &&
+    covers(request.namespace, request.path) &&
     covers(grant.namespace, request.path) &&
     grant.operations.includes(request.operation) &&
     layers.every((layer) => grant.layers.includes(layer)) &&
-    request.viewId === undefined &&
-    !request.sensitive
+    (request.viewId === undefined
+      ? grant.views.length === 0
+      : grant.views.includes(request.viewId)) &&
+    (!request.sensitive || grant.sensitive)
   );
 }
 export function selectGrant(

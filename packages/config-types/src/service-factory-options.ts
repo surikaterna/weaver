@@ -105,6 +105,7 @@ export const configurationServiceProviderBindingSchema = z
     scopePath: scopes.optional(),
     operation: configurationServiceProviderReadSchema,
     ownership: configurationServiceProviderOwnershipSchema,
+    watch: z.boolean().optional(),
   })
   .readonly();
 export type ConfigurationServiceProviderBinding = z.infer<

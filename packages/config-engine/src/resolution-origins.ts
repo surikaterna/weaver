@@ -39,7 +39,9 @@ function combineSummary(
   if (left === "empty") return right;
   if (right === "empty") return left;
   if (left === "mixed" || right === "mixed") return "mixed";
-  return left.layer === right.layer && left.providerId === right.providerId
+  return left.layer === right.layer &&
+    left.providerId === right.providerId &&
+    JSON.stringify(left.sourcePath) === JSON.stringify(right.sourcePath)
     ? left
     : "mixed";
 }

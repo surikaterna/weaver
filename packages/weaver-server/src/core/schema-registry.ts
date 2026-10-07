@@ -8,6 +8,10 @@ import {
   createRegistryAdapter,
   type RegistryState,
 } from "@weaver-conf/config-registry/internal/server-adapter";
+import {
+  parsePersistedRegistry,
+  serializeRegistry,
+} from "@weaver-conf/config-registry/persistence";
 import { createWeaverError } from "../types/errors";
 import {
   beginRegistryBinding,
@@ -21,10 +25,6 @@ import {
   writeRegistryInternalConfig,
 } from "./config-service-internal";
 import type { WeaverConfigService, WriteContext } from "./config-service-types";
-import {
-  parsePersistedRegistry,
-  serializeRegistry,
-} from "./schema-registry-persistence";
 
 export type {
   RegisteredSchemaAnchor,

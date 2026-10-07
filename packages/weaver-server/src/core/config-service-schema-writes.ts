@@ -11,6 +11,7 @@ import {
   type ConfigurationValidationSession,
   createConfigurationValidationSession,
 } from "@weaver-conf/config-engine/internal/schema-validation-session";
+import { buildSchemaPatch } from "@weaver-conf/config-service/admission";
 import type {
   ConfigurationPropertySchema,
   ScopeInstance,
@@ -30,7 +31,6 @@ import {
   validationFailure,
   writeFailure,
 } from "./config-service-schema-errors";
-import { buildSchemaPatch } from "./config-service-schema-patches";
 import type {
   EffectiveValidationContext,
   SchemaWriteContext,

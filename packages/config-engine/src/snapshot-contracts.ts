@@ -26,6 +26,7 @@ const originSchema = z.strictObject({
   layer: z.string().min(1),
   providerId: z.string().min(1),
   rank: z.number().finite(),
+  sourcePath: z.array(z.string().min(1)).min(1).readonly().optional(),
 });
 const layerSchema = originSchema
   .extend({
@@ -88,6 +89,11 @@ export const resolvedPathInspectionSchema = guarded(
       effectiveValue: z.unknown(),
       effectiveLayer: z.string().optional(),
       effectiveProviderId: z.string().optional(),
+      effectiveSourcePath: z
+        .array(z.string().min(1))
+        .min(1)
+        .readonly()
+        .optional(),
       contributions: z.array(contributionSchema).readonly(),
     })
     .readonly(),

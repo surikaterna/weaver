@@ -1,5 +1,4 @@
 import type { AuthConfig } from "@weaver-conf/config-auth";
-import type { CanonicalSchemaRegistryReader } from "@weaver-conf/config-registry";
 import {
   type ConfigurationAuthorityAuditRecord,
   type ConfigurationAuthorityController,
@@ -13,35 +12,31 @@ import {
   capturePort,
   invalidHost,
   ownRecord,
-  portMember,
 } from "./authority/authority-contract-capture";
 
-const registryMethods = [
-  "getSchema",
-  "resolveAnchor",
-  "listAll",
-  "listRegisteredSchemaIdentities",
-  "listRegisteredSchemaIdentityPage",
-  "getRegisteredSchema",
-];
-const registrySchema = z.custom<CanonicalSchemaRegistryReader>((value) => {
-  if (!value || typeof value !== "object") return false;
-  return registryMethods.every(
-    (key) => typeof portMember(value, key) === "function",
-  );
-});
+const registrySchema = z
+  .strictObject({
+    initial: z.unknown().optional(),
+    storage: z
+      .discriminatedUnion("kind", [
+        z.strictObject({ kind: z.literal("memory") }),
+        z.strictObject({
+          kind: z.literal("provider"),
+          providerId: z.string().min(1),
+        }),
+      ])
+      .optional(),
+    schemaIdentityMaxPageSize: z.number().int().positive().safe().optional(),
+  })
+  .readonly();
 function callable<T>() {
   return z.custom<T>((value) => typeof value === "function");
 }
 const hostShape = z
   .strictObject({
     registry: registrySchema.optional(),
-    hostAuthority: configurationHostAuthoritySchema.optional(),
-    authConfig: z.custom<AuthConfig>().optional(),
-    onAuthorityReady:
-      callable<
-        (controller: ConfigurationAuthorityController) => void
-      >().optional(),
+    hostAuthority: configurationHostAuthoritySchema,
+    authConfig: z.custom<AuthConfig>((value) => value !== undefined),
     now: callable<() => number>().optional(),
     writers: z
       .array(configurationProviderWriteBindingSchema)
@@ -71,6 +66,9 @@ function captureHost(input: unknown): unknown {
   }
   return {
     ...fields,
+    ...(fields.registry === undefined
+      ? {}
+      : { registry: captureData(fields.registry) }),
     ...(fields.hostAuthority === undefined
       ? {}
       : {
@@ -88,19 +86,30 @@ function captureHost(input: unknown): unknown {
   };
 }
 /** Trusted composition shapes, never principal verification or capability minting. */
-export const configurationServiceHostOptionsSchema = z.preprocess(
-  (input, context) => {
-    try {
-      return captureHost(input);
-    } catch {
-      context.addIssue({
-        code: "custom",
-        message: "Invalid configuration host",
-      });
-      return z.NEVER;
-    }
-  },
+function captureHostInput(input: unknown, context: z.RefinementCtx) {
+  try {
+    return captureHost(input);
+  } catch {
+    context.addIssue({
+      code: "custom",
+      message: "Invalid configuration host",
+    });
+    return z.NEVER;
+  }
+}
+export const configurationServiceHostBindingSchema = z.preprocess(
+  captureHostInput,
   hostShape,
+);
+export const configurationServiceHostOptionsSchema = z.preprocess(
+  captureHostInput,
+  hostShape
+    .unwrap()
+    .extend({
+      onAuthorityReady:
+        callable<(controller: ConfigurationAuthorityController) => void>(),
+    })
+    .readonly(),
 );
 export type ConfigurationServiceHostOptions = z.output<
   typeof configurationServiceHostOptionsSchema

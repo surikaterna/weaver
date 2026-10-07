@@ -1,5 +1,4 @@
-import type { CanonicalSchemaRegistryReader } from "@weaver-conf/config-registry";
-import { createRegistryAdapter } from "@weaver-conf/config-registry/internal/server-adapter";
+import type { ConfigurationServiceHostOptions } from "@weaver-conf/config-service";
 import {
   type ConfigurationServiceOptions,
   type ConfigurationServiceProviderBinding,
@@ -8,7 +7,6 @@ import {
   createWeaverError,
 } from "@weaver-conf/config-types";
 import { z } from "zod";
-import { parsePersistedRegistry } from "./schema-registry-persistence";
 
 const selectionSchema = z.strictObject({
   providerId: z.string().min(1),
@@ -21,16 +19,19 @@ export function captureAuthorityRegistryLoader(
   configuration: ConfigurationServiceOptions,
   selection: Selection,
   schemaIdentityMaxPageSize = 200,
-): () => Promise<CanonicalSchemaRegistryReader> {
+): () => Promise<NonNullable<ConfigurationServiceHostOptions["registry"]>> {
   const parsed = selectionSchema.safeParse(selection);
   if (!parsed.success) return invalidBinding();
   const binding = selectBinding(configuration, parsed.data);
   const load = captureLoad(binding);
-  const environment = configuration.identity.environment;
   const pageSize = z.number().int().min(50).max(Number.MAX_SAFE_INTEGER);
   if (!pageSize.safeParse(schemaIdentityMaxPageSize).success)
     return invalidBinding();
-  return () => loadRegistry(load, environment, schemaIdentityMaxPageSize);
+  return async () => ({
+    initial: await loadRegistry(load),
+    storage: { kind: "provider", providerId: parsed.data.providerId },
+    schemaIdentityMaxPageSize,
+  });
 }
 
 function invalidBinding(): never {
@@ -115,31 +116,26 @@ function ownField(input: unknown, key: string): unknown {
   return descriptor && "value" in descriptor ? descriptor.value : undefined;
 }
 
-async function loadRegistry(
-  load: () => Promise<unknown>,
-  environment: string,
-  schemaIdentityMaxPageSize: number,
-): Promise<CanonicalSchemaRegistryReader> {
+async function loadRegistry(load: () => Promise<unknown>): Promise<unknown> {
   const layer = await loadLayer(load);
-  const registry = ownField(ownField(layer.entries, "_weaver"), "registry");
+  const internal = ownField(layer.entries, "_weaver");
+  const registry = ownField(internal, "registry");
+  if (
+    registry === undefined &&
+    !(
+      internal !== null &&
+      typeof internal === "object" &&
+      Object.hasOwn(internal, "registry")
+    )
+  )
+    return undefined;
   const raw = ownField(registry, "schemas");
   if (raw === undefined || ownField(raw, "environments") === undefined)
     throw createWeaverError(
       "SERVER_DEGRADED",
       "Persisted registry metadata is unavailable",
     );
-  try {
-    const state = parsePersistedRegistry(raw);
-    return createRegistryAdapter(
-      { defaultEnvironment: environment, schemaIdentityMaxPageSize },
-      state,
-    ).reader;
-  } catch {
-    throw createWeaverError(
-      "VALIDATION_ERROR",
-      "Persisted registry metadata is invalid",
-    );
-  }
+  return raw;
 }
 
 async function loadLayer(load: () => Promise<unknown>) {

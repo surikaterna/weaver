@@ -1,4 +1,4 @@
-import { configurationServiceHostOptionsSchema } from "@weaver-conf/config-service";
+import { configurationServiceHostBindingSchema } from "@weaver-conf/config-service";
 import {
   type ConfigurationServiceIdentity,
   captureServiceData,
@@ -44,7 +44,7 @@ const registrySelectionSchema = z.strictObject({
   providerId: z.string().min(1),
   layer: z.string().min(1),
 });
-const requiredHostSchema = configurationServiceHostOptionsSchema.transform(
+const requiredHostSchema = configurationServiceHostBindingSchema.transform(
   (host, context) => {
     if (!host.authConfig || !host.hostAuthority || !host.writers) {
       context.addIssue({

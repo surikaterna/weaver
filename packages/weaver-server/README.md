@@ -51,6 +51,24 @@ The private sorted index retains O(N) identity references, builds on hydration a
 
 ### Schema registry v2 upgrade and rollback (`weaver-afwt`)
 
+The opt-in shared-authority server loads raw persisted registry metadata and passes
+it, with the selected fixed provider binding, to the configuration root. The root
+owns the sole live registry adapter; bootstrap does not create a second registry.
+Truly absent registry metadata permits first provisioning, while an existing
+incomplete container rejects startup. The existing v1/v2 codecs now belong to
+`@weaver-conf/config-registry/persistence`; invalid inputs produce sanitized typed
+`VALIDATION_ERROR` errors. Programmatic hosts administer live metadata through the
+root's explicit schema capability port. This does not add HTTP/SCOMP schema routes
+to the shared-authority host or change the legacy server's default selection.
+
+The shared-authority host's existing PUT/DELETE routes submit one command through
+`controller.forMutations(token).apply(commands)`. Responses expose the canonical
+receipt list and commanded-identity revisions; successful ETags use the returned
+revision, not a later query. Public JSON aggregate reads use the same pruned projection.
+Native embedded callers must replace root/query `set`/`remove` with this command port.
+No HTTP batch, patch, validation, SSE or new SCOMP endpoint is added by this migration;
+the default legacy server and its transport-backed SDK remain separate cutover work.
+
 Before deploying, stop **all old registration writers**; mixed old/new writers are unsupported. Take a verified, restorable snapshot of the protected `_weaver.registry.schemas` root (including its enclosing storage layer) and retain the authoritative service/fragment registration source. A versionless grouped v1 root loads read-only. The first successful registration writes the complete strict `{version:2,environments:{...}}` snapshot through the existing internal write path; unsuccessful registration or persistence failure does not upgrade the root. The schema graph codec inside entries remains version 1. Old binaries **cannot read v2**: never restart one against upgraded storage. To roll back, stop all new writers, restore the verified pre-upgrade v1 snapshot, then start old binaries. This discards registrations made since that snapshot. Prefer a forward v2 fix/redeploy if those registrations must be retained. Compare identities with the authoritative source/backup and re-register any missing identities from that source; a lone valid colon-bearing legacy entry cannot reveal whether an alias was lost, so never infer or fabricate its counterpart. An invalid envelope, metadata mismatch, or malformed graph fails registry startup before writes: investigate/restore from the snapshot rather than editing keys in place.
 
 ### Audit

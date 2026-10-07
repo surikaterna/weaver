@@ -4,15 +4,15 @@ import type {
   authorizationDecisionSchema,
   authorizationRequestSchema,
   configurationAuthorityAuditRecordSchema,
+  configurationAuthorizationRequestSchema,
   trustedPrincipalSnapshotSchema,
 } from "./schemas-service-authority";
+import type { ConfigurationMutationAuthority } from "./service-mutations";
 import type {
-  ConfigurationServiceIdentity,
-  ConfigurationServiceWriteOptions,
-  ConfigurationServiceWriteResult,
-  HydratedConfigurationInspection,
-} from "./service-capabilities";
-import type { CanonicalConfigurationPath } from "./service-paths";
+  ConfigurationReader,
+  ConfigurationReaderSelection,
+} from "./service-readers";
+import type { ConfigurationSchemaAuthorityRequest } from "./service-schema-authority";
 
 export type AuthorityGrant = z.infer<typeof authorityGrantSchema>;
 export type TrustedPrincipalSnapshot = z.infer<
@@ -20,6 +20,9 @@ export type TrustedPrincipalSnapshot = z.infer<
 >;
 export type AuthorizationDecision = z.infer<typeof authorizationDecisionSchema>;
 export type AuthorizationRequest = z.infer<typeof authorizationRequestSchema>;
+export type ConfigurationAuthorizationRequest = z.infer<
+  typeof configurationAuthorizationRequestSchema
+>;
 export type ConfigurationAuthorityAuditRecord = z.infer<
   typeof configurationAuthorityAuditRecordSchema
 >;
@@ -30,37 +33,23 @@ export interface ConfigurationAuthorityCapability {
   readonly [authorityCapability]: true;
 }
 
-/** Trusted host request port, not a consumer factory or an identity verifier. */
-export interface ConfigurationAuthorityRequest {
-  readonly identity: ConfigurationServiceIdentity;
-  readonly revision: string;
-  prepare(): Promise<void>;
-  get(path: CanonicalConfigurationPath): unknown;
-  inspect(path: CanonicalConfigurationPath): HydratedConfigurationInspection;
-  set(
-    path: CanonicalConfigurationPath,
-    value: unknown,
-    options: ConfigurationServiceWriteOptions,
-  ): Promise<ConfigurationServiceWriteResult>;
-  remove(
-    path: CanonicalConfigurationPath,
-    options: ConfigurationServiceWriteOptions,
-  ): Promise<ConfigurationServiceWriteResult>;
-}
-
 export interface ConfigurationAuthorityController {
+  forMutations(
+    capability: ConfigurationAuthorityCapability,
+  ): ConfigurationMutationAuthority;
+  forSchemas(
+    capability: ConfigurationAuthorityCapability,
+  ): ConfigurationSchemaAuthorityRequest;
   mint(snapshot: TrustedPrincipalSnapshot): ConfigurationAuthorityCapability;
   revoke(capability: ConfigurationAuthorityCapability): void;
   replace(
     capability: ConfigurationAuthorityCapability,
     snapshot: TrustedPrincipalSnapshot,
   ): ConfigurationAuthorityCapability;
-  bindRoot(capability: ConfigurationAuthorityCapability): void;
   forIdentity(
     capability: ConfigurationAuthorityCapability,
-    identity: ConfigurationServiceIdentity,
-    namespace: CanonicalConfigurationPath,
-  ): ConfigurationAuthorityRequest;
+    selection: ConfigurationReaderSelection,
+  ): ConfigurationReader;
 }
 
 export interface ConfigurationHostAuthority {

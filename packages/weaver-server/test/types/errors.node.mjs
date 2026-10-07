@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  configurationServiceWriteResultSchema,
+  configurationMutationResultSchema,
   WeaverErrorInstance,
 } from "@weaver-conf/config-types";
 import {
@@ -69,17 +69,18 @@ test("legacy REST write statuses and unknown-code fallback remain unchanged", ()
 test("hydrated unknown outcomes are exclusive to WRITE_OUTCOME_UNKNOWN", () => {
   for (const code of ["DISPOSED", "WRITE_ERROR"]) {
     const error = { code, message: "failed" };
-    assert.equal(configurationServiceWriteResultSchema.safeParse(
-      { success: false, error, outcome: "rejected" }).success, true);
-    assert.equal(configurationServiceWriteResultSchema.safeParse(
-      { success: false, error, outcome: "unknown" }).success, false);
+    assert.equal(configurationMutationResultSchema.safeParse(
+      { success: false, error, outcome: "rejected", results: [] }).success, true);
+    assert.equal(configurationMutationResultSchema.safeParse(
+      { success: false, error, outcome: "unknown", results: [] }).success, false);
   }
   for (const code of weaverErrorCodes) {
-    const result = { success: false, error: { code, message: "failed" }, outcome: "unknown" };
-    assert.equal(configurationServiceWriteResultSchema.safeParse(result).success,
+    const error = { code, message: "failed" };
+    const result = { success: false, error, outcome: "unknown", results: [{ index: 0, effect: "unknown", error }] };
+    assert.equal(configurationMutationResultSchema.safeParse(result).success,
       code === "WRITE_OUTCOME_UNKNOWN", code);
   }
-  assert.equal(configurationServiceWriteResultSchema.safeParse({
-    success: false, error: { code: "WRITE_OUTCOME_UNKNOWN", message: "failed" }, outcome: "rejected",
+  assert.equal(configurationMutationResultSchema.safeParse({
+    success: false, error: { code: "WRITE_OUTCOME_UNKNOWN", message: "failed" }, outcome: "rejected", results: [],
   }).success, false);
 });

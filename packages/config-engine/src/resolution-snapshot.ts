@@ -26,6 +26,7 @@ function originOf(layer: ResolutionLayer): ResolutionOrigin {
     layer: layer.layer,
     providerId: layer.providerId,
     rank: layer.rank,
+    ...(layer.sourcePath === undefined ? {} : { sourcePath: layer.sourcePath }),
   });
 }
 
@@ -37,7 +38,11 @@ function validatePlan(input: ResolutionSnapshotInput): void {
         "UNSUPPORTED_OPERATION",
         "Opaque custom merge cannot provide provenance",
       );
-    const pair = JSON.stringify([layer.layer, layer.providerId]);
+    const pair = JSON.stringify([
+      layer.layer,
+      layer.providerId,
+      layer.sourcePath,
+    ]);
     if (pairs.has(pair))
       throw createWeaverError(
         "VALIDATION_ERROR",
@@ -145,6 +150,9 @@ export function inspectResolvedPath(
     effectiveValue: effective.value,
     effectiveLayer: winner?.layer,
     effectiveProviderId: winner?.providerId,
+    ...(winner?.sourcePath === undefined
+      ? {}
+      : { effectiveSourcePath: winner.sourcePath }),
     contributions: Object.freeze(contributions),
   });
 }

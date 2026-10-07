@@ -37,6 +37,34 @@ The full SDK matrix remains `weaver-0b81.9`; independent integrated audit and
 packed consumer gates remain required. Historical architecture below is retained
 without expanding replay, distributed-writer or durability guarantees.
 
+`weaver-sbmu` replaces native root/query writers with one host-capability mutation
+port, `forMutations(token).apply(commands)`. Ordered JSON set/remove/value-patch
+commands share the existing FIFO and stage every prefix before effects. Grouped
+flush and per-command receipts distinguish rejected, known partial and unknown
+outcomes without transaction or rollback fiction. The existing authority HTTP writes
+submit one-command lists and return this result directly; public aggregate queries
+remain projected. This does not add network batch/patch/validation routes or certify
+the legacy transport SDK against the native command API.
+
+`weaver-xezt` gives the shared configuration root one owned live registry and an
+explicit host-only schema capability port. Registration shares the data FIFO and
+stages metadata, encoded persistence and all ready projections before provider
+effects; required flush precedes publication. The central host supplies detached
+bootstrap data and the selected storage binding, not a separately owned reader.
+Uncertain schema persistence fences all payload access until root recreation,
+because disclosure policy itself may have changed. The shared-authority HTTP/SCOMP
+schema surface and default-server cutover remain separate work; this is not SDK
+parity, multi-writer coordination or automatic recovery.
+
+`weaver-0b81.7` connects native reader notifications to that same publication seam.
+Committed batches/prefixes, schema invalidations and validated reload/readback
+observations share one `ConfigurationReaderChange` union. Delivery reauthorizes the
+captured selection; obsolete policy evidence yields value-free invalidation, not old
+values under new policy. Root reload, declared-writer flush, explicit provider watch
+ownership and revision-bounded restart acknowledgement use the same FIFO. Neither
+reload nor acknowledgement clears uncertainty. These are core capabilities, not an
+HTTP/SSE/SCOMP feed or a migrated SDK cache; those integrations remain separate work.
+
 Browser clients need synchronous local reads and optional offline persistence. Backend
 services need layer-targeted writes, schema metadata, and restart detection. Both use
 the same transport-backed client, but a prior design also made local Zod declarations

@@ -1,11 +1,12 @@
 import { consoleLogger } from "@weaver-conf/config-engine";
 import {
+  type AuthorizationRequest,
   type ConfigurationAuthorityAuditRecord,
   configurationAuthorityAuditRecordSchema,
   createWeaverError,
+  type TrustedPrincipalSnapshot,
 } from "@weaver-conf/config-types";
 import type { RootState } from "../root-state";
-import type { WriteTicket } from "./authority-write";
 
 export function invokeWriteHook<T>(state: RootState, hook: () => T): T {
   if (state.writeHookActive)
@@ -19,7 +20,11 @@ export function invokeWriteHook<T>(state: RootState, hook: () => T): T {
 }
 export async function auditWrite(
   state: RootState,
-  ticket: WriteTicket,
+  ticket: {
+    readonly principal: TrustedPrincipalSnapshot;
+    readonly request: AuthorizationRequest;
+    readonly commandIndex?: number;
+  },
   phase: ConfigurationAuthorityAuditRecord["phase"],
 ): Promise<void> {
   const audit = state.factory.host.audit;
@@ -29,6 +34,9 @@ export async function auditWrite(
       principalId: ticket.principal.principalId,
       request: ticket.request,
       phase,
+      ...(ticket.commandIndex === undefined
+        ? {}
+        : { commandIndex: ticket.commandIndex }),
     });
     await invokeWriteHook(state, () => audit(record));
   } catch {

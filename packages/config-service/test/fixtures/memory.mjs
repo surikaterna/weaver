@@ -48,3 +48,19 @@ export function scopeOptions({ firstGate, secondGate, firstFails = false } = {})
     providers: [binding(base), ...scopes, binding(last)],
   }) };
 }
+
+export function viewSchema() {
+  const settings = {
+    flag: { type: ["string", "null"] },
+    panel: { type: "object", properties: { a: { type: "number" }, b: { type: "number" } } },
+    list: { type: "array", items: { type: "number" } },
+    missing: { type: "string" },
+    "literal.dot": { type: "string" },
+    "雪": { type: "string" },
+    hidden: { type: "string", "x-weaver": { sensitive: true } },
+    admin: { type: "string", "x-weaver": { visibility: "admin" } },
+  };
+  return { type: "object", properties: { ...settings,
+    instances: { type: "object", additionalProperties: { type: "object", properties: structuredClone(settings) } },
+  } };
+}

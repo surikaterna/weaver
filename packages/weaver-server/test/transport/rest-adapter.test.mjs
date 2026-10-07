@@ -86,7 +86,7 @@ describe("RestAdapter v1", () => {
 
   test("authorized generic writes retain typed 400 errors and zero effects on complete denial", async () => {
     const { svc, adapter, provider, registry } = await setup();
-    await registerTestSchema(registry, "open", "dev", { mode: { type: "string" } }, { additionalProperties: true });
+    await registerTestSchema(registry, "open", "dev", { mode: { type: "string" } }, { additionalProperties: false });
     const writes = vi.spyOn(provider, "write");
     const removes = vi.spyOn(provider, "remove");
     const deltas = [];

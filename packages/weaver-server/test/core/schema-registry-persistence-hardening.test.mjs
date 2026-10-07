@@ -1,11 +1,10 @@
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
-import { ZodError } from "zod";
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { createPersistentSchemaRegistry } from "../../src/core/schema-registry.ts";
 import {
   parsePersistedRegistry,
   serializeRegistry,
-} from "../../src/core/schema-registry-persistence.ts";
+} from "@weaver-conf/config-registry/persistence";
 
 const dangerousSegments = ["__proto__", "constructor", "prototype"];
 const reservedEnvironments = ["__proto__", "constructor", "prototype"];
@@ -65,7 +64,7 @@ describe("persistent schema registry hardening", () => {
         parsePersistedRegistry({
           environments: { [environment]: environmentRegistry },
         }),
-      ).toThrow(ZodError);
+      ).toThrow("Invalid registry persistence data");
     }
   });
 
@@ -96,7 +95,7 @@ describe("persistent schema registry hardening", () => {
     );
     await expect(
       createPersistentSchemaRegistry({ configService: malformed.configService }),
-    ).rejects.toBeInstanceOf(ZodError);
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: "Invalid registry persistence data" });
     malformed.expectNoWrites();
 
     const valid = await createPersistenceHarness({});
@@ -226,7 +225,6 @@ describe("persistent schema registry hardening", () => {
         ]) {
           await expectPersistedRegistryRejection(
             environmentRegistry,
-            segment,
           );
         }
       }
@@ -255,7 +253,6 @@ describe("persistent schema registry hardening", () => {
         for (const environmentRegistry of cases) {
           await expectPersistedRegistryRejection(
             environmentRegistry,
-            segment,
           );
         }
       }
@@ -347,10 +344,10 @@ function slotMetadataCase(path, field, value) {
   return { schemas: {}, slots: { [path]: slot } };
 }
 
-async function expectPersistedRegistryRejection(environmentRegistry, segment) {
+async function expectPersistedRegistryRejection(environmentRegistry) {
   const configService = await configServiceWithRegistry(environmentRegistry);
   await expect(createPersistentSchemaRegistry({ configService })).rejects.toThrow(
-    `Path segment "${segment}" is not allowed`,
+      "Invalid registry persistence data",
   );
 }
 
@@ -359,14 +356,9 @@ async function expectReservedEnvironmentRejection(configService) {
     await createPersistentSchemaRegistry({ configService });
     throw new Error("Expected persisted environment rejection");
   } catch (error) {
-    expect(error).toBeInstanceOf(ZodError);
-    expect(error.issues).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          message: "Environment uses a reserved identifier",
-        }),
-      ]),
-    );
+    expect(error.code).toBe("VALIDATION_ERROR");
+    expect(error.message).toBe("Invalid registry persistence data");
+    expect(error.issues).toBeUndefined();
   }
 }
 

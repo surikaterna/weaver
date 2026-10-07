@@ -7,6 +7,7 @@ import type { SchemaIdentityPages } from "./identity-pages";
 import type {
   CanonicalSchemaRegistryReader,
   RegisteredSchemaAnchor,
+  RegistryProjectionReader,
 } from "./registry-contracts";
 import {
   type RegistryState,
@@ -20,6 +21,7 @@ export function createRegistryReader(
   defaultEnvironment: string,
 ): CanonicalSchemaRegistryReader {
   return {
+    ...createRegistryProjectionReader(state, defaultEnvironment),
     getSchema(serviceId, environment) {
       try {
         const { servicePath } = deriveServicePath(serviceId);
@@ -31,18 +33,8 @@ export function createRegistryReader(
         return null;
       }
     },
-    resolveAnchor(path, environment) {
-      return findRegisteredAnchor(
-        state().schemas.values(),
-        path,
-        environment ?? defaultEnvironment,
-      );
-    },
     listAll() {
       return structuredClone(listSchemas(state()));
-    },
-    listRegisteredSchemaIdentities() {
-      return listSchemaIdentities(state());
     },
     listRegisteredSchemaIdentityPage(input) {
       return pages.page(input);
@@ -54,6 +46,24 @@ export function createRegistryReader(
         : null;
     },
   };
+}
+
+export function createRegistryProjectionReader(
+  state: () => RegistryState,
+  defaultEnvironment: string,
+): RegistryProjectionReader {
+  return Object.freeze({
+    resolveAnchor(path: string, environment?: string) {
+      return findRegisteredAnchor(
+        state().schemas.values(),
+        path,
+        environment ?? defaultEnvironment,
+      );
+    },
+    listRegisteredSchemaIdentities() {
+      return structuredClone(listSchemaIdentities(state()));
+    },
+  });
 }
 
 export function listSchemas(state: RegistryState) {

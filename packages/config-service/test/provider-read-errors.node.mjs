@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { withConsumer } from "./fixtures/packed-consumer.mjs";
+import { hostedReader, readonlyHost } from "./fixtures/authority.mjs";
 
 function input(bindings, extra = {}) {
   return {
@@ -76,20 +77,20 @@ async function hydrationProof(api, directory, format) {
   try {
     for (const ioFailure of [false, true]) {
       if (ioFailure) { await rm(filePath); await mkdir(filePath); }
-      await assert.rejects(api.createConfigurationService(options), sanitized("SERVER_DEGRADED", filePath, "broken"));
-      const root = await api.createConfigurationService({ ...options, failureMode: "allow-degraded" });
+      await assert.rejects(api.createConfigurationService(options, readonlyHost(options)), sanitized("SERVER_DEGRADED", filePath, "broken"));
+      const { root, reader } = await hostedReader({ ...options, failureMode: "allow-degraded" }, "/alpha", api.createConfigurationService);
       try {
         assert.equal(root.mode, "degraded");
         assert.deepEqual(root.degradedProviders, ["broken"]);
-        assert.equal(root.get("/alpha/flag"), "confirmed");
-        assert.ok(root.inspect("/alpha/flag").contributions.every((item) => item.providerId !== "broken"));
-        assert.equal(root.getAtLayer("broken", "/alpha/flag"), undefined);
+        assert.equal(reader.get(["flag"]), "confirmed");
+        assert.ok(reader.inspect(["flag"]).contributions.every((item) => item.providerId !== "broken"));
+        assert.equal(reader.get(["flag"], { layer: "broken" }), undefined);
       } finally { await root.dispose(); }
     }
     await rm(filePath, { recursive: true });
     for (const contents of [undefined, "{}"]) {
       if (contents) await writeFile(filePath, contents);
-      const root = await api.createConfigurationService(options);
+      const root = await api.createConfigurationService(options, readonlyHost(options));
       try { assert.equal(root.mode, "live"); assert.deepEqual(root.degradedProviders, []); }
       finally { await root.dispose(); }
     }
@@ -107,20 +108,21 @@ async function preloadProof(api, directory, format) {
   const first = [{ scopeId: "region", value: "first" }], second = [{ scopeId: "region", value: "second" }];
   const bindings = providers.map((provider, index) => binding(provider, index ? { scopePath: index === 1 ? first : second } : {}));
   const options = input(bindings, { layers: [{ kind: "fixed", layer: "base", providerIds: ["base"] }, { kind: "scope", layer: "scope", providerIds: ["first", "second"] }] });
-  const root = await api.createConfigurationService(options);
+  const { root, reader } = await hostedReader(options, "/alpha", api.createConfigurationService);
   try {
-    await root.preloadScope(first);
-    const revision = root.revision, identity = root.identity, inspection = root.inspect("/alpha/flag");
-    await assert.rejects(root.preloadScope(second), sanitized("SERVER_DEGRADED", secondPath, "second"));
-    assert.equal(root.revision, revision); assert.deepEqual(root.identity, identity);
-    assert.deepEqual(root.inspect("/alpha/flag"), inspection);
-    assert.equal(root.get("/alpha/flag"), "base");
-    assert.equal(root.getForScope("/alpha/flag", first), "first");
-    assert.throws(() => root.getForScope("/alpha/flag", second), { code: "SCOPE_NOT_LOADED" });
+    const firstReader = reader.withScope(first), secondReader = reader.withScope(second);
+    await firstReader.prepare();
+    const revision = reader.revision, identity = reader.selection.identity, inspection = reader.inspect(["flag"]);
+    await assert.rejects(secondReader.prepare(), sanitized("SERVER_DEGRADED", secondPath, "second"));
+    assert.equal(reader.revision, revision); assert.deepEqual(reader.selection.identity, identity);
+    assert.deepEqual(reader.inspect(["flag"]), inspection);
+    assert.equal(reader.get(["flag"]), "base");
+    assert.equal(firstReader.get(["flag"]), "first");
+    assert.throws(() => secondReader.get(["flag"]), { code: "SCOPE_NOT_LOADED" });
     await writeFile(secondPath, '{"alpha":{"flag":"repaired"}}');
-    await root.preloadScope(second);
-    assert.equal(root.getForScope("/alpha/flag", second), "repaired");
-    assert.equal(root.revision, revision);
+    await secondReader.prepare();
+    assert.equal(secondReader.get(["flag"]), "repaired");
+    assert.equal(reader.revision, revision);
   } finally { await root.dispose(); for (const provider of providers) provider.dispose(); }
 }
 

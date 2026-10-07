@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createRegistryAdapter } from "@weaver-conf/config-registry/internal/server-adapter";
 import { defineWeaver, Layers } from "@weaver-conf/config-types";
 import { createFileSystemStorageProvider } from "@weaver-conf/storage-providers";
-import { serializeRegistry } from "../../src/core/schema-registry-persistence.ts";
+import { serializeRegistry } from "@weaver-conf/config-registry/persistence";
 
 export const testSecret = "authority-tests-only-not-a-production-secret";
 export function jwt(claims = {}, secret = testSecret, alg = "HS256") {
@@ -37,7 +37,7 @@ export function canonicalSeed(environment) {
       state = prepared.candidate; prepared.publish();
     }
   }
-  return { reader: adapter.reader, serialized: serializeRegistry(state) };
+  return { serialized: serializeRegistry(state) };
 }
 
 function instrument(provider) {

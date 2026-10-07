@@ -7,10 +7,10 @@ import {
 import {
   expandReadEvidence,
   type ReadEvidence,
+  readMemberEvidence,
   readMemberIsAmbiguous,
-  readMemberSchemas,
 } from "./registered-read-metadata";
-import type { CanonicalSchemaRegistryReader } from "./registry-contracts";
+import type { RegistryProjectionReader } from "./registry-contracts";
 import { ownValue } from "./structural-witness-own-data";
 
 interface AnchorNode {
@@ -18,6 +18,9 @@ interface AnchorNode {
   schema?: ConfigurationPropertySchema;
 }
 export interface ReadContext {
+  readonly path: readonly string[];
+  readonly policies: readonly ConfigurationPropertySchema[];
+  readonly hardForbidden: boolean;
   readonly evidence: ReadEvidence;
   readonly candidate: unknown;
   readonly anchor: AnchorNode | undefined;
@@ -29,7 +32,7 @@ export interface ReadContext {
 }
 
 export function captureReadAnchors(
-  reader: CanonicalSchemaRegistryReader,
+  reader: RegistryProjectionReader,
   environment: string,
 ): AnchorNode {
   const root: AnchorNode = { children: new Map() };
@@ -65,6 +68,8 @@ class ReadContexts {
     anchors: AnchorNode,
     state: Readonly<Record<string, unknown>>,
     sources: readonly unknown[],
+    private readonly storagePath: readonly string[] = [],
+    private readonly addressed = false,
   ) {
     this.root = this.intern(
       anchors.schema ? [anchors.schema] : [],
@@ -94,23 +99,39 @@ class ReadContexts {
     sources: readonly unknown[],
     uncertain: boolean,
     ancestorDenied: boolean,
+    unconstrained = false,
+    path: readonly string[] = [],
+    policies: readonly ConfigurationPropertySchema[] = [],
+    hardForbidden = false,
   ): ReadContext {
-    const evidence = expandReadEvidence(schemas, candidate);
+    const evidence = expandReadEvidence(schemas, candidate, unconstrained);
     const parts = evidence.schemas.map((schema) => this.id(schema));
     const sourceIds = sources.map((value) => this.id(value));
-    const key = `${inherited || evidence.forbidden}:${ancestorDenied}:${uncertain || evidence.ambiguous}:${anchor ? this.id(anchor) : ""}:${parts.join(",")}:${sourceIds.join(",")}`;
-    let values = this.contextKeys.get(key);
-    if (!values) {
-      values = new Map();
-      this.contextKeys.set(key, values);
-    }
+    const key = [
+      this.addressed ? JSON.stringify(path) : "",
+      hardForbidden,
+      unconstrained,
+      inherited || evidence.forbidden,
+      ancestorDenied,
+      uncertain || evidence.ambiguous,
+      anchor ? this.id(anchor) : "",
+      parts.join(","),
+      // Inherited policy conjunctions must not collapse to one forbidden bit.
+      [...new Set(policies)].map((schema) => this.id(schema)).join(","),
+      sourceIds.join(","),
+    ].join(":");
+    const values = this.valuesFor(key);
     const existing = values.get(candidate);
     if (existing) return existing;
     const context = Object.freeze({
+      path: Object.freeze([...path]),
+      policies: Object.freeze([...policies, ...evidence.schemas]),
+      hardForbidden,
       evidence,
       candidate,
       anchor,
-      declared: schemas.length > 0 || (anchor?.children.size ?? 0) > 0,
+      declared:
+        unconstrained || schemas.length > 0 || (anchor?.children.size ?? 0) > 0,
       forbidden: inherited || evidence.forbidden,
       ancestorDenied,
       uncertain: uncertain || evidence.ambiguous,
@@ -119,6 +140,14 @@ class ReadContexts {
     values.set(candidate, context);
     return context;
   }
+  private valuesFor(key: string): Map<unknown, ReadContext> {
+    let values = this.contextKeys.get(key);
+    if (!values) {
+      values = new Map();
+      this.contextKeys.set(key, values);
+    }
+    return values;
+  }
   readonly child = (parent: ReadContext, key: string): ReadContext => {
     // Classify the intact parent before narrowing its marker and source context.
     const ancestorDenied =
@@ -126,7 +155,8 @@ class ReadContexts {
       isReadReference(parent.candidate) ||
       (this.referenceDenial?.(parent) ?? false);
     const anchor = parent.anchor?.children.get(key);
-    const schemas = readMemberSchemas(parent.evidence, key, parent.candidate);
+    const member = readMemberEvidence(parent.evidence, key, parent.candidate);
+    const schemas = [...member.schemas];
     if (anchor?.schema) schemas.push(anchor.schema);
     const candidate =
       parent.candidate !== null && typeof parent.candidate === "object"
@@ -142,14 +172,34 @@ class ReadContexts {
       candidate,
       anchor,
       parent.forbidden ||
+        this.storageDenied([...parent.path, key]) ||
         isReservedPathSegment(key) ||
         (parent === this.root && key === "_weaver") ||
         readMemberIsAmbiguous(parent.evidence, key, parent.candidate),
       sources,
       parent.uncertain,
       ancestorDenied,
+      member.unconstrained,
+      [...parent.path, key],
+      parent.policies,
+      parent.hardForbidden ||
+        this.storageDenied([...parent.path, key]) ||
+        isReservedPathSegment(key) ||
+        (parent === this.root && key === "_weaver") ||
+        readMemberIsAmbiguous(parent.evidence, key, parent.candidate),
     );
   };
+  private storageDenied(path: readonly string[]): boolean {
+    if (!path.includes("instances")) return false;
+    if (
+      !this.storagePath.length ||
+      path.slice(this.storagePath.length).includes("instances")
+    )
+      return true;
+    return path
+      .slice(0, this.storagePath.length)
+      .some((part, index) => part !== this.storagePath[index]);
+  }
   bindReferenceDenial(classify: (context: ReadContext) => boolean): void {
     if (this.referenceDenial)
       throw createWeaverError(
@@ -160,7 +210,10 @@ class ReadContexts {
   }
   at(segments: readonly string[]): ReadContext {
     let context = this.root;
-    for (const key of segments) context = this.child(context, key);
+    for (const key of segments) {
+      if (!context.declared) break;
+      context = this.child(context, key);
+    }
     return context;
   }
 }
@@ -175,6 +228,8 @@ export function createReadContexts(
   anchors: AnchorNode,
   state: Readonly<Record<string, unknown>>,
   sources: readonly unknown[] = [],
+  storagePath: readonly string[] = [],
+  addressed = false,
 ) {
-  return new ReadContexts(anchors, state, sources);
+  return new ReadContexts(anchors, state, sources, storagePath, addressed);
 }

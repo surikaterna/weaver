@@ -9,6 +9,7 @@ import { createCanonicalSchemaRegistry, createRegisteredReadProjection, register
   registeredReadProjectionSchema, type RegisteredReadProjection, schemaWriteSupport, structuralSupportSchema,
   type StructuralSupport, type CanonicalSchemaRegistryReader } from '@weaver-conf/config-registry';
 import { createRegistryAdapter } from '@weaver-conf/config-registry/internal/server-adapter';
+import { parsePersistedRegistry, serializeRegistry, serializedSchemaRegistrySchema, type SerializedSchemaRegistry } from '@weaver-conf/config-registry/persistence';
 import { resolveConfigurationSnapshot, validateEffectiveConfiguration, validatePartialConfiguration } from '@weaver-conf/config-engine';
 import { canonicalConfigurationPathSchema, hydratedConfigurationInspectionSchema } from '@weaver-conf/config-types';
 import * as types from '@weaver-conf/config-types';
@@ -17,20 +18,22 @@ import type { z } from 'zod';
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 type Assert<T extends true> = T;
 type IdentifierInput = Assert<Equal<z.input<typeof types.serviceIdSchema>, string>>;
-type RelativeOutput = Assert<Equal<z.output<typeof types.relativeConfigurationPathSchema>, readonly [string, ...string[]]>>;
+type RelativeOutput = Assert<Equal<z.output<typeof types.relativeConfigurationPathSchema>, readonly string[]>>;
 type CanonicalOutput = Assert<Equal<z.output<typeof types.canonicalConfigurationPathSchema>, types.CanonicalConfigurationPath>>;
 types.serviceIdSchema.min(2); types.providerIdSchema.regex(/panel/);
-types.relativeConfigurationPathSchema.out.unwrap().rest(types.providerIdSchema);
+types.relativeConfigurationPathSchema.out.unwrap().min(0);
 types.configurationServiceIdentitySchema.out.unwrap().pick({ environment: true });
 types.configurationServiceIdentitySchema.out.unwrap().omit({ scopePath: true });
-types.configurationServiceIdentitySchema.out.unwrap().extend({ revision: types.hydratedConfigurationReaderSchema.out.shape.revision });
-types.hydratedConfigurationInspectionSchema.out.unwrap().safeExtend({ revision: types.hydratedConfigurationReaderSchema.out.shape.revision });
+types.configurationServiceIdentitySchema.out.unwrap().extend({ revision: types.configurationReaderSchema.out.unwrap().shape.revision });
+types.hydratedConfigurationInspectionSchema.out.unwrap().safeExtend({ revision: types.configurationReaderSchema.out.unwrap().shape.revision });
 engine.resolutionOriginSchema.out.unwrap().shape.rank.finite();
 engine.canonicalConfigPathSchema.out.unwrap().shape.storageKey.min(1);
 registeredReadProjectionSchema.out.pick({ entries: true });
 registeredReadProjectionContextSchema.out.unwrap().shape.revision.min(1);
 const registry: CanonicalSchemaRegistryReader = createCanonicalSchemaRegistry({ defaultEnvironment: 'dev' });
 const adapter = createRegistryAdapter({ defaultEnvironment: 'dev' });
+const serialized: SerializedSchemaRegistry = serializeRegistry(adapter.snapshot());
+serializedSchemaRegistrySchema.parse(serialized); parsePersistedRegistry(serialized);
 const context = registeredReadProjectionContextSchema.parse({ identity: { environment: 'dev', scopePath: [] }, revision: 'r' });
 const projection: RegisteredReadProjection = createRegisteredReadProjection(registry,
   resolveConfigurationSnapshot({ configuredRanks: [0], layers: [], ceilings: [] }), context);
@@ -75,7 +78,7 @@ async function checkProgram(directory, mode) {
     module: bundler ? ts.ModuleKind.ESNext : ts.ModuleKind.NodeNext,
     moduleResolution: bundler ? ts.ModuleResolutionKind.Bundler : ts.ModuleResolutionKind.NodeNext };
   const program = ts.createProgram([filename], options);
-  for (const [suffix, stem] of [["", "index"], ["/internal/server-adapter", "internal/server-adapter"]]) {
+  for (const [suffix, stem] of [["", "index"], ["/internal/server-adapter", "internal/server-adapter"], ["/persistence", "persistence"]]) {
     await assertResolution(directory, filename, options, program, mode, `@weaver-conf/config-registry${suffix}`, stem);
   }
   for (const source of program.getSourceFiles()) {

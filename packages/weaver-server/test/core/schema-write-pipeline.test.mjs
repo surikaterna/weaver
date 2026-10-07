@@ -1,6 +1,6 @@
 import { validatePartialConfiguration } from "@weaver-conf/config-engine";
 import { createInMemoryStorageProvider } from "@weaver-conf/storage-providers";
-import { buildSchemaPatch } from "../../src/core/config-service-schema-patches.ts";
+import { buildSchemaPatch } from "@weaver-conf/config-service/admission";
 import { prepareRegisteredPatchWrite } from "../../src/core/config-service-schema-writes.ts";
 import { createWeaverConfigService } from "../../src/core/config-service.ts";
 import { createSchemaRegistry } from "../../src/core/schema-registry.ts";

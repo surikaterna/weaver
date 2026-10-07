@@ -25,6 +25,8 @@ async function captureCallbacks(sandbox, stage, original, cleanupFails) {
     if (specifier === "node:os") return moduleOf({ tmpdir: () => sandbox });
     if (specifier === "node:test") return moduleOf({ test: (name, callback) => callbacks.push({ name, callback }) });
     if (specifier.startsWith("node:")) return moduleOf(await import(specifier));
+    if (specifier === "./operation-support-fixture.mjs") return moduleOf(await import("./operation-support-fixture.mjs"));
+    if (specifier === "../../config-types/test/domain-boundary-fixture.mjs") return moduleOf(await import("../../config-types/test/domain-boundary-fixture.mjs"));
     return moduleOf({ browserGraphs: undefined, fixture: undefined, installConsumer: undefined,
       run: undefined, withConsumer: undefined, strictDeclarations: undefined,
       exercise: "", readProjectionExercise: "", ancestorProjectionExercise: "", exerciseDomainBoundaries: () => {}, internalExports: [], rootExports: [] });

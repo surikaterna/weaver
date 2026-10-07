@@ -277,22 +277,24 @@ export {
 } from "./schemas-schema-validation";
 export * from "./schemas-service-authority";
 export {
-  configurationEffectiveChangeSchema,
   configurationInspectionValueSchema,
   configurationLayerContributionSchema,
+  configurationReaderChangeOptionsSchema,
+  configurationReaderChangeSchema,
+  configurationRestartStateSchema,
   configurationServiceIdentitySchema,
-  configurationServiceWriteOptionsSchema,
-  configurationServiceWriteResultSchema,
+  configurationServiceSchema,
   hydratedConfigurationInspectionSchema,
-  hydratedConfigurationReaderSchema,
-  hydratedConfigurationServiceSchema,
-  hydratedScopedConfigurationServiceSchema,
-  hydratedServiceConfigurationServiceSchema,
 } from "./schemas-service-capabilities";
+export * from "./schemas-service-mutations";
 export {
   canonicalConfigurationPathSchema,
+  configurationNamespaceSchema,
+  configurationViewIdSchema,
   relativeConfigurationPathSchema,
 } from "./schemas-service-paths";
+export * from "./schemas-service-readers";
+export * from "./schemas-service-schema-authority";
 // schemas-session.ts — Zod schemas for session types
 export {
   godModeSessionSchema,
@@ -311,7 +313,6 @@ export {
 } from "./schemas-transport";
 export type {
   ConfigurationInspection,
-  ConfigurationService,
   ConfigurationSessionHandle,
   ScopedConfigurationService,
   ServiceConfigurationService,
@@ -320,17 +321,14 @@ export type {
 export * from "./service-authority";
 // service.ts — Service interfaces
 export type {
-  ConfigurationEffectiveChange,
   ConfigurationInspectionValue,
   ConfigurationLayerContribution,
+  ConfigurationReaderChange,
+  ConfigurationReaderChangeOptions,
+  ConfigurationRestartState,
+  ConfigurationService,
   ConfigurationServiceIdentity,
-  ConfigurationServiceWriteOptions,
-  ConfigurationServiceWriteResult,
   HydratedConfigurationInspection,
-  HydratedConfigurationReader,
-  HydratedConfigurationService,
-  HydratedScopedConfigurationService,
-  HydratedServiceConfigurationService,
 } from "./service-capabilities";
 export { captureServiceData } from "./service-data-boundary";
 export type {
@@ -351,11 +349,15 @@ export {
   configurationServiceProviderReadContextSchema,
   configurationServiceProviderReadSchema,
 } from "./service-factory-options";
+export * from "./service-mutations";
 export type {
   CanonicalConfigurationPath,
+  ConfigurationNamespace,
   RelativeConfigurationPath,
 } from "./service-paths";
 export * from "./service-provider-write";
+export * from "./service-readers";
+export * from "./service-schema-authority";
 // session.ts — Session layer types
 export type {
   GodModeSession,

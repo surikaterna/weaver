@@ -14,7 +14,7 @@ import {
 import {
   decodeSchemaGraph,
   encodeSchemaGraph,
-} from "../src/core/schema-registry-schema-codec.ts";
+} from "@weaver-conf/config-registry/persistence";
 
 const encoding = "weaver.configuration-property-schema-graph";
 
@@ -383,9 +383,9 @@ describe("public graph registration pipelines", () => {
       providers: [tracked.provider],
       environment: "test",
     });
-    await expect(createPersistentSchemaRegistry({ configService: service })).rejects.toThrow(
-      "Invalid schema node reference",
-    );
+    await expect(createPersistentSchemaRegistry({ configService: service })).rejects.toMatchObject({
+      code: "VALIDATION_ERROR", message: "Invalid registry persistence data",
+    });
     expect(tracked.writes()).toBe(0);
   });
 });

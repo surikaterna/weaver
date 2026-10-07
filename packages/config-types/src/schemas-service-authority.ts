@@ -1,11 +1,15 @@
 import { z } from "zod";
 import { configurationRoleSchema } from "./schemas-policy";
 import { configurationServiceIdentitySchema } from "./schemas-service-capabilities";
-import { canonicalConfigurationPathSchema } from "./schemas-service-paths";
+import {
+  canonicalConfigurationPathSchema,
+  configurationNamespaceSchema,
+  configurationViewIdSchema,
+} from "./schemas-service-paths";
+import { schemaAuthorizationRequestSchema } from "./schemas-service-schema-authority";
 import type {
   ConfigurationAuthorityCapability,
   ConfigurationAuthorityController,
-  ConfigurationAuthorityRequest,
   ConfigurationHostAuthority,
 } from "./service-authority";
 import { serviceDataBoundary } from "./service-data-boundary";
@@ -16,12 +20,18 @@ export const authorityGrantSchema = serviceDataBoundary(
   z
     .strictObject({
       identity: configurationServiceIdentitySchema,
-      namespace: canonicalConfigurationPathSchema,
+      namespace: configurationNamespaceSchema,
       operations: z.array(operation).readonly(),
       layers: names,
-      views: names,
+      views: z.array(configurationViewIdSchema).readonly(),
       sensitive: z.boolean(),
     })
+    .refine(
+      (grant) =>
+        grant.namespace !== "/" ||
+        (!grant.operations.includes("write") && grant.views.length === 0),
+      { message: "Root grants are base read/inspect only" },
+    )
     .readonly(),
 );
 export const trustedPrincipalSnapshotSchema = serviceDataBoundary(
@@ -30,6 +40,10 @@ export const trustedPrincipalSnapshotSchema = serviceDataBoundary(
       principalId: z.string().min(1),
       roles: z.array(configurationRoleSchema).readonly(),
       grants: z.array(authorityGrantSchema).readonly(),
+      schemaPermissions: z
+        .array(z.enum(["read", "register"]))
+        .readonly()
+        .optional(),
       session: z
         .strictObject({
           mode: z.string().min(1),
@@ -42,25 +56,44 @@ export const trustedPrincipalSnapshotSchema = serviceDataBoundary(
     .readonly(),
 );
 export const authorizationDecisionSchema = z.enum(["allowed", "denied"]);
-export const authorizationRequestSchema = serviceDataBoundary(
-  z
-    .strictObject({
-      identity: configurationServiceIdentitySchema,
-      namespace: canonicalConfigurationPathSchema,
-      path: canonicalConfigurationPathSchema,
-      operation,
-      layer: z.string().min(1).optional(),
-      viewId: z.string().min(1).optional(),
-      sensitive: z.boolean(),
-    })
-    .readonly(),
+const configurationSelection = {
+  identity: configurationServiceIdentitySchema,
+  namespace: configurationNamespaceSchema,
+  path: configurationNamespaceSchema,
+  layer: z.string().min(1).optional(),
+  viewId: configurationViewIdSchema.optional(),
+  sensitive: z.boolean(),
+};
+export const configurationAuthorizationRequestSchema = serviceDataBoundary(
+  z.discriminatedUnion("operation", [
+    z
+      .strictObject({
+        ...configurationSelection,
+        operation: z.enum(["read", "inspect"]),
+      })
+      .readonly(),
+    z
+      .strictObject({
+        ...configurationSelection,
+        operation: z.literal("write"),
+        namespace: canonicalConfigurationPathSchema,
+        path: canonicalConfigurationPathSchema,
+        mutation: z.enum(["set", "remove", "patch"]),
+      })
+      .readonly(),
+  ]),
 );
+export const authorizationRequestSchema = z.union([
+  configurationAuthorizationRequestSchema,
+  schemaAuthorizationRequestSchema,
+]);
 export const configurationAuthorityAuditRecordSchema = serviceDataBoundary(
   z
     .strictObject({
       principalId: z.string().min(1),
       request: authorizationRequestSchema,
       phase: z.enum(["denied", "before-dispatch", "committed", "unknown"]),
+      commandIndex: z.number().int().nonnegative().optional(),
     })
     .readonly(),
 );
@@ -84,18 +117,8 @@ export const configurationAuthorityControllerSchema = serviceDataBoundary(
     mint: callable<ConfigurationAuthorityController["mint"]>(),
     revoke: callable<ConfigurationAuthorityController["revoke"]>(),
     replace: callable<ConfigurationAuthorityController["replace"]>(),
-    bindRoot: callable<ConfigurationAuthorityController["bindRoot"]>(),
     forIdentity: callable<ConfigurationAuthorityController["forIdentity"]>(),
-  }),
-);
-export const configurationAuthorityRequestSchema = serviceDataBoundary(
-  z.strictObject({
-    identity: configurationServiceIdentitySchema,
-    revision: z.string().min(1),
-    prepare: callable<ConfigurationAuthorityRequest["prepare"]>(),
-    get: callable<ConfigurationAuthorityRequest["get"]>(),
-    inspect: callable<ConfigurationAuthorityRequest["inspect"]>(),
-    set: callable<ConfigurationAuthorityRequest["set"]>(),
-    remove: callable<ConfigurationAuthorityRequest["remove"]>(),
+    forSchemas: callable<ConfigurationAuthorityController["forSchemas"]>(),
+    forMutations: callable<ConfigurationAuthorityController["forMutations"]>(),
   }),
 );

@@ -28,7 +28,8 @@ test("strict authority fields, caller descriptors and writer adapter shapes reje
   assert.ok(Object.isFrozen(parsed)); assert.ok(Object.isFrozen(parsed.operation));
   assert.equal(types.configurationProviderWriteBindingSchema.safeParse({ ...writer, actor: "untrusted" }).success, false);
   let calls = 0; const fn = () => { calls++; };
-  assert.ok(types.configurationAuthorityControllerSchema.safeParse({ mint: fn, revoke: fn, replace: fn, bindRoot: fn, forIdentity: fn }).success);
+  assert.ok(types.configurationAuthorityControllerSchema.safeParse({ mint: fn, revoke: fn, replace: fn, forIdentity: fn, forSchemas: fn, forMutations: fn }).success);
+  assert.equal(types.configurationAuthorityControllerSchema.safeParse({ mint: fn, revoke: fn, replace: fn, bindRoot: fn, forIdentity: fn, forSchemas: fn, forMutations: fn }).success, false);
   assert.ok(types.configurationHostAuthoritySchema.safeParse({ authorizeReadSync: fn, authorizeWrite: fn }).success);
   assert.equal(calls, 0); assert.equal(Object.isFrozen(fn), false);
 });

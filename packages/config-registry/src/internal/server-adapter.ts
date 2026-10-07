@@ -6,11 +6,15 @@ import { guardRegistrationInput } from "../registration-parser";
 import type {
   CanonicalSchemaRegistryOptions,
   CanonicalSchemaRegistryReader,
+  RegistryProjectionReader,
   SchemaRegistrationContext,
   SchemaRegistrationRequest,
   SchemaRegistrationResult,
 } from "../registry-contracts";
-import { createRegistryReader } from "../registry-read";
+import {
+  createRegistryProjectionReader,
+  createRegistryReader,
+} from "../registry-read";
 import {
   applyEvaluation,
   cloneState,
@@ -32,6 +36,7 @@ export {
 export interface PreparedRegistration {
   readonly result: SchemaRegistrationResult;
   readonly candidate: RegistryState | undefined;
+  readonly preview: RegistryProjectionReader | undefined;
   readonly environment: string | undefined;
   readonly context: SchemaRegistrationContext | undefined;
   publish(): void;
@@ -39,6 +44,8 @@ export interface PreparedRegistration {
 
 export interface RegistryAdapter {
   readonly reader: CanonicalSchemaRegistryReader;
+  readonly revision: number;
+  snapshot(): RegistryState;
   prepare(
     request: SchemaRegistrationRequest,
     context?: SchemaRegistrationContext,
@@ -55,6 +62,10 @@ export function createRegistryAdapter(
   const authority = new RegistryAuthority(options, initialState, entropy);
   return {
     reader: authority.reader,
+    get revision() {
+      return authority.revision;
+    },
+    snapshot: () => authority.snapshot(),
     prepare: (request, context, fallbackEnvironment) =>
       authority.prepare(request, context, fallbackEnvironment),
   };
@@ -64,6 +75,7 @@ class RegistryAuthority {
   private state: RegistryState;
   private readonly pages: SchemaIdentityPages;
   private generation = 0;
+  private readonly defaultEnvironment: string;
   readonly reader: CanonicalSchemaRegistryReader;
 
   constructor(
@@ -72,6 +84,7 @@ class RegistryAuthority {
     entropy?: () => Uint8Array,
   ) {
     this.state = structuredClone(initialState);
+    this.defaultEnvironment = options.defaultEnvironment;
     this.pages = new SchemaIdentityPages(
       this.state,
       options.schemaIdentityMaxPageSize ?? 200,
@@ -82,6 +95,14 @@ class RegistryAuthority {
       this.pages,
       options.defaultEnvironment,
     );
+  }
+
+  get revision(): number {
+    return this.generation;
+  }
+
+  snapshot(): RegistryState {
+    return structuredClone(this.state);
   }
 
   prepare(
@@ -105,6 +126,10 @@ class RegistryAuthority {
     const expectedGeneration = this.generation;
     return {
       result,
+      preview: createRegistryProjectionReader(
+        () => candidate,
+        this.defaultEnvironment,
+      ),
       environment: input.request.environment,
       context: input.context,
       // Pure synchronous registrations need no persistence snapshot traversal.
@@ -138,6 +163,7 @@ function rejectedPreparation(
   return {
     result,
     candidate: undefined,
+    preview: undefined,
     environment: undefined,
     context: undefined,
     publish() {},

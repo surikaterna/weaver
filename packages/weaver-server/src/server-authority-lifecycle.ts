@@ -1,7 +1,7 @@
 import {
+  type ConfigurationService,
   type ConfigurationServiceOptions,
   createWeaverError,
-  type HydratedConfigurationService,
 } from "@weaver-conf/config-types";
 import type { HttpServer } from "./http-server";
 
@@ -29,7 +29,7 @@ export function borrowAuthorityProviders(
 export function createAuthorityLifecycle(
   hooks: readonly (() => void | Promise<void>)[],
 ) {
-  let root: HydratedConfigurationService | undefined;
+  let root: ConfigurationService | undefined;
   let server: HttpServer | undefined;
   let closing = false;
   let completion: Promise<void> | undefined;
@@ -37,7 +37,7 @@ export function createAuthorityLifecycle(
     get closing() {
       return closing;
     },
-    attachRoot(value: HydratedConfigurationService) {
+    attachRoot(value: ConfigurationService) {
       root = value;
     },
     attachServer(value: HttpServer) {

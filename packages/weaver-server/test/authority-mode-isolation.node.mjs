@@ -277,7 +277,7 @@ test("concurrent principals use separate namespaces and tokens without root rebi
 test("finally revokes real request port after verified JWT operation, including failed operation", async () => {
   const fixture = await filesystemHost(); let controller;
   const { configuration, registry: _, mapPrincipal: __, ...host } = fixture.authority;
-  const root = await createConfigurationService(configuration, { ...host, registry: fixture.registry.reader, onAuthorityReady(value) { controller = value; } });
+  const root = await createConfigurationService(configuration, { ...host, registry: { initial: fixture.registry.serialized, storage: { kind: "provider", providerId: fixture.authority.registry.providerId } }, onAuthorityReady(value) { controller = value; } });
   try {
     const auth = createAuthMiddleware({ jwtValidator: createJwtValidator({ publicKeyOrSecret: testSecret }), adminRoles: [] });
     const context = await auth.authenticate(jwt());
@@ -287,10 +287,12 @@ test("finally revokes real request port after verified JWT operation, including 
       const operation = withAuthorityRequest(fixture.authority, controller, context, selected, () => {}, (port) => {
         captured = port;
         if (fail) throw new Error("operation");
-        return port.get(selected.path);
+        return port.query.get(["name"]);
       });
       if (fail) await assert.rejects(operation, /operation/); else assert.equal(await operation, "base");
-      assert.throws(() => captured.get(selected.path), { code: "FORBIDDEN" });
+      assert.throws(() => captured.query.get(["name"]), { code: "FORBIDDEN" });
+      const result = await captured.mutations.apply([{ identity: captured.identity, namespace: captured.namespace, layer: "late", path: selected.path, operation: "set", value: "revoked" }]);
+      assert.equal(result.error.code, "FORBIDDEN");
     }
   } finally { await root.dispose(); await fixture.cleanup(); }
 });

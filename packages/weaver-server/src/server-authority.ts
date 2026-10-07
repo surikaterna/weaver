@@ -1,8 +1,8 @@
 import { createConfigurationService } from "@weaver-conf/config-service";
 import {
   type ConfigurationAuthorityController,
+  type ConfigurationService,
   createWeaverError,
-  type HydratedConfigurationService,
 } from "@weaver-conf/config-types";
 import { createAuthMiddleware } from "./auth/auth-middleware";
 import { createJwtValidator } from "./auth/jwt-validator";
@@ -66,7 +66,7 @@ export async function startAuthorityServer(
 
 async function listen(
   options: ReturnType<typeof resolveAuthorityOptions>,
-  root: HydratedConfigurationService,
+  root: ConfigurationService,
   controller: ConfigurationAuthorityController,
   lifecycle: ReturnType<typeof createAuthorityLifecycle>,
 ): Promise<WeaverServer> {
@@ -135,7 +135,7 @@ function withoutAutomaticEtags(
 }
 
 function authorityHealth(
-  root: HydratedConfigurationService,
+  root: ConfigurationService,
   closing: () => boolean,
 ): HealthEndpoints {
   const health = createHealthEndpoints();

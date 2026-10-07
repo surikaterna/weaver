@@ -4,14 +4,6 @@ import {
   deriveFragmentPath,
   deriveServicePath,
 } from "@weaver-conf/config-engine";
-import type {
-  RegistryState,
-  SchemaEntry,
-} from "@weaver-conf/config-registry/internal/server-adapter";
-import {
-  createEmptyState,
-  schemaKey,
-} from "@weaver-conf/config-registry/internal/server-adapter";
 import {
   fragmentSlotRegistrationMetadataSchema,
   objectConfigurationPropertySchemaSchema,
@@ -19,11 +11,14 @@ import {
   schemaRegistrationMetadataSchema,
 } from "@weaver-conf/config-types";
 import { z } from "zod";
+import type { RegistryState, SchemaEntry } from "./registry-state";
+import { createEmptyState, schemaKey } from "./registry-state";
 import {
   decodeSchemaGraph,
   encodeSchemaGraph,
   type PersistedSchemaGraph,
-} from "./schema-registry-schema-codec";
+  persistedSchemaGraphSchema,
+} from "./schema-graph-codec";
 
 const persistedSchemaEntrySchema = z.strictObject({
   kind: z.enum(["service", "fragment"]),
@@ -52,7 +47,7 @@ type PersistedSchemaEntry = z.infer<typeof persistedSchemaEntrySchema>;
 interface SerializedSchemaEntry extends Omit<PersistedSchemaEntry, "schema"> {
   readonly schema: PersistedSchemaGraph;
 }
-interface SerializedSchemaRegistry {
+export interface SerializedSchemaRegistry {
   readonly version: 2;
   readonly environments: Record<
     string,
@@ -65,6 +60,22 @@ interface SerializedSchemaRegistry {
     }
   >;
 }
+export const serializedSchemaRegistrySchema: z.ZodType<SerializedSchemaRegistry> =
+  z.strictObject({
+    version: z.literal(2),
+    environments: z.record(
+      registrationEnvironmentSchema,
+      z.strictObject({
+        schemas: z.record(
+          z.string(),
+          persistedSchemaEntrySchema.extend({
+            schema: persistedSchemaGraphSchema,
+          }),
+        ),
+        slots: z.record(z.string(), fragmentSlotRegistrationMetadataSchema),
+      }),
+    ),
+  });
 type MutablePersistedEnvironment = {
   readonly schemas: Map<string, SerializedSchemaEntry>;
   readonly slots: Map<

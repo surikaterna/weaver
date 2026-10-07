@@ -6,7 +6,19 @@ import { test } from "node:test";
 import { createRegistryAdapter } from "@weaver-conf/config-registry/internal/server-adapter";
 import { createFileSystemStorageProvider } from "@weaver-conf/storage-providers";
 import { captureAuthorityRegistryLoader } from "../src/core/authority-registry-bootstrap.ts";
-import { serializeRegistry } from "../src/core/schema-registry-persistence.ts";
+import { parsePersistedRegistry, serializeRegistry } from "@weaver-conf/config-registry/persistence";
+import { createConfigurationService } from "@weaver-conf/config-service";
+import { defineWeaver, Layers } from "@weaver-conf/config-types";
+
+function readonlyHost() {
+  return {
+    authConfig: { weaverConfig: defineWeaver([Layers.Static("files")]),
+      visibilityRoles: { admin: new Set(), platform: new Set() },
+      layerWritePolicies: [], dynamicScopeRoles: new Set() },
+    hostAuthority: { authorizeReadSync: () => "denied", authorizeWrite: async () => "denied" },
+    onAuthorityReady() {},
+  };
+}
 
 function persistedRegistry() {
   const adapter = createRegistryAdapter({ defaultEnvironment: "dev" });
@@ -67,7 +79,10 @@ for (const version of [1, 2]) {
         const storagePath = kind === "load" ? filePath : `${filePath}.${encodeURIComponent(dialect)}.json`;
         const before = await readFile(storagePath);
         const loader = captureAuthorityRegistryLoader(configuration(provider, operation), selection, 50);
-        const reader = await loader();
+        const loaded = await loader();
+        assert.deepEqual(loaded.initial, raw);
+        assert.deepEqual(loaded.storage, { kind: "provider", providerId: "registry" });
+        const reader = createRegistryAdapter({ defaultEnvironment: "dev" }, parsePersistedRegistry(loaded.initial)).reader;
         assert.deepEqual(reader.listRegisteredSchemaIdentities(), expected.listRegisteredSchemaIdentities());
         assert.deepEqual(reader.getRegisteredSchema("/example", "dev"),
           expected.getRegisteredSchema("/example", "dev"));
@@ -103,9 +118,9 @@ test("captures prototype method once, retains original receiver and dialect", as
   assert.deepEqual(provider.calls, []);
   input.providers[0].operation.layer = "changed";
   provider.loadLayer = () => assert.fail("replacement must not run");
-  const reader = await load();
+  const loaded = await load();
   assert.deepEqual(provider.calls, ["actual:雪"]);
-  assert.deepEqual(reader.listRegisteredSchemaIdentities().anchors, []);
+  assert.deepEqual(loaded.initial, { version: 2, environments: {} });
 });
 
 test("binding validation fails before storage IO", () => {
@@ -137,8 +152,15 @@ test("binding validation fails before storage IO", () => {
   assert.deepEqual(provider.calls, []);
 });
 
-test("missing and incomplete metadata never become an empty registry", async () => {
-  for (const entries of [{}, { _weaver: {} }, { _weaver: { registry: {} } },
+test("absent metadata permits provisioning but incomplete containers reject", async () => {
+  for (const entries of [{}, { _weaver: {} }]) {
+    const provider = new ReceiverProvider(); provider.data = { entries };
+    const loaded = await captureAuthorityRegistryLoader(configuration(provider), selection)();
+    assert.equal(loaded.initial, undefined);
+    const root = await createConfigurationService(configuration(provider), { ...readonlyHost(), registry: loaded });
+    await root.dispose();
+  }
+  for (const entries of [{ _weaver: { registry: {} } },
     { _weaver: { registry: { schemas: undefined } } },
     { _weaver: { registry: { schemas: {} } } }]) {
     const provider = new ReceiverProvider();
@@ -165,7 +187,11 @@ test("invalid layer descriptors and persisted metadata reject without leaking in
     { _weaver: { registry: { schemas: badCodec } } }]) {
     const provider = new ReceiverProvider();
     provider.data = { entries };
-    await assert.rejects(captureAuthorityRegistryLoader(configuration(provider), selection)(), (error) => {
+    await assert.rejects(async () => {
+      const registry = await captureAuthorityRegistryLoader(configuration(provider), selection)();
+      const root = await createConfigurationService(configuration(provider), { ...readonlyHost(), registry });
+      await root.dispose();
+    }, (error) => {
       assert.equal(error.code, "VALIDATION_ERROR");
       assert.doesNotMatch(error.message, /SECRET/);
       assert.equal(error.details, undefined);

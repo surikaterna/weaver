@@ -11,7 +11,7 @@ import {
 import {
   parsePersistedRegistry,
   serializeRegistry,
-} from "../../src/core/schema-registry-persistence.ts";
+} from "@weaver-conf/config-registry/persistence";
 
 const owner = { name: "test", contact: "test@example.org" };
 const service = (environment, slotPath) =>

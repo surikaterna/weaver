@@ -26,13 +26,17 @@ export function writableOptions(providers) {
 export function writer(provider, extra = {}) {
   return { providerId: provider.id, operation: { kind: "write" }, flush: "none", failureSemantics: "unknown", ...extra };
 }
-export async function writable({ provider = new WritableMemory(), input = writableOptions([provider]), host = {}, claims } = {}) {
+export async function writable({ provider = new WritableMemory(), input = writableOptions([provider]), host = {}, claims, readerClaims } = {}) {
   let controller;
   const supplied = { authConfig: authConfig(input), writers: [writer(provider)],
     hostAuthority: { authorizeReadSync: () => "allowed", authorizeWrite: async () => "allowed" },
     onAuthorityReady(value) { controller = value; }, ...host };
   const root = await createConfigurationService(input, supplied);
   const token = controller.mint(claims ?? principal(input));
-  controller.bindRoot(token);
-  return { root, provider, input, host: supplied, controller, token };
+  const reader = controller.forIdentity(readerClaims ? controller.mint(readerClaims) : token, { identity: input.identity, namespace: "/alpha" });
+  return { root, reader, provider, input, host: supplied, controller, token, mutations: controller.forMutations(token) };
+}
+
+export function commands(input, ...items) {
+  return items.map((item) => ({ identity: input.identity, namespace: "/alpha", layer: "base", ...item }));
 }

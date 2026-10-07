@@ -1,105 +1,107 @@
 import type { AuthFunctions } from "@weaver-conf/config-auth";
 import type {
-  ConfigurationServiceIdentity,
-  ConfigurationServiceWriteResult,
+  ConfigurationMutationAuthority,
+  ConfigurationMutationResult,
 } from "@weaver-conf/config-types";
 import type { RootState } from "../root-state";
 import { auditWrite } from "./authority-audit";
 import {
-  authorizeWrite,
-  captureWrite,
-  checkWriteInvocation,
-  type WriteTicket,
+  type MutationTicket,
+  mutationRequest,
+  mutationTarget,
 } from "./authority-write";
 import type { createCapabilityRegistry } from "./capability-registry";
-import { publish, stagePublication } from "./publication";
-import {
-  dispatchWrite,
-  reconcileUnknown,
-  rejected,
-  rejection,
-} from "./write-outcome";
-import { admitWritePolicy } from "./write-policy";
+import { captureMutations } from "./mutation-capture";
+import { dispatchMutations } from "./mutation-dispatch";
+import { type MutationPlan, stageMutation } from "./mutation-plan";
+import { mutationRejection } from "./mutation-result";
+import { initialPublication } from "./publication";
+import { admitMutationPolicy } from "./write-policy";
 
-type WriteExecutor = (
+export function createMutationAuthority(
+  state: RootState,
+  registry: ReturnType<typeof createCapabilityRegistry>,
+  auth: AuthFunctions | undefined,
   token: unknown,
-  identity: ConfigurationServiceIdentity,
-  namespace: string | undefined,
-  path: unknown,
-  operation: "set" | "remove",
-  value: unknown,
-  options: unknown,
-) => Promise<ConfigurationServiceWriteResult>;
-export function createWriteExecutor(
-  state: RootState,
-  registry: ReturnType<typeof createCapabilityRegistry>,
-  auth: AuthFunctions | undefined,
-): WriteExecutor {
-  return (...args) => enqueueWrite(state, registry, auth, args);
+): ConfigurationMutationAuthority {
+  registry.current(token);
+  return Object.freeze<ConfigurationMutationAuthority>({
+    apply: (input) => {
+      let ticket: MutationTicket | undefined;
+      let index = 0;
+      try {
+        ticket = captureMutations(state, registry, auth, token, input);
+        for (const command of ticket.commands) {
+          mutationTarget(state, ticket, command);
+          index++;
+        }
+        const captured = ticket;
+        return state.queue.enqueue(() => execute(state, captured));
+      } catch (error) {
+        return rejectedInvocation(state, ticket, index, error);
+      }
+    },
+  });
 }
-function enqueueWrite(
+
+async function rejectedInvocation(
   state: RootState,
-  registry: ReturnType<typeof createCapabilityRegistry>,
-  auth: AuthFunctions | undefined,
-  args: Parameters<WriteExecutor>,
-): Promise<ConfigurationServiceWriteResult> {
-  if (state.disposed) return Promise.resolve(rejected("DISPOSED"));
-  if (!auth || !args[0] || !state.factory.writers.size || state.writeFence)
-    return Promise.resolve(rejected("WRITE_UNAVAILABLE"));
-  if (state.writeHookActive) return Promise.resolve(rejected("FORBIDDEN"));
-  let ticket: WriteTicket | undefined;
-  try {
-    ticket = captureWrite(state, registry, auth, ...args);
-    checkWriteInvocation(state, ticket);
-    const captured = ticket;
-    return state.queue.enqueue(() => execute(state, captured));
-  } catch (error) {
-    return ticket
-      ? auditWrite(state, ticket, "denied").then(() => rejection(error))
-      : Promise.resolve(rejection(error));
-  }
+  ticket: MutationTicket | undefined,
+  index: number,
+  error: unknown,
+): Promise<ConfigurationMutationResult> {
+  const result = mutationRejection(error, ticket?.commands, index);
+  const command = ticket?.commands[index];
+  if (ticket && command)
+    await auditWrite(
+      state,
+      {
+        principal: ticket.principal,
+        request: mutationRequest(command),
+        commandIndex: index,
+      },
+      "denied",
+    );
+  return result;
 }
+
 async function execute(
   state: RootState,
-  ticket: WriteTicket,
-): Promise<ConfigurationServiceWriteResult> {
-  let target: ReturnType<WriteTicket["check"]>;
-  let plan: ReturnType<typeof stagePublication>;
+  ticket: MutationTicket,
+): Promise<ConfigurationMutationResult> {
+  let index = 0;
+  const plans: MutationPlan[] = [];
+  let draft = initialPublication(state);
   try {
-    target = ticket.check();
-    await authorizeWrite(state, ticket);
-    ticket.check();
-    admitWritePolicy(
-      state,
-      ticket.principal,
-      ticket.request,
-      ticket.auth,
-      ticket.options.layer,
-    );
-    plan = stagePublication(state, ticket, target);
-    await auditWrite(state, ticket, "before-dispatch");
-    ticket.check();
+    for (const command of ticket.commands) {
+      const target = mutationTarget(state, ticket, command, true);
+      const staged = stageMutation(state, draft, command, target);
+      const request = await admitMutationPolicy(state, ticket, staged);
+      const plan = Object.freeze({ ...staged, request });
+      ticket.check();
+      await auditWrite(
+        state,
+        { principal: ticket.principal, request, commandIndex: index },
+        "before-dispatch",
+      );
+      ticket.check();
+      plans.push(plan);
+      draft = plan.after;
+      index++;
+    }
   } catch (error) {
-    await auditWrite(state, ticket, "denied");
-    return rejection(error);
+    const command = ticket.commands[index];
+    if (command)
+      await auditWrite(
+        state,
+        {
+          principal: ticket.principal,
+          request: mutationRequest(command),
+          commandIndex: index,
+        },
+        "denied",
+      );
+    return mutationRejection(error, ticket.commands, index);
   }
-  const writer = state.factory.writers.get(target.selection.captured);
-  if (!writer) return rejected("WRITE_UNAVAILABLE");
-  const outcome = await dispatchWrite(state, ticket, target, writer);
-  if (outcome === "committed") {
-    publish(state, plan);
-    await auditWrite(state, ticket, "committed");
-    return {
-      success: true,
-      layer: ticket.options.layer,
-      revision: plan.revision,
-    };
-  }
-  if (outcome === "unknown") {
-    const result = await reconcileUnknown(state, ticket, target);
-    await auditWrite(state, ticket, "unknown");
-    return result;
-  }
-  await auditWrite(state, ticket, "denied");
-  return rejected("WRITE_ERROR");
+  return dispatchMutations(state, ticket, plans);
 }

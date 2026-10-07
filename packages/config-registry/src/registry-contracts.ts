@@ -118,3 +118,18 @@ export interface CanonicalSchemaRegistry extends CanonicalSchemaRegistryReader {
     context?: SchemaRegistrationContext,
   ): SchemaRegistrationResult;
 }
+
+export type RegistryProjectionReader = Pick<
+  CanonicalSchemaRegistryReader,
+  "listRegisteredSchemaIdentities" | "resolveAnchor"
+>;
+
+export const registryProjectionReaderSchema: z.ZodType<RegistryProjectionReader> =
+  z.strictObject({
+    listRegisteredSchemaIdentities: z.custom<
+      RegistryProjectionReader["listRegisteredSchemaIdentities"]
+    >((value) => typeof value === "function"),
+    resolveAnchor: z.custom<RegistryProjectionReader["resolveAnchor"]>(
+      (value) => typeof value === "function",
+    ),
+  });
