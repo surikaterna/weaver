@@ -2,13 +2,13 @@ import {
   inspectResolvedPath,
   parseCanonicalConfigPath,
   type ResolutionLayer,
-  resolveConfigurationSnapshot,
   validateEffectiveConfiguration,
 } from "@weaver-conf/config-engine";
 import {
   createRegisteredReadProjection,
   type RegisteredMutationEvidence,
   type RegistryProjectionReader,
+  registeredCeilingEvidence,
   registeredMutationEvidence,
 } from "@weaver-conf/config-registry";
 import {
@@ -22,6 +22,7 @@ import {
 import type { IdentitySnapshot } from "./identity-snapshots";
 import { currentIdentity } from "./identity-state";
 import { identityKey } from "./layer-stack";
+import { resolveRegisteredLayers } from "./resolution-context";
 import { assertReadable, type RootState } from "./root-state";
 
 export type PreparedView = Readonly<
@@ -123,13 +124,10 @@ export function deriveView(
   const logical = parseCanonicalConfigPath(namespace).segments;
   const physical = [...logical, "instances", selection.viewId];
   const schemas = declaredObject(base, logical, registry);
-  declaredObject(base, physical, registry);
+  declaredObject(base, physical, registry, false);
   const layers = viewLayers(base, logical, physical);
-  const raw = resolveConfigurationSnapshot({
-    layers,
-    configuredRanks: [...new Set(base.raw.layers.map((layer) => layer.rank))],
-    ceilings: [],
-  });
+  const raw = resolveRegisteredLayers(layers, base.resolution);
+  requireObject(inspectResolvedPath(raw, logical).effectiveValue);
   if (validate)
     validateView(
       schemas,
@@ -149,6 +147,7 @@ function declaredObject(
   base: IdentitySnapshot,
   path: readonly string[],
   registry: RegistryProjectionReader,
+  validateValue = true,
 ): readonly ConfigurationPropertySchema[] {
   const schemas: ConfigurationPropertySchema[] = [];
   let declared = false;
@@ -180,7 +179,8 @@ function declaredObject(
       "SCHEMA_NOT_REGISTERED",
       "View path is not declared",
     );
-  requireObject(inspectResolvedPath(base.raw, path).effectiveValue);
+  if (validateValue)
+    requireObject(inspectResolvedPath(base.raw, path).effectiveValue);
   return schemas;
 }
 
@@ -206,6 +206,7 @@ function viewLayers(
 ): ResolutionLayer[] {
   const baseValues = inspectResolvedPath(base.raw, logical).contributions;
   const viewValues = inspectResolvedPath(base.raw, physical).contributions;
+  const sourceCeilings = physicalCeilings(base, logical, physical);
   const tier = (
     values: typeof baseValues,
     sourcePath: readonly string[],
@@ -213,17 +214,53 @@ function viewLayers(
   ) =>
     base.raw.layers.map((layer, index) => {
       const value = values[index]?.value;
-      requireObject(value);
       const entries =
         value === undefined
           ? {}
           : nest(logical, strip ? withoutStorage(value) : value);
-      return { ...layer, sourcePath, entries };
+      return {
+        ...layer,
+        sourcePath,
+        entries,
+        sourceCeilings: strip ? [] : sourceCeilings,
+      };
     });
   return [
     ...tier(baseValues, logical, true),
     ...tier(viewValues, physical, false),
   ];
+}
+
+function physicalCeilings(
+  base: IdentitySnapshot,
+  logical: readonly string[],
+  physical: readonly string[],
+) {
+  const context = base.resolution;
+  const evidence = registeredCeilingEvidence(context.registry, {
+    environment: base.identity.environment,
+    registryRevision: base.registryRevision,
+    layerNames: context.layerNames,
+    candidates: base.raw.layers,
+  });
+  return evidence.ceilings.flatMap((ceiling) => {
+    if (prefix(physical, ceiling.path))
+      return [
+        {
+          path: [...logical, ...ceiling.path.slice(physical.length)],
+          maxRank: ceiling.maxRank,
+        },
+      ];
+    if (prefix(ceiling.path, physical))
+      return [{ path: logical, maxRank: ceiling.maxRank }];
+    return [];
+  });
+}
+function prefix(parent: readonly string[], child: readonly string[]): boolean {
+  return (
+    parent.length <= child.length &&
+    parent.every((key, index) => key === child[index])
+  );
 }
 
 function requireObject(value: unknown): void {
@@ -237,8 +274,8 @@ function requireObject(value: unknown): void {
     );
 }
 
-function withoutStorage(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object") return {};
+function withoutStorage(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   return Object.fromEntries(
     Object.entries(value).filter(([key]) => key !== "instances"),
   );

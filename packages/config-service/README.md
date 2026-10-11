@@ -50,9 +50,10 @@ Fixed bindings require an explicit environment set or host-approved `common` map
 Scope bindings require an explicit environment set and nonempty exact ordered prefix.
 Each dynamic slot expands contributors in identity order at its configured position,
 before subsequent fixed slots. Duplicate identifiers/selectors, unused/ambiguous
-bindings and invalid canonical registrations fail before any provider read. Every
-schema position carrying override-ceiling metadata and custom resolution options
-is unsupported in this default-merge slice, even without corresponding data.
+bindings and invalid canonical registrations fail before any provider read.
+`x-weaver.maxOverrideLayer` names any configured slot, including custom, scope and
+empty session slots. Unknown names at any schema position or in any environment
+fail `VALIDATION_ERROR` before provider effects. Custom merge options remain unsupported.
 
 `reader.withScope(scopePath).prepare()` stages distinct identities FIFO and
 deduplicates pending/ready tuples. `withScope` replaces the entire ordered tuple;
@@ -97,8 +98,8 @@ dispatch is not rollback.
 
 Without explicit writer opt-in, writes reject `WRITE_UNAVAILABLE`,
 even for writable providers. Root reload and flush are host lifecycle operations;
-after disposal these return `DISPOSED`. Ceiling integration and transport
-feeds remain successor work, not alpha/product readiness claims. Production
+after disposal these return `DISPOSED`. Transport feeds remain successor work,
+not alpha/product readiness claims. Production
 imports no filesystem, storage aggregate or server package. Node hosts may inject
 the public filesystem provider and explicitly map its construction-time environment
 overlay and `loadLayer` file dialect.
@@ -321,7 +322,8 @@ does not require authority over unchanged siblings carried in its anchor payload
 Sensitive writes require explicit sensitive grants, roles and host approval, without
 implicitly granting sensitive reads. References, direct internal/instance storage paths
 and promotion remain unavailable. Checked root-owned sessions can satisfy the existing
-emergency change policy, never schema admission or visibility. Ceiling metadata still rejects at startup.
+emergency change policy and numeric ceilings for their own confined source,
+never schema admission, visibility or promotion.
 
 Canonical admission validates the full raw candidate layer and prospective effective
 configuration for every loaded identity sharing the selected binding, using the same
@@ -392,7 +394,7 @@ schemaIdentityMaxPageSize? }`. `initial` is persisted registry data decoded by
 `@weaver-conf/config-registry/persistence`; it is not a callable reader. Omit it
 to start empty or register `options.schemas` in caller order. Defined initial data
 and nonempty seed schemas are mutually exclusive before ownership or I/O. Null,
-malformed data and unsupported ceilings reject; they never become an empty store.
+malformed data and unknown ceiling names reject; they never become an empty store.
 All input is detached. There is no reader-injection overload or external registry
 lifetime requirement.
 
@@ -455,14 +457,44 @@ owned hook after settlement, preserving sanitized primary errors; borrowed hooks
 are never closed. Keep host/controller references private: this is not a sandbox
 against arbitrary same-realm code with access to the composition root.
 
+## Registered ceilings
+
+The configured slot order is the sole physical rank order. Parent and child
+ceilings intersect at the minimum rank. Registry branch/member evidence compiles
+paths from raw contributions and declared properties, including absent children
+protected against destructive ancestor replacement. Pattern/wildcard and array
+members expand over actual candidate keys; arrays remain atomic, without holes or
+per-element filtering. `allOf` restrictions intersect; `anyOf`/`oneOf` collect
+applicable raw-candidate witnesses and unresolved alternatives conservatively.
+There is no first-branch choice or post-merge fixed-point solver. `not` remains a
+native value-validation assertion, including when selecting applicable branches.
+Annotations occurring only beneath `not` emit no positive ceiling or inverse
+policy, even under double negation. Positive ancestor/sibling ceilings still apply;
+all ceiling names, including negative-only and inactive annotations, must refer to
+configured slots before provider IO. This does not expand read visibility.
+
+Ordinary above-ceiling provider data is ignored for effective resolution, not
+erased from storage. Direct above-ceiling mutations reject `POLICY_VIOLATION`
+before effects even if equal or masked. Schema tightening, relaxation and removal
+restage existing data under the candidate registry generation. Views preserve
+override-tier precedence but use physical ranks: selected overrides must satisfy
+both logical and mapped physical ceilings. Physical instance policy never limits
+unrelated base fallback.
+
+`get`, `snapshot`, effective inspection and effective events use the engine-issued
+ceiling-resolved snapshot. Authorized `get(..., { layer })` and raw contribution
+inspection remain source observations: a present contribution is not a promise it
+won resolution. Ceiling exclusion is not confidentiality redaction; ordinary
+visibility, sensitivity, declaration and reference checks still apply.
+
 ## Shared ephemeral sessions
 
 Add exactly one `{ kind: "session", layer: "incident" }` slot at the desired position
 in `options.layers` (the name is host-defined). It has no provider IDs. Supply
 `host.sessions = { defaultDurationMs, maxDurationMs, maxActiveSessions, timer? }`;
 durations are positive integer milliseconds at most 2,147,483,647. Configure
-`authConfig.sessionLayer` to that same name and explicitly set
-`authConfig.elevatedSessionMode = "emergency-override"`. No implicit session slot,
+`authConfig.sessionLayer` to that same name. No mode-string elevation is accepted.
+No implicit session slot,
 unlimited lifetime, elevated default or generic provider registration is created.
 
 The host mints immutable principal `sessionPermissions`: `read`, `activate`,
@@ -505,16 +537,19 @@ Sessions are **shared configuration** for the exact target, not private preferen
 All otherwise authorized readers observe them without a reader session selector.
 Within the configured slot, later activation wins; extension does not reorder.
 Removal reveals the next session then ordinary layers. View paths use the existing
-compiler, schema and resolver. Emergency sessions can satisfy only supported
-session/change-policy restrictions. All other grants, roles, visibility, reference
-taint, admission and promotion restrictions remain; ceilings are still unsupported.
+compiler, schema and resolver. Live root-verified emergency sessions can satisfy
+restricted session/change policy and bypass numeric ceilings only for their own
+confined contribution. All other grants, roles, visibility, reference taint,
+admission and promotion restrictions remain.
 
 The existing `config-sessions` controller owns each entry store, lease and timer.
 Root state holds references and immutable confinement facts only. Creator expiry
 caps the lease. Deadline/revocation immediately ends eligibility for **new dispatch**,
 but effective fallback is a serialized publication on the existing queue. If an
 accepted operation is awaiting provider IO, readers retain the last published
-generation until it settles and fallback publishes. Accepted effects retain honest
+generation until it settles and fallback publishes. Each new publication refreshes
+eligibility, including after an accepted write or required flush: it never emits a
+new generation with an expired emergency exemption. Accepted effects retain honest
 receipts; expiry is not rollback or hard-real-time value removal. Session changes
 use the same reader event/restart path, with `cause: "session"` for lifecycle changes;
 empty activation/extension emits no effective-value event.

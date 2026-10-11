@@ -23,6 +23,7 @@ import { identityKey } from "./layer-stack";
 import { createOperationQueue } from "./operation-queue";
 import { reloadProvider } from "./provider-reload";
 import { startProviderWatches } from "./provider-watch";
+import { captureResolutionContext } from "./resolution-context";
 import {
   cleanupResult,
   closeResources,
@@ -104,10 +105,8 @@ function stage(
     identity,
     `${state.incarnation}${state.generation + 1}`,
     loaded,
-    state.factory.registry,
-    state.factory.options.layers.map((_, rank) => rank),
+    captureResolutionContext(state, identity),
     state.factory.options.failureMode,
-    state.factory.adapter.revision,
   );
 }
 

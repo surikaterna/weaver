@@ -1,3 +1,4 @@
+import { validateRegisteredCeilingNames } from "@weaver-conf/config-registry";
 import { createRegistryAdapter } from "@weaver-conf/config-registry/internal/server-adapter";
 import { parsePersistedRegistry } from "@weaver-conf/config-registry/persistence";
 import {
@@ -11,7 +12,7 @@ import {
   validateAuthLayers,
 } from "./authority/authority-contract-capture";
 import { captureWriters } from "./authority/provider-write";
-import { rejectCeilings } from "./ceiling-presence";
+import { validateRegistryCeilings } from "./ceiling-validation";
 import { selectBindings, validateStack } from "./layer-stack";
 import { captureBinding } from "./provider-binding";
 import {
@@ -133,11 +134,7 @@ function validateHost(
     Boolean(sessions.length) !== Boolean(host.sessions)
   )
     invalidHost();
-  if (
-    sessions.length &&
-    (host.authConfig.sessionLayer !== sessions[0]?.layer ||
-      host.authConfig.elevatedSessionMode !== "emergency-override")
-  )
+  if (sessions.length && host.authConfig.sessionLayer !== sessions[0]?.layer)
     invalidHost();
   if (host.registry?.initial !== undefined && options.schemas.length)
     invalidHost();
@@ -163,6 +160,10 @@ function registerSchemas(
     parsePersistedRegistry(host.registry?.initial),
   );
   for (const request of options.schemas) {
+    validateRegisteredCeilingNames(
+      request.schema,
+      options.layers.map((slot) => slot.layer),
+    );
     const prepared = registry.prepare(request);
     const result = prepared.result;
     if (!result.success)
@@ -172,8 +173,9 @@ function registerSchemas(
       );
     prepared.publish();
   }
-  for (const request of options.schemas) rejectCeilings(request.schema);
-  for (const entry of registry.snapshot().schemas.values())
-    rejectCeilings(entry.schema);
+  validateRegistryCeilings(
+    registry.reader,
+    options.layers.map((slot) => slot.layer),
+  );
   return registry;
 }

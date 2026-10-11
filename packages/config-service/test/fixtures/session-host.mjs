@@ -15,7 +15,7 @@ export async function sessionHost({ provider = new WritableMemory(), input = wri
   const value = await writable({ provider, input, claims, host: {
     now: clock.now,
     sessions: { defaultDurationMs: 100, maxDurationMs: 1000, maxActiveSessions: 10, timer: clock },
-    authConfig: { ...authConfig(input), sessionLayer: "incident", elevatedSessionMode: "emergency-override" },
+    authConfig: { ...authConfig(input), sessionLayer: "incident" },
     ...host,
   } });
   const sessions = value.controller.forSessions(value.token);

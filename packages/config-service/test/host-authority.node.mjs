@@ -171,7 +171,7 @@ test("revocation/expiry during delayed preparation cannot publish, a new reader 
   }
 });
 
-test("detached persisted input owns metadata; conflicts and durable ceilings reject before IO", async () => {
+test("detached persisted input owns metadata; conflicts and unknown durable ceilings reject before IO", async () => {
   const provider = new MemoryProvider("p", "base", { alpha: { flag: "public" } });
   const input = options([provider]), registry = { initial: persisted(input.schemas) };
   const host = readonlyHost(input);
@@ -183,8 +183,8 @@ test("detached persisted input owns metadata; conflicts and durable ceilings rej
     assert.equal(reader.get(["flag"]), "public");
     assert.equal(provider.loads, 1);
   } finally { await root.dispose(); }
-  const initial = persisted([registration("west", "other", { type: "object", properties: { absent: { type: "string", "x-weaver": { maxOverrideLayer: "base" } } } })]);
-  await assert.rejects(createConfigurationService(hostedInput, { ...host, registry: { initial } }), { code: "UNSUPPORTED_OPERATION" }); assert.equal(provider.loads, 1);
+  const initial = persisted([registration("west", "other", { type: "object", properties: { absent: { type: "string", "x-weaver": { maxOverrideLayer: "unknown" } } } })]);
+  await assert.rejects(createConfigurationService(hostedInput, { ...host, registry: { initial } }), { code: "VALIDATION_ERROR" }); assert.equal(provider.loads, 1);
 });
 
 test("host preflight is own-data/native shape, missing AuthConfig and malformed ranks deny before hooks", async () => {
@@ -371,11 +371,11 @@ test("host-owned intrinsic containers cannot execute caller iterator getters dur
   }
 });
 
-test("legacy request ceiling preflight is retained even when later registration replaces the metadata", async () => {
+test("unknown ceiling preflight runs even when later registration would replace the metadata", async () => {
   const provider = new MemoryProvider("p", "base", {}), first = registration();
-  first.schema.properties.flag["x-weaver"] = { maxOverrideLayer: "base" };
+  first.schema.properties.flag["x-weaver"] = { maxOverrideLayer: "unknown" };
   const input = options([provider], { schemas: [first, registration()] });
-  await assert.rejects(createConfigurationService(input, readonlyHost(input)), { code: "UNSUPPORTED_OPERATION" });
+  await assert.rejects(createConfigurationService(input, readonlyHost(input)), { code: "VALIDATION_ERROR" });
   assert.equal(provider.loads, 0);
 });
 

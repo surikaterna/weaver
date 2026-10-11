@@ -4,14 +4,18 @@ import { z } from "zod";
 import { scopeInstanceSchema } from "./schemas-layers";
 import { configurationRoleSchema } from "./schemas-policy";
 import { configurationPropertySchemaSchema } from "./schemas-property";
-import { sessionTypeSchema } from "./schemas-session";
 
 export const configurationAccessContextSchema = z.strictObject({
   userId: z.string(),
   roles: z.array(configurationRoleSchema).readonly(),
   assignedScopes: z.array(scopeInstanceSchema).readonly().optional(),
-  sessionMode: z
-    .union([z.literal("emergency-override"), sessionTypeSchema])
+  trustedSession: z
+    .strictObject({
+      id: z.string().min(1),
+      emergency: z.boolean(),
+      reason: z.string(),
+    })
+    .readonly()
     .optional(),
 });
 

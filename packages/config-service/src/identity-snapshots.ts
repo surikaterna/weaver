@@ -1,22 +1,23 @@
 import {
-  type ResolutionLayer,
-  resolveConfigurationSnapshot,
-} from "@weaver-conf/config-engine";
-import {
   createRegisteredReadProjection,
   type RegisteredReadProjection,
-  type RegistryProjectionReader,
 } from "@weaver-conf/config-registry";
 import type {
   ConfigurationPropertySchema,
   ConfigurationServiceIdentity,
 } from "@weaver-conf/config-types";
 import { type LoadedContribution, requireHealthy } from "./hydration";
+import {
+  type ResolutionContext,
+  resolutionLayers,
+  resolveRegisteredLayers,
+} from "./resolution-context";
 
 export interface IdentitySnapshot {
   readonly identity: ConfigurationServiceIdentity;
   readonly revision: string;
   readonly registryRevision: number;
+  readonly resolution: ResolutionContext;
   readonly contributions: readonly LoadedContribution[];
   readonly degradedProviders: readonly string[];
   readonly projection: RegisteredReadProjection;
@@ -31,13 +32,12 @@ export function stageIdentity(
   identity: ConfigurationServiceIdentity,
   revision: string,
   contributions: readonly LoadedContribution[],
-  registry: RegistryProjectionReader,
-  configuredRanks: readonly number[],
+  resolution: ResolutionContext,
   failureMode: "fail" | "allow-degraded" | undefined,
-  registryRevision: number,
 ): IdentitySnapshot {
+  const { registry, registryRevision } = resolution;
   const degradedProviders = requireHealthy(contributions, failureMode);
-  const snapshot = resolveIdentitySnapshot(contributions, configuredRanks);
+  const snapshot = resolveIdentitySnapshot(contributions, resolution);
   const projection = createRegisteredReadProjection(registry, snapshot, {
     identity,
     revision,
@@ -47,6 +47,7 @@ export function stageIdentity(
     revision,
     degradedProviders,
     registryRevision,
+    resolution,
     contributions: Object.freeze([...contributions]),
     projection,
     raw: snapshot,
@@ -66,13 +67,10 @@ export function stageIdentity(
 
 export function resolveIdentitySnapshot(
   contributions: readonly LoadedContribution[],
-  configuredRanks: readonly number[],
+  context: ResolutionContext,
 ) {
-  const layers: ResolutionLayer[] = [];
-  for (const item of contributions) if (item.layer) layers.push(item.layer);
-  return resolveConfigurationSnapshot({
-    layers,
-    configuredRanks,
-    ceilings: [],
-  });
+  return resolveRegisteredLayers(
+    resolutionLayers(contributions, context),
+    context,
+  );
 }

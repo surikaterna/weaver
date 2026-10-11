@@ -53,8 +53,8 @@ test("schema graph ceilings do not recurse into literal defaults, but unselected
   const literal = registration("east", "alpha", { type: "object", properties: { literal: { type: "object", default: { "x-weaver": { maxOverrideLayer: "base" } }, properties: {} } } });
   const host = readonlyHost(options([provider]));
   const root = await createConfigurationService(options([provider], { schemas: [literal] }), host); await root.dispose();
-  const ceiling = registration("west", "beta", { type: "object", properties: { absent: { type: "string", "x-weaver": { maxOverrideLayer: "base" } } } });
-  await assert.rejects(createConfigurationService(options([provider], { schemas: [registration(), ceiling] }), host), { code: "UNSUPPORTED_OPERATION" }); assert.equal(provider.loads, 1);
+  const ceiling = registration("west", "beta", { type: "object", properties: { absent: { type: "string", "x-weaver": { maxOverrideLayer: "unknown" } } } });
+  await assert.rejects(createConfigurationService(options([provider], { schemas: [registration(), ceiling] }), host), { code: "VALIDATION_ERROR" }); assert.equal(provider.loads, 1);
 });
 
 test("factory isolates registration input and captures future scope methods without freezing opaque provider", async () => {

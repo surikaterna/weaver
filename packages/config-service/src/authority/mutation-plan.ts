@@ -12,6 +12,7 @@ import {
 import type { LoadedContribution } from "../hydration";
 import { resolveIdentitySnapshot } from "../identity-snapshots";
 import { identityKey } from "../layer-stack";
+import { captureResolutionContext } from "../resolution-context";
 import type { RootState } from "../root-state";
 import type { Mutation } from "./admission-contracts";
 import { mutationRequest } from "./authority-write";
@@ -65,7 +66,7 @@ export function stageMutation(
             snapshot.contributions,
             new Map([[target.selection.captured, entries]]),
           ),
-          state.factory.options.layers.map((_, rank) => rank),
+          captureResolutionContext(state, snapshot.identity),
         ).entries,
     }),
   );

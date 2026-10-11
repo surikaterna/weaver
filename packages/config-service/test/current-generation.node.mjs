@@ -35,14 +35,15 @@ test("private current identity lookup keeps value, inspection and revision on th
   const factory = validateFactory(input, readonlyHost(input));
   const identity = factory.options.identity;
   const original = await loadContributions(factory.selected, identity);
-  const first = stageIdentity(identity, "original", original, factory.registry, [0], undefined, factory.adapter.revision);
+  const resolution = { registry: factory.registry, identity, layerNames: ["base"], configuredRanks: [0], registryRevision: factory.adapter.revision, sessions: new Map() };
+  const first = stageIdentity(identity, "original", original, resolution, undefined);
   const state = { factory, ready: new Map([[identityKey(identity), first]]), views: new Map(),
     disposed: false, events: createServiceEvents() };
   const { controller } = createHostAuthority(state, async () => { throw Error("ready reader must not hydrate"); });
   const reader = controller.forIdentity(controller.mint(principal(input)), { identity, namespace: "/alpha" });
   provider.entries = { alpha: { flag: "after" } };
   const loaded = await loadContributions(factory.selected, identity);
-  const next = stageIdentity(identity, "successor", loaded, factory.registry, [0], undefined, factory.adapter.revision);
+  const next = stageIdentity(identity, "successor", loaded, resolution, undefined);
   assert.equal(reader.get(["flag"]), "before");
   assert.equal(reader.revision, first.revision);
   state.ready.set(identityKey(identity), next);

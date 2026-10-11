@@ -11,13 +11,8 @@ export type PolicyDecision =
   | { readonly outcome: "requires-emergency-auth"; readonly message: string }
   | { readonly outcome: "denied"; readonly reason: string };
 
-/**
- * Extended access context that includes an optional override reason
- * for emergency override authorization.
- */
-export interface PolicyEvaluationContext extends ConfigurationAccessContext {
-  overrideReason?: string | undefined;
-}
+/** Policy inputs are supplied by the trusted host, not authenticated by this utility. */
+export type PolicyEvaluationContext = ConfigurationAccessContext;
 
 /**
  * Evaluates whether a configuration change is allowed based on the key's
@@ -66,18 +61,20 @@ export function evaluateChangePolicy(
         message: "Change requires full CI/CD pipeline review",
       };
 
-    case "emergency-override": {
-      if (
-        context.sessionMode === "emergency-override" &&
-        context.overrideReason !== undefined &&
-        context.overrideReason.length > 0
-      ) {
-        return { outcome: "allowed" };
-      }
-      return {
-        outcome: "requires-emergency-auth",
-        message: "This key requires emergency override authorization",
-      };
-    }
+    case "emergency-override":
+      return emergencyDecision(context);
   }
+}
+
+function emergencyDecision(context: PolicyEvaluationContext): PolicyDecision {
+  if (
+    context.trustedSession?.emergency === true &&
+    typeof context.trustedSession.reason === "string" &&
+    context.trustedSession.reason.trim().length > 0
+  )
+    return { outcome: "allowed" };
+  return {
+    outcome: "requires-emergency-auth",
+    message: "This key requires emergency override authorization",
+  };
 }

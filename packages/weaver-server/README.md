@@ -45,6 +45,42 @@ const server = await bootstrap({
 - `createAuthMiddleware(options)` — JWT-based request authentication
 - `createJwtValidator(options)` — Token validation and identity extraction
 
+Schema registration uses the separate `AuthGate.gateSchemaWrite(accessContext)`
+purpose, not a configuration write to a synthetic `admin` layer or the registry's
+storage layer. With JWT authentication enabled, the route still requires an
+authenticated administrative context **and** the gate requires a mapped role in
+the explicitly configured `schemaAdminRoles`. Startup supplies the same
+`adminRoles` as the JWT middleware. A service identity's administrative marker
+alone does not permit registration. Schema GET retains its existing `gateRead`
+policy. Explicit no-auth legacy composition is unchanged.
+
+Custom gate compositions must move schema-write restrictions formerly placed in
+`canWrite` to the schema-specific synchronous narrowing callback:
+
+```ts
+const gate = createAuthGate({
+  authFunctions, // canWrite governs real configuration-layer writes only
+  mapContext,
+  schemaAdminRoles: ["schema-operator"],
+  canRegisterSchema: (access) => approvedSchemaOperators.has(access.userId),
+});
+```
+
+Absent/empty schema roles deny. The optional callback can only narrow the role
+policy: only exactly `true` allows, while false, exceptions, malformed results
+and promises deny. Missing or broken custom `gateSchemaWrite` methods fail closed;
+there is no fallback to `gateWrite`. Co-located native Zod gate schemas validate
+callable shapes, not authentication or authority.
+
+Default server authorization ranks now capture ordered distinct layer names from
+the **actual bootstrapped providers**, including custom names. Duplicate names
+share a slot. Scoped requests map through the existing scope parser only when the
+configured scope provider supports the complete scoped load/write/remove dialect.
+Unknown targets and ceiling names deny; no administrative rank is manufactured.
+This authorization capture does not change the legacy resolver's base/scope order
+or certify legacy network ceiling parity. The canonical root owns ceiling
+resolution; the remaining default-runtime cutover is separate work.
+
 ### Registered schema browsing (operator access)
 
 `GET /v1/admin/schemas/identities` returns only service/fragment path, kind, and environment plus declared slots' path, environment, and `accepts`. It includes empty slots, not schemas or owner metadata. `GET /v1/admin/schemas/anchors/*anchorPath?env=<environment>` returns the schema and registration metadata for **one exact** anchor and environment; children, slots, and unknown environments do not resolve by prefix. Both HTTP routes require an authenticated admin with read access to `_weaver.registry.schemas`. Trusted SCOMP peers expose the same operations and data, but do **not** perform per-user HTTP authorization: do not expose a trusted peer to an untrusted browser or Pages origin. The legacy admin bulk schema route remains for compatibility and explicitly opted-in client boot validation.

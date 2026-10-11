@@ -1,4 +1,5 @@
 export const rootExports = ["canonicalSchemaRegistryOptionsSchema", "createCanonicalSchemaRegistry", "createRegisteredReadProjection",
+  "registeredCeilingEvidence", "registeredCeilingEvidenceSchema", "registeredCeilingInputSchema", "validateRegisteredCeilingNames",
   "registeredMutationEvidence", "registeredMutationEvidenceSchema", "registeredMutationFootprint", "registeredMutationFootprintSchema",
   "registeredReadProjectionContextSchema", "registeredReadProjectionSchema",
   "registeredReadAccessEvidenceSchema", "registeredReadAccessSchema", "registeredReadViewSourceSchema",

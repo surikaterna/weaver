@@ -81,7 +81,6 @@ const authSchema = z.strictObject({
   layerWritePolicies: z.array(layerWritePolicySchema).readonly(),
   dynamicScopeRoles: roleSetSchema,
   sessionLayer: z.string().min(1).optional(),
-  elevatedSessionMode: z.string().min(1).optional(),
 });
 export function captureAuthConfig(input: unknown): AuthConfig {
   const fields = ownRecord(input);

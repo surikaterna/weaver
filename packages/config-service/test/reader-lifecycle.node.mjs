@@ -97,7 +97,7 @@ async function queuedAggregateFixture(viewId) {
   host.hostAuthority.authorizeReadSync = (_actor, request) => denyFlag && request.path === "/alpha/flag" ? "denied" : "allowed";
   const factory = validateFactory(input, host), identity = factory.options.identity;
   const loaded = await loadContributions(factory.selected, identity), key = identityKey(identity);
-  const state = { factory, ready: new Map(), views: new Map(), fixed: loaded, generation: 0,
+  const state = { factory, sessions: new Map(), ready: new Map(), views: new Map(), fixed: loaded, generation: 0,
     incarnation: "queued-test:", disposed: false, queue: createOperationQueue(),
      events: { subscribe(_selection, _path, callback) { queued = callback; return () => {}; }, publish() {} } };
   const selection = { identity, namespace: "/alpha", ...(viewId === undefined ? {} : { viewId }) };
@@ -105,7 +105,7 @@ async function queuedAggregateFixture(viewId) {
     const value = { open, flag };
     const entries = { alpha: viewId === undefined ? value : { open: "base", instances: { [viewId]: value } } };
     const contributions = loaded.map((item) => ({ ...item, layer: { ...item.layer, entries } }));
-    const snapshot = stageIdentity(identity, revision, contributions, factory.registry, [0], undefined, factory.adapter.revision);
+    const snapshot = stageIdentity(identity, revision, contributions, { registry: factory.registry, identity, layerNames: ["base"], configuredRanks: [0], registryRevision: factory.adapter.revision, sessions: new Map() }, undefined);
     state.ready.set(key, snapshot);
     state.views = stageViews(state.views, state.ready, factory.registry, false);
     return snapshot;

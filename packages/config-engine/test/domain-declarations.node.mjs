@@ -29,7 +29,7 @@ test("native contracts retain historical fields and explicitly migrate captured-
     execFileSync("tar", ["-xf", tar, "-C", before]);
     const lines = ["import type { z } from 'zod';", "type Normalize<T> = T extends (...args: never[])=>unknown ? T : T extends object ? { [K in keyof T]: Normalize<T[K]> } : T;",
       "type Equal<A,B> = (<T>()=>T extends A?1:2) extends (<T>()=>T extends B?1:2) ? true : false;", "type Assert<T extends true> = T;",
-      "type StripSources<T> = T extends string | number | boolean ? T : T extends readonly unknown[] ? { [K in keyof T]: StripSources<T[K]> } : T extends object ? { [K in keyof T as K extends 'source'|'sourcePath'|'effectiveSourcePath'|'effectiveSource'|'namespace'|'viewId' ? never : K]: StripSources<T[K]> } : T;",
+      "type StripSources<T> = T extends string | number | boolean ? T : T extends readonly unknown[] ? { [K in keyof T]: StripSources<T[K]> } : T extends object ? { [K in keyof T as K extends 'source'|'sourcePath'|'sourceCeilings'|'effectiveSourcePath'|'effectiveSource'|'namespace'|'viewId' ? never : K]: StripSources<T[K]> } : T;",
       `import * as Readers from '${join(root, "packages/config-types/src/schemas-service-readers")}';`,
       `import type { ConfigurationNamespace, ConfigurationReader, ConfigurationService } from '${join(root, "packages/config-types/src/index")}';`];
     domains.forEach(([pkg, module, names], index) => {
@@ -80,6 +80,9 @@ test("native contracts retain historical fields and explicitly migrate captured-
       "declare const projection: A4.RegisteredReadProjection; declare const namespace: ConfigurationNamespace;",
       "projection.authorizeValidation(namespace, evidence => !evidence.sensitive); projection.get(namespace, evidence => evidence.path.length > 0);",
       "type SourcePath = Assert<Equal<z.output<typeof A3.resolutionOriginSchema>['sourcePath'], readonly string[] | undefined>>;",
+      "type SourceCeilings = Assert<Equal<z.output<typeof A3.resolutionLayerSchema>['sourceCeilings'], readonly A3.ResolutionCeiling[] | undefined>>;",
+      "type InputSourceCeilings = Assert<Equal<A3.ResolutionSnapshotInput['layers'][number]['sourceCeilings'], readonly A3.ResolutionCeiling[] | undefined>>;",
+      "type SnapshotSourceCeilings = Assert<Equal<A3.ConfigurationSnapshot['layers'][number]['sourceCeilings'], readonly A3.ResolutionCeiling[] | undefined>>;",
       "type EffectiveSourcePath = Assert<Equal<z.output<typeof A3.resolvedPathInspectionSchema>['effectiveSourcePath'], readonly string[] | undefined>>;",
     );
     const fixture = join(directory, "proof.mts"); await writeFile(fixture, lines.join("\n"));

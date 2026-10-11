@@ -26,7 +26,7 @@ test("expiry during full-prefix authorization rejects even an earlier persistent
   } finally { await s.root.dispose(); }
 });
 
-test("deadline during accepted persistent IO preserves receipts and serializes fallback after that publication", async () => {
+test("deadline during accepted persistent IO preserves receipts and refreshes fallback in that publication", async () => {
   let entered, release;
   const started = new Promise((resolve) => { entered = resolve; });
   const gate = new Promise((resolve) => { release = resolve; });
@@ -55,8 +55,8 @@ test("deadline during accepted persistent IO preserves receipts and serializes f
     await s.root.flush();
     assert.equal(s.reader.get(["flag"]), "accepted persistent");
     assert.equal(s.provider.writes, 1);
-    assert.equal(events.length, 2);
-    assert.deepEqual(events.map((event) => event.current.value), ["accepted temporary", "accepted persistent"]);
+    assert.equal(events.length, 1);
+    assert.deepEqual(events.map((event) => event.current.value), ["accepted persistent"]);
   } finally { await s.root.dispose(); }
 });
 

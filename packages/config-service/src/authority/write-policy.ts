@@ -22,6 +22,7 @@ import {
   mutationRequest,
 } from "./authority-write";
 import { covers, evidencePath } from "./authorization-requests";
+import { admitCeilingMutation } from "./ceiling-admission";
 import { compileMutationPath } from "./mutation-capture";
 import type { MutationPlan } from "./mutation-plan";
 import { checkedSessionMutation } from "./session-mutations";
@@ -33,6 +34,7 @@ export async function admitMutationPolicy(
   ticket: MutationTicket,
   plan: MutationPlan,
 ): Promise<ConfigurationAuthorizationRequest> {
+  admitCeilingMutation(state, ticket, plan);
   if (
     state.factory.host.authConfig?.sessionLayer === plan.command.layer &&
     !plan.session
@@ -214,10 +216,9 @@ function checkEvidence(
   const access = {
     userId: ticket.principal.principalId,
     roles: ticket.principal.roles,
-    ...(plan.session?.emergency
+    ...(plan.session
       ? {
-          sessionMode: "emergency-override",
-          overrideReason: plan.session.controller.getSession()?.reason,
+          trustedSession: trustedSession(plan.session),
         }
       : {}),
   };
@@ -241,6 +242,14 @@ function checkEvidence(
     )
       throw createWeaverError("POLICY_VIOLATION", "Mutation policy denied");
   }
+}
+
+function trustedSession(ref: NonNullable<MutationPlan["session"]>) {
+  ref.ownerCheck();
+  const metadata = ref.controller.getSession();
+  if (!metadata || !ref.controller.isActive())
+    throw createWeaverError("FORBIDDEN", "Session is unavailable");
+  return { id: metadata.id, emergency: ref.emergency, reason: metadata.reason };
 }
 
 function destructivePath(

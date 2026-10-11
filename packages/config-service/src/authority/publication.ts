@@ -9,6 +9,7 @@ import {
   stageIdentity,
 } from "../identity-snapshots";
 import type { CapturedBinding } from "../provider-binding";
+import { captureResolutionContext } from "../resolution-context";
 import {
   publicationRestart,
   type ReloadBehavior,
@@ -16,6 +17,7 @@ import {
 } from "../restart-state";
 import type { RootState } from "../root-state";
 import { type PreparedView, stageViews } from "../view-snapshots";
+import { refreshPublicationEligibility } from "./publication-eligibility";
 import { anchorValidation } from "./schema-admission";
 
 export interface PublicationPlan {
@@ -66,7 +68,6 @@ export function stagePublication(
   replacements: Replacements,
 ): PublicationPlan {
   const ready = new Map(draft.ready);
-  const ranks = state.factory.options.layers.map((_, rank) => rank);
   for (const [key, snapshot] of draft.ready) {
     if (
       !snapshot.contributions.some((item) =>
@@ -79,7 +80,8 @@ export function stagePublication(
       replacements,
     );
     requireHealthy(contributions, "fail");
-    const effective = resolveIdentitySnapshot(contributions, ranks);
+    const context = captureResolutionContext(state, snapshot.identity);
+    const effective = resolveIdentitySnapshot(contributions, context);
     validateCandidate(state, snapshot, contributions, effective.entries);
     ready.set(
       key,
@@ -87,10 +89,8 @@ export function stagePublication(
         snapshot.identity,
         draft.revision,
         contributions,
-        state.factory.registry,
-        ranks,
+        context,
         "fail",
-        state.factory.adapter.revision,
       ),
     );
   }
@@ -130,11 +130,19 @@ export function validateCandidate(
   }
 }
 
-/** No resolution, validation, callbacks or awaits may occur in publication. */
 export function publish(
   state: RootState,
   plan: PublicationPlan,
   cause: ConfigurationReaderChange["cause"] = "mutation",
+): void {
+  commitPublication(state, refreshPublicationEligibility(state, plan), cause);
+}
+
+/** The swap itself contains no resolution, callbacks or awaits. */
+function commitPublication(
+  state: RootState,
+  plan: PublicationPlan,
+  cause: ConfigurationReaderChange["cause"],
 ): void {
   const before = initialPublication(state);
   state.ready = plan.ready;

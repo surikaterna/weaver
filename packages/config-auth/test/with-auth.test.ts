@@ -23,7 +23,6 @@ const authConfig: AuthConfig = {
   ],
   dynamicScopeRoles: new Set(["admin"]),
   sessionLayer: "session",
-  elevatedSessionMode: "god-mode",
 };
 
 describe("withAuth", () => {
@@ -104,7 +103,7 @@ describe("withAuth", () => {
       const ctx = {
         userId: "u1",
         roles: ["user"] as const,
-        sessionMode: "god-mode" as const,
+        trustedSession: { id: "verified", emergency: true, reason: "incident" },
       };
       const schema = {
         type: "string" as const,

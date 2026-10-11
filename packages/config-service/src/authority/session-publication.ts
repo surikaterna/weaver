@@ -1,5 +1,6 @@
 import { stageIdentity } from "../identity-snapshots";
 import { identityKey } from "../layer-stack";
+import { captureResolutionContext } from "../resolution-context";
 import { publicationRestart } from "../restart-state";
 import type { RootState } from "../root-state";
 import { stageViews } from "../view-snapshots";
@@ -28,10 +29,8 @@ export function stageSession(
       previous.identity,
       draft.revision,
       contributions,
-      state.factory.registry,
-      state.factory.options.layers.map((_, rank) => rank),
+      captureResolutionContext(state, previous.identity),
       "allow-degraded",
-      state.factory.adapter.revision,
     ),
   );
   const plan = {

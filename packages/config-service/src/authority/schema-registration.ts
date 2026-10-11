@@ -14,7 +14,6 @@ import {
   type TrustedPrincipalSnapshot,
   WeaverErrorInstance,
 } from "@weaver-conf/config-types";
-import { rejectCeilings } from "../ceiling-presence";
 import { errorData } from "../resource-ownership";
 import { assertLive, type RootState } from "../root-state";
 import { auditWrite, invokeWriteHook } from "./authority-audit";
@@ -191,7 +190,6 @@ function preparePublication(
       prepared.result.error?.code ?? "VALIDATION_ERROR",
       "Schema registration rejected",
     );
-  rejectCeilings(request.schema);
   return stageSchemaPublication(state, prepared);
 }
 

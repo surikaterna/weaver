@@ -33,10 +33,10 @@ function checkPolicy(api) {
     check(api.evaluateChangePolicy(gated, context, "app", () => true).outcome === "requires-promotion", policy);
   }
   const emergency = { "x-weaver": { changePolicy: "emergency-override" } };
-  for (const ctx of [context, { ...context, sessionMode: "emergency-override", overrideReason: "" }]) {
+  for (const ctx of [context, { ...context, trustedSession: { id: "verified", emergency: true, reason: "" } }]) {
     check(api.evaluateChangePolicy(emergency, ctx, "app", () => true).outcome === "requires-emergency-auth", "emergency auth required");
   }
-  const authorized = { ...context, sessionMode: "emergency-override", overrideReason: "incident" };
+  const authorized = { ...context, trustedSession: { id: "verified", emergency: true, reason: "incident" } };
   check(api.evaluateChangePolicy(emergency, authorized, "app", () => true).outcome === "allowed", "emergency authorized");
   check(api.evaluateChangePolicy(emergency, authorized, "app", () => false).outcome === "denied", "emergency cannot bypass base permission");
 }

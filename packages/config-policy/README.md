@@ -67,7 +67,7 @@ const auth = withAuth({ /* ... */ });
 
 const decision = evaluateChangePolicy(
   { type: "string", changePolicy: "staging-gate" },
-  { roles: ["tenantAdmin"], sessionMode: undefined },
+  { userId: "verified-host-user", roles: ["tenantAdmin"] },
   "tenant",
   auth.canWrite,
 );
@@ -150,7 +150,7 @@ await tracker.regularize("override-1", "ops@example.com");
 | Type | Description |
 |---|---|
 | `PolicyDecision` | Outcome: allowed, requires-promotion, requires-emergency-auth, denied |
-| `PolicyEvaluationContext` | Access context extended with `overrideReason` |
+| `PolicyEvaluationContext` | Host-supplied access context with optional `trustedSession: { id, emergency, reason }` |
 | `PolicyViolation` | Validation finding with severity and suggested policy |
 | `RatchetRule` | Ordered or custom ratchet rule definition |
 | `RatchetValidationResult` | Evaluations, violations, and blocked transitions |
@@ -159,3 +159,9 @@ await tracker.regularize("override-1", "ops@example.com");
 ## License
 
 MIT
+Policy helpers do not authenticate sessions. A trusted host supplies
+`trustedSession` only after verifying membership, lease and confinement. Native
+configuration-service requests never accept this object as authority: callers
+select a root-owned session ID. Legacy mode strings and `overrideReason` no longer
+grant emergency policy access. Emergency policy also requires a nonblank stored
+reason and ordinary write authorization; promotion requirements remain enforced.

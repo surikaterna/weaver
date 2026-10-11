@@ -72,7 +72,15 @@ The only lifecycle port is `forSessions(capability)`; data still uses `apply` wi
 a checked selector. Deadline/revocation cuts off new dispatch immediately while
 effective fallback waits on the same serialized publication queue. It is not a
 rollback of already accepted effects. Emergency membership never relaxes ordinary
-grants, visibility or schema admission, and ceilings remain separate work. Native
+grants, visibility or schema admission. `weaver-yqi0` compiles registered ceilings
+from canonical raw-candidate branch/member evidence into the existing resolver.
+Logical and source-local physical view ceilings intersect using configured ranks,
+not virtual tier positions. Only a live matching root-owned emergency contribution
+may bypass numeric limits; new publications refresh eligibility after awaited IO
+without rewriting accepted receipts. Raw authorized layer observations remain
+distinct from ceiling-resolved effective values. Native `not` remains negative-only
+value validation; its annotations emit no positive or inverse ceiling policy,
+while all configured ceiling names are still validated. Native
 feature tests replace the unwired server session map/sweeper before its removal;
 no compatibility facade or network endpoint is introduced.
 

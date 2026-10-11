@@ -19,6 +19,7 @@ import {
   stageIdentity,
 } from "./identity-snapshots";
 import type { CapturedBinding } from "./provider-binding";
+import { captureResolutionContext } from "./resolution-context";
 import { errorData } from "./resource-ownership";
 import { publicationRestart } from "./restart-state";
 import { assertReadable, type RootState } from "./root-state";
@@ -171,17 +172,15 @@ function stageObserved(
   revision: string,
   contributions: readonly LoadedContribution[],
 ): IdentitySnapshot {
-  const ranks = state.factory.options.layers.map((_, rank) => rank);
-  const effective = resolveIdentitySnapshot(contributions, ranks);
+  const context = captureResolutionContext(state, previous.identity);
+  const effective = resolveIdentitySnapshot(contributions, context);
   validateCandidate(state, previous, contributions, effective.entries);
   return stageIdentity(
     previous.identity,
     revision,
     contributions,
-    state.factory.registry,
-    ranks,
+    context,
     state.factory.options.failureMode,
-    state.factory.adapter.revision,
   );
 }
 

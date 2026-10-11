@@ -32,7 +32,6 @@ const testAuth = withAuth({
   ],
   dynamicScopeRoles: new Set(["scope-admin", "tenant-admin", "platform-ops"]),
   sessionLayer: "session",
-  elevatedSessionMode: "god-mode",
 });
 
 // --- canRead tests ---
@@ -121,20 +120,20 @@ test("canWrite: emergency override bypasses ceiling", () => {
   const userCtx = {
     userId: "u1",
     tenantId: "t1",
-    roles: ["user"],
-    sessionMode: "emergency-override",
+    roles: ["support"],
+    trustedSession: { id: "verified", emergency: true, reason: "incident" },
   };
   const schema = {
     type: "number",
     "x-weaver": { maxOverrideLayer: "tenant" },
   };
   // emergency override should bypass the ceiling
-  expect(testAuth.canWrite(userCtx, "user", "k", schema)).toBe(true);
+  expect(testAuth.canWrite(userCtx, "session", "k", schema)).toBe(true);
 });
 
-test("canWrite: dynamic scope layers allow scope-admin", () => {
+test("canWrite: unconfigured scope names fail closed even for scope-admin", () => {
   const scopeAdminCtx = { userId: "u1", tenantId: "t1", roles: ["scope-admin"] };
-  expect(testAuth.canWrite(scopeAdminCtx, "country:NO", "k", undefined)).toBe(true);
+  expect(testAuth.canWrite(scopeAdminCtx, "country:NO", "k", undefined)).toBe(false);
 });
 
 test("canWrite: dynamic scope layers deny regular user", () => {
@@ -183,11 +182,11 @@ const sessionCtx = (overrides = {}) => ({
   ...overrides,
 });
 
-const godModeCtx = (overrides = {}) => ({
+const emergencyCtx = (overrides = {}) => ({
   userId: "u1",
   tenantId: "t1",
   roles: ["platform-ops"],
-  sessionMode: "god-mode",
+  trustedSession: { id: "verified", emergency: true, reason: "incident" },
   ...overrides,
 });
 
@@ -210,24 +209,24 @@ test("session-mode: blocked rejects session layer write unconditionally", () => 
   expect(testAuth.canWrite(sessionCtx(), "session", "example.app.theme", schema)).toBe(false);
 });
 
-test("session-mode: blocked rejects even with god-mode", () => {
+test("session-mode: blocked rejects even with trusted emergency", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "blocked" } };
-  expect(testAuth.canWrite(godModeCtx(), "session", "example.app.theme", schema)).toBe(false);
+  expect(testAuth.canWrite(emergencyCtx(), "session", "example.app.theme", schema)).toBe(false);
 });
 
-test("session-mode: restricted rejects session write without god-mode", () => {
+test("session-mode: restricted rejects session write without trusted emergency", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "restricted" } };
   expect(testAuth.canWrite(sessionCtx(), "session", "example.app.theme", schema)).toBe(false);
 });
 
-test("session-mode: restricted allows session write with god-mode", () => {
+test("session-mode: restricted allows session write with trusted emergency", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "restricted" } };
-  expect(testAuth.canWrite(godModeCtx(), "session", "example.app.theme", schema)).toBe(true);
+  expect(testAuth.canWrite(emergencyCtx(), "session", "example.app.theme", schema)).toBe(true);
 });
 
-test("session-mode: restricted rejects with non-god-mode session type", () => {
+test("session-mode: restricted rejects a standard trusted session", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "restricted" } };
-  const ctx = sessionCtx({ sessionMode: "debug" });
+  const ctx = sessionCtx({ trustedSession: { id: "verified", emergency: false, reason: "debug" } });
   expect(testAuth.canWrite(ctx, "session", "example.app.theme", schema)).toBe(false);
 });
 
@@ -237,7 +236,7 @@ test("session-mode: blocked key can still be written to tenant layer", () => {
   expect(testAuth.canWrite(ctx, "tenant", "example.app.theme", schema)).toBe(true);
 });
 
-test("session-mode: restricted key can be written to user layer without god-mode", () => {
+test("session-mode: restricted key can be written to user layer without trusted emergency", () => {
   const schema = { type: "string", "x-weaver": { sessionMode: "restricted" } };
   const ctx = { userId: "u1", tenantId: "t1", roles: ["user"] };
   expect(testAuth.canWrite(ctx, "user", "example.app.theme", schema)).toBe(true);

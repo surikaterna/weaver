@@ -2,8 +2,6 @@
 
 import { z } from "zod";
 
-import { configurationLayerSchema } from "./schemas-layers";
-
 export const configChangePolicySchema = z.enum([
   "full-pipeline",
   "staging-gate",
@@ -48,7 +46,7 @@ export const weaverPropertyExtensionsSchema = z.strictObject({
   changePolicy: configChangePolicySchema.optional(),
   reloadBehavior: configReloadBehaviorSchema.optional(),
   expressionAllowed: z.boolean().optional(),
-  maxOverrideLayer: configurationLayerSchema.optional(),
+  maxOverrideLayer: z.string().min(1).optional(),
   writeRestriction: z.array(configurationRoleSchema).readonly().optional(),
   sessionMode: propertySessionModeSchema.optional(),
 });

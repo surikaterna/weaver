@@ -1,6 +1,14 @@
 export { schemaRegistrationAuditMetadataSchema } from "@weaver-conf/config-types";
 export { createCanonicalSchemaRegistry } from "./canonical-schema-registry";
 export {
+  type RegisteredCeilingEvidence,
+  type RegisteredCeilingInput,
+  registeredCeilingEvidence,
+  registeredCeilingEvidenceSchema,
+  registeredCeilingInputSchema,
+  validateRegisteredCeilingNames,
+} from "./registered-ceilings";
+export {
   type RegisteredMutationEvidence,
   type RegisteredMutationFootprint,
   registeredMutationEvidenceSchema,

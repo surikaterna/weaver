@@ -3,6 +3,7 @@ import { serializeRegistry } from "@weaver-conf/config-registry/persistence";
 import { createWeaverError } from "@weaver-conf/config-types";
 import type { LoadedContribution } from "../hydration";
 import { stageIdentity } from "../identity-snapshots";
+import { captureResolutionContext } from "../resolution-context";
 import type { RootState } from "../root-state";
 import { dispatchEffect } from "./registry-effects";
 
@@ -80,10 +81,8 @@ export async function persistSeed(state: RootState): Promise<void> {
         snapshot.identity,
         snapshot.revision,
         replaceRegistryContribution(snapshot.contributions, storage),
-        state.factory.registry,
-        state.factory.options.layers.map((_, rank) => rank),
+        captureResolutionContext(state, snapshot.identity),
         state.factory.options.failureMode,
-        state.factory.adapter.revision,
       ),
     );
   const outcome = await storage.dispatch();

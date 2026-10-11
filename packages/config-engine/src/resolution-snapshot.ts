@@ -51,6 +51,10 @@ function validatePlan(input: ResolutionSnapshotInput): void {
     pairs.add(pair);
     if (!input.configuredRanks.includes(layer.rank))
       throw createWeaverError("VALIDATION_ERROR", "Unknown layer rank");
+    for (const ceiling of layer.sourceCeilings ?? []) {
+      if (!input.configuredRanks.includes(ceiling.maxRank))
+        throw createWeaverError("VALIDATION_ERROR", "Unknown ceiling rank");
+    }
   }
   for (const ceiling of input.ceilings) {
     if (!input.configuredRanks.includes(ceiling.maxRank))
@@ -75,10 +79,16 @@ export function resolveConfigurationSnapshot(
   let origin: RecordOrigin | undefined;
   for (const layer of parsed.data.layers) {
     if (Object.keys(layer.entries).length === 0) continue;
+    const sourcePolicy = layer.sourceCeilings?.length
+      ? compileResolutionPolicy([
+          ...parsed.data.ceilings,
+          ...layer.sourceCeilings,
+        ])
+      : policy;
     const merged = mergeObservedRecords(entries, layer.entries, origin, {
       origin: originOf(layer),
       rank: layer.rank,
-      policy: layer.trustedEmergency ? emergency : policy,
+      policy: layer.trustedEmergency ? emergency : sourcePolicy,
     });
     entries = merged.entries;
     origin = merged.origin;

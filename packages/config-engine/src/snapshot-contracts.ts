@@ -28,17 +28,18 @@ const originSchema = z.strictObject({
   rank: z.number().finite(),
   sourcePath: z.array(z.string().min(1)).min(1).readonly().optional(),
 });
-const layerSchema = originSchema
-  .extend({
-    entries: dataRecordSchema,
-    trustedEmergency: z.boolean().optional(),
-    merge: z.unknown().optional(),
-  })
-  .readonly();
 const ceilingSchema = z
   .strictObject({
     path: requestPathSchema,
     maxRank: z.number().finite(),
+  })
+  .readonly();
+const layerSchema = originSchema
+  .extend({
+    entries: dataRecordSchema,
+    trustedEmergency: z.boolean().optional(),
+    sourceCeilings: z.array(ceilingSchema).readonly().optional(),
+    merge: z.unknown().optional(),
   })
   .readonly();
 const contributionSchema = z

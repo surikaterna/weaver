@@ -61,17 +61,17 @@ test("explicit environment, loadLayer dialect and trusted read context are hones
   assert.equal(context.identity.environment, "west"); assert.deepEqual(context.scopePath, []); assert.equal(context.layer, "fixed"); assert.ok(Object.isFrozen(context)); await next.root.dispose();
 });
 
-test("canonical registrations and recursive ceilings reject before effects", async () => {
+test("invalid canonical registrations and unknown recursive ceilings reject before effects", async () => {
   const provider = new MemoryProvider("p", "base", {});
   const fragment = { serviceId: "alpha", providerId: "part", environment: "east", owner: { name: "host", contact: "host@example.org" }, slotPath: "/parts", schema: { type: "object", properties: {} } };
   const service = { ...registration(), fragmentSlots: [{ slotPath: "/parts", accepts: "object" }], schema: { type: "object", properties: { parts: { type: "object", properties: {} } } } };
   const host = readonlyHost(options([provider]));
   for (const schemas of [[fragment, service], [service, fragment, fragment], [registration(), fragment], [service, fragment, { ...service, fragmentSlots: [] }]]) await assert.rejects(createConfigurationService(options([provider], { schemas }), host));
   for (const keyword of ["properties", "patternProperties", "additionalProperties", "items", "allOf", "anyOf", "oneOf", "not"]) {
-    const leaf = { type: "string", "x-weaver": { maxOverrideLayer: "base" } };
+    const leaf = { type: "string", "x-weaver": { maxOverrideLayer: "unknown" } };
     const branch = ["properties", "patternProperties"].includes(keyword) ? { [keyword]: { absent: leaf } } : { [keyword]: ["allOf", "anyOf", "oneOf"].includes(keyword) ? [leaf] : leaf };
     const schema = { type: "object", properties: { empty: { type: keyword === "items" ? "array" : "object", ...branch } } };
-    await assert.rejects(createConfigurationService(options([provider], { schemas: [registration("east", "alpha", schema)] }), host), { code: "UNSUPPORTED_OPERATION" });
+    await assert.rejects(createConfigurationService(options([provider], { schemas: [registration("east", "alpha", schema)] }), host), { code: "VALIDATION_ERROR" });
   }
   await assert.rejects(createConfigurationService(options([provider], { merge: () => ({}) }), host), { code: "UNSUPPORTED_OPERATION" });
   assert.equal(provider.loads + provider.writes + provider.removes + provider.flushes, 0);

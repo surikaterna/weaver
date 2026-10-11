@@ -180,7 +180,7 @@ function queueCompositionBranch(
   pending: WalkFrame[],
   runtime: WalkRuntime,
 ): void {
-  const { mode } = frame.state.context;
+  const mode = frame.keyword === "not" ? "effective" : frame.state.context.mode;
   const memoEligible = runtime.plan.memoEligible?.has(schema) === true;
   const memo = runtime.memo;
   const cached =

@@ -5,6 +5,7 @@ import {
 import { loadContributions } from "./hydration";
 import { stageIdentity } from "./identity-snapshots";
 import { identityKey, selectBindings } from "./layer-stack";
+import { captureResolutionContext } from "./resolution-context";
 import { assertReadable, type RootState } from "./root-state";
 
 export interface PendingIdentity {
@@ -105,10 +106,8 @@ export async function hydrateIdentity(
     identity,
     `${state.incarnation}${state.generation + 1}`,
     contributions,
-    state.factory.registry,
-    state.factory.options.layers.map((_, rank) => rank),
+    captureResolutionContext(state, identity),
     state.factory.options.failureMode,
-    state.factory.adapter.revision,
   );
   assertReadable(state);
   requireWaiter(guards);

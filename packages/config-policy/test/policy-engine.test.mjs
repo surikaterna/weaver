@@ -33,7 +33,6 @@ const testAuth = withAuth({
   ],
   dynamicScopeRoles: new Set(["scope-admin", "tenant-admin", "platform-ops"]),
   sessionLayer: "session",
-  elevatedSessionMode: "god-mode",
 });
 
 // Helpers — minimal context and schema builders
@@ -87,7 +86,7 @@ test("full-pipeline policy returns requires-promotion", () => {
 test("emergency-override without session flag returns requires-emergency-auth", () => {
   const result = evaluateChangePolicy(
     makeSchema({ changePolicy: "emergency-override" }),
-    makeContext(), // no sessionMode
+    makeContext(),
     "app",
     testAuth.canWrite,
   );
@@ -99,8 +98,7 @@ test("emergency-override with session flag and reason returns allowed", () => {
   const result = evaluateChangePolicy(
     makeSchema({ changePolicy: "emergency-override" }),
     makeContext({
-      sessionMode: "emergency-override",
-      overrideReason: "Production incident #1234",
+      trustedSession: { id: "verified", emergency: true, reason: "Production incident #1234" },
     }),
     "app",
     testAuth.canWrite,
@@ -133,7 +131,7 @@ test("missing changePolicy defaults to direct-allowed", () => {
 test("emergency-override without reason returns requires-emergency-auth", () => {
   const result = evaluateChangePolicy(
     makeSchema({ changePolicy: "emergency-override" }),
-    makeContext({ sessionMode: "emergency-override" }), // no overrideReason
+    makeContext({ trustedSession: { id: "verified", emergency: true } }),
     "app",
     testAuth.canWrite,
   );
@@ -143,7 +141,7 @@ test("emergency-override without reason returns requires-emergency-auth", () => 
 test("emergency-override with empty reason returns requires-emergency-auth", () => {
   const result = evaluateChangePolicy(
     makeSchema({ changePolicy: "emergency-override" }),
-    makeContext({ sessionMode: "emergency-override", overrideReason: "" }),
+    makeContext({ trustedSession: { id: "verified", emergency: true, reason: "" } }),
     "app",
     testAuth.canWrite,
   );
