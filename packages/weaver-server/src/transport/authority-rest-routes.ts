@@ -1,12 +1,19 @@
+import { parseCanonicalConfigPath } from "@weaver-conf/config-engine";
 import {
   type ConfigurationAuthorityController,
-  type ConfigurationAuthorityRequest,
+  configurationMutationCommandSchema,
   createWeaverError,
   hydratedConfigurationInspectionSchema,
 } from "@weaver-conf/config-types";
 import type { ServerAuthorityOptions } from "../server-authority-options";
-import { authorityLeafResponseSchema } from "./authority-rest-contracts";
-import { withAuthorityRequest } from "./authority-rest-principal";
+import {
+  authorityValueResponseSchema,
+  authorityWireValue,
+} from "./authority-rest-contracts";
+import {
+  type AuthorityRequestContext,
+  withAuthorityRequest,
+} from "./authority-rest-principal";
 import {
   type SelectedAuthorityRequest,
   selectAuthorityRequest,
@@ -18,28 +25,40 @@ import {
 import type { RestRequest, RestRoute } from "./rest-adapter";
 
 function execute(
-  port: ConfigurationAuthorityRequest,
+  context: AuthorityRequestContext,
   selected: SelectedAuthorityRequest,
 ) {
-  if (selected.method === "PUT")
-    return port
-      .set(selected.path, selected.value, selected.options)
-      .then(authorityWriteResponse);
-  if (selected.method === "DELETE")
-    return port
-      .remove(selected.path, selected.options)
-      .then(authorityWriteResponse);
+  if (selected.method !== "GET") {
+    const command = configurationMutationCommandSchema.safeParse({
+      identity: context.identity,
+      namespace: context.namespace,
+      path: selected.path,
+      ...selected.options,
+      ...(selected.method === "PUT"
+        ? { operation: "set", value: selected.value }
+        : { operation: "remove" }),
+    });
+    if (!command.success)
+      throw createWeaverError("VALIDATION_ERROR", "Invalid mutation command");
+    return context.mutations
+      .apply([command.data])
+      .then((result) => authorityWriteResponse(result, context.identity));
+  }
+  const port = context.query;
+  const relative = selected.parsed.segments.slice(
+    parseCanonicalConfigPath(context.namespace).segments.length,
+  );
   if (selected.inspect) {
     const inspection = hydratedConfigurationInspectionSchema.parse(
-      port.inspect(selected.path),
+      port.inspect(relative),
     );
     return authoritySuccess(inspection, inspection.revision);
   }
-  const value = port.get(selected.path);
-  const revision = port.revision;
-  const data = authorityLeafResponseSchema.parse({
+  const { value: inspected, revision } = port.snapshot(relative);
+  const value = inspected.state === "value" ? inspected.value : undefined;
+  const data = authorityValueResponseSchema.parse({
     key: selected.parsed.storageKey,
-    ...(value === undefined ? {} : { value }),
+    ...(value === undefined ? {} : { value: authorityWireValue(value) }),
   });
   return authoritySuccess(data, revision);
 }

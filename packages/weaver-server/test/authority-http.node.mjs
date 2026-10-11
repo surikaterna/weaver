@@ -4,6 +4,8 @@ import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createConfigurationService } from "@weaver-conf/config-service";
+import { createRegistryAdapter } from "@weaver-conf/config-registry/internal/server-adapter";
+import { serializeRegistry } from "@weaver-conf/config-registry/persistence";
 import { startWeaverServer } from "../src/index.ts";
 import { deferred, effects, filesystemHost, http, jwt } from "./fixtures/authority-host.mjs";
 
@@ -15,7 +17,7 @@ function rejected(response, status, code, outcome) {
   if (outcome) {
     assert.equal(response.body.data.outcome, outcome);
     assert.deepEqual(response.body.data.error, response.body.error);
-    assert.equal(response.body.data.revision, undefined);
+    assert.equal(response.body.data.revisions, undefined);
   }
 }
 function success(response) {
@@ -30,14 +32,63 @@ function semanticInspection(inspection) {
 async function directPort(fixture) {
   let controller;
   const { configuration, registry: _, mapPrincipal: __, ...host } = fixture.authority;
-  const root = await createConfigurationService(configuration, { ...host, registry: fixture.registry.reader,
+  const root = await createConfigurationService(configuration, { ...host, registry: { initial: fixture.registry.serialized, storage: { kind: "provider", providerId: fixture.authority.registry.providerId } },
     onAuthorityReady(value) { controller = value; } });
   const principal = fixture.authority.mapPrincipal({ identity: { userId: "alice" } });
   const token = controller.mint(principal);
-  const port = controller.forIdentity(token, configuration.identity, "/example");
+  const port = controller.forIdentity(token, { identity: configuration.identity, namespace: "/example" });
   await port.prepare();
-  return { root, port };
+  return { root, port, mutations: controller.forMutations(token), selection: { identity: configuration.identity, namespace: "/example", layer: "late" } };
 }
+
+async function projectedTupleFixture() {
+  const fixture = await filesystemHost();
+  const tuple = { type: "array", items: [
+    { type: "string" }, { type: "string", "x-weaver": { sensitive: true } }, { type: "string" },
+  ] };
+  const adapter = createRegistryAdapter({ defaultEnvironment: "dev" });
+  const prepared = adapter.prepare({ serviceId: "example", environment: "dev", owner: { name: "host", contact: "host@example.org" }, fragmentSlots: [],
+    schema: { type: "object", properties: { name: { type: "string" }, count: { type: "number" }, blocked: { type: "string" },
+      list: tuple, nested: { type: "object", properties: { list: tuple } }, missing: { type: "string" }, literalNull: { type: "null" },
+    } } });
+  assert.equal(prepared.result.success, true); prepared.publish();
+  fixture.registry.serialized = serializeRegistry(adapter.snapshot());
+  const base = fixture.authority.configuration.providers[0].provider;
+  await base.write("_weaver.registry.schemas", fixture.registry.serialized);
+  await base.write("example.list", ["first", "PRIVATE-ARRAY-CREDENTIAL", "third"]);
+  await base.write("example.nested", { list: ["first", "PRIVATE-NESTED-CREDENTIAL", "third"] });
+  await base.write("example.literalNull", null);
+  return fixture;
+}
+
+test("real JWT HTTP redacts whole restricted arrays without holes, null placeholders or weakened mutation input", async () => {
+  const fixture = await projectedTupleFixture(); let server, root, controller;
+  try {
+    server = await startWeaverServer(fixture.options);
+    const { configuration, registry: _, mapPrincipal: __, ...host } = fixture.authority;
+    root = await createConfigurationService({ ...configuration, providers: configuration.providers.map((binding) => ({ ...binding, ownership: { kind: "borrowed" } })) }, {
+      ...host, registry: { initial: fixture.registry.serialized }, onAuthorityReady(value) { controller = value; },
+    });
+    const token = controller.mint(fixture.authority.mapPrincipal({ identity: { userId: "alice" } }));
+    const query = controller.forIdentity(token, { identity: configuration.identity, namespace: "/example" });
+    assert.throws(() => query.get(["list"]), { code: "FORBIDDEN" });
+    assert.deepEqual(query.inspect(["list"]).effective, { state: "redacted" });
+    const value = ["first", , "third"];
+    const before = effects(fixture);
+    const result = await controller.forMutations(token).apply([{ identity: configuration.identity, namespace: "/example", layer: "base", operation: "set", path: "/example/list", value }]);
+    assert.equal(result.error.code, "VALIDATION_ERROR"); assert.deepEqual(effects(fixture), before);
+    const listResponse = await http(server, "/v1/config/example/list");
+    rejected(listResponse, 403, "FORBIDDEN");
+    const nestedResponse = await http(server, "/v1/config/example/nested"), nested = success(nestedResponse);
+    assert.deepEqual(nested.value, {});
+    const inspectionResponse = await http(server, "/v1/config/example/list?inspect"), inspection = success(inspectionResponse);
+    assert.deepEqual(inspection.effective, { state: "redacted" });
+    assert.doesNotMatch(JSON.stringify({ list: listResponse.body, nested: nestedResponse.body, inspection: inspectionResponse.body, result }), /PRIVATE|CREDENTIAL|cause/);
+    assert.equal(Object.hasOwn(success(await http(server, "/v1/config/example/missing")), "value"), false);
+    assert.equal(success(await http(server, "/v1/config/example/literalNull")).value, null);
+    assert.equal(Object.hasOwn(value, 1), false); assert.deepEqual(effects(fixture), before);
+  } finally { await root?.dispose(); await server?.close(); await fixture.cleanup(); }
+});
 
 for (const environment of ["dev", "production"]) {
   for (const dialect of [false, true]) {
@@ -49,24 +100,24 @@ for (const environment of ["dev", "production"]) {
         server = await startWeaverServer(fixture.options);
         const local = await directPort(direct); root = local.root;
         const path = "/v1/config/example/name";
-        assert.equal(success(await http(server, path)).value, local.port.get("/example/name"));
+        assert.equal(success(await http(server, path)).value, local.port.get(["name"]));
         assert.deepEqual(semanticInspection(success(await http(server, `${path}?inspect`))),
-          semanticInspection(local.port.inspect("/example/name")));
+          semanticInspection(local.port.inspect(["name"])));
         const initial = (await http(server, path)).body.meta.revision;
         const localInitial = local.port.revision;
         const written = success(await http(server, `${path}?layer=late`, { method: "PUT", body: { value: "new" }, headers: { "if-match": `"${initial}"` } }));
-        const localWrite = await local.port.set("/example/name", "new", { layer: "late", ifRevision: localInitial });
+        const localWrite = await local.mutations.apply([{ ...local.selection, operation: "set", path: "/example/name", value: "new", ifRevision: localInitial }]);
         assert.equal(localWrite.success, true); assert.equal(written.success, true);
-        assert.equal(written.revision, (await http(server, path)).body.meta.revision);
+        assert.equal(written.revisions[0].revision, (await http(server, path)).body.meta.revision);
         rejected(await http(server, `${path}?layer=late`, { method: "PUT", body: { value: "stale" }, headers: { "if-match": initial } }), 409, "REVISION_CONFLICT", "rejected");
-        assert.equal((await local.port.set("/example/name", "stale", { layer: "late", ifRevision: localInitial })).error.code, "REVISION_CONFLICT");
+        assert.equal((await local.mutations.apply([{ ...local.selection, operation: "set", path: "/example/name", value: "stale", ifRevision: localInitial }])).error.code, "REVISION_CONFLICT");
         rejected(await http(server, `${path}?layer=late`, { method: "PUT", body: { value: 7 } }), 400, "VALIDATION_ERROR", "rejected");
-        assert.equal((await local.port.set("/example/name", 7, { layer: "late" })).error.code, "VALIDATION_ERROR");
+        assert.equal((await local.mutations.apply([{ ...local.selection, operation: "set", path: "/example/name", value: 7 }])).error.code, "VALIDATION_ERROR");
         rejected(await http(server, "/v1/config/example/blocked?layer=late", { method: "PUT", body: { value: "denied" } }), 400, "POLICY_VIOLATION", "rejected");
-        assert.equal((await local.port.set("/example/blocked", "denied", { layer: "late" })).error.code, "POLICY_VIOLATION");
+        assert.equal((await local.mutations.apply([{ ...local.selection, operation: "set", path: "/example/blocked", value: "denied" }])).error.code, "POLICY_VIOLATION");
         success(await http(server, `${path}?layer=late`, { method: "DELETE" }));
-        assert.equal((await local.port.remove("/example/name", { layer: "late" })).success, true);
-        assert.deepEqual(semanticInspection(success(await http(server, `${path}?inspect`))), semanticInspection(local.port.inspect("/example/name")));
+        assert.equal((await local.mutations.apply([{ ...local.selection, operation: "remove", path: "/example/name" }])).success, true);
+        assert.deepEqual(semanticInspection(success(await http(server, `${path}?inspect`))), semanticInspection(local.port.inspect(["name"])));
         const old = (await http(server, path)).body.meta.revision;
         await server.close(); server = await startWeaverServer(fixture.options);
         assert.equal(success(await http(server, path)).value, "base");
@@ -150,7 +201,7 @@ test("required flush holds HTTP response and publication; expiry after dispatch 
     assert.equal(success(await http(server, "/v1/config/example/name?inspect")).effective.value, "base");
     release.resolve();
     const response = await write; const data = success(response);
-    assert.equal(data.success, true); assert.equal(data.revision, response.body.meta.revision);
+    assert.equal(data.success, true); assert.equal(data.revisions[0].revision, response.body.meta.revision);
     assert.equal(fixture.controls.late.calls.flush, 1);
     const binding = fixture.authority.configuration.providers.at(-1);
     assert.equal((await binding.provider.load()).entries.example.name, "committed");
@@ -190,7 +241,7 @@ test("complete preparation READ grant is required and request data never elevate
   } finally { await server.close(); await fixture.cleanup(); }
 });
 
-test("warm policy denial and schema rejection preserve revision/effects; leaf subset has no aggregate escape", async () => {
+test("warm policy denial and schema rejection preserve revision/effects; public aggregates use canonical responses", async () => {
   const fixture = await filesystemHost(); let allow = false;
   fixture.authority.hostAuthority.authorizeWrite = async () => allow ? "allowed" : "denied";
   const server = await startWeaverServer(fixture.options);
@@ -200,9 +251,9 @@ test("warm policy denial and schema rejection preserve revision/effects; leaf su
     rejected(await http(server, "/v1/config/example/name?layer=late", { method: "PUT", body: { value: "denied" } }), 403, "FORBIDDEN", "rejected");
     allow = true;
     rejected(await http(server, "/v1/config/example/name?layer=late", { method: "PUT", body: { value: 9 } }), 400, "VALIDATION_ERROR", "rejected");
-    rejected(await http(server, "/v1/config/example/name?layer=late", { method: "PUT", body: { value: {} } }), 501, "UNSUPPORTED_OPERATION", "rejected");
-    assert.equal((await http(server, "/v1/config/example")).status, 403);
-    assert.equal((await http(server, "/v1/config/example?inspect")).status, 403);
+    rejected(await http(server, "/v1/config/example/name?layer=late", { method: "PUT", body: { value: {} } }), 400, "VALIDATION_ERROR", "rejected");
+    assert.equal(success(await http(server, "/v1/config/example")).value.name, "base");
+    assert.equal(success(await http(server, "/v1/config/example?inspect")).effective.value.name, "base");
     assert.equal((await http(server, "/v1/config/example/name?view=private")).status, 400);
     assert.equal((await http(server, "/v1/config/example/name")).body.meta.revision, first.body.meta.revision);
     assert.deepEqual(effects(fixture), before);
@@ -221,7 +272,7 @@ for (const outcome of ["throw", "malformed"]) {
       assert.doesNotMatch(JSON.stringify(response.body), /SECRET/);
       assert.equal(fixture.controls.late.calls.load, loads + 1);
       assert.equal(fixture.controls.late.calls.write, 1);
-      assert.equal(fixture.controls.late.calls.flush, 0);
+      assert.equal(fixture.controls.late.calls.flush, 1);
       rejected(await http(server, "/v1/config/example/name?layer=late", { method: "DELETE" }), 503, "WRITE_UNAVAILABLE", "rejected");
       assert.equal(fixture.controls.late.calls.remove, 0);
     } finally { await server.close(); await fixture.cleanup(); }

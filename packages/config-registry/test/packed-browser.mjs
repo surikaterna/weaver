@@ -4,11 +4,11 @@ import { realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, sep } from "node:path";
 import { createContext, runInContext } from "node:vm";
-import { exercise, internalExports, rootExports } from "./operation-support-fixture.mjs";
+import { exercise, persistenceBoundaryExercise, internalExports, rootExports } from "./operation-support-fixture.mjs";
 import { fixture, requireTool } from "./packed-consumer-helper.mjs";
 import { witnessExercise } from "./structural-witness-regressions.mjs";
 import { readProjectionExercise } from "./read-projection-fixture.mjs";
-import { exerciseDomainBoundaries } from "../../config-types/test/domain-boundary-fixture.mjs";
+import { exerciseDomainBoundaries, exerciseUnknownMutationReceipts } from "../../config-types/test/domain-boundary-fixture.mjs";
 import { ancestorProjectionExercise } from "./read-projection-ancestor-fixture.mjs";
 
 const { build } = requireTool("esbuild");
@@ -21,9 +21,9 @@ export async function browserGraphs(directory) {
       const cjs = mode === "cjs";
       const entry = await fixture(directory, `${boundary}-${mode}.${cjs ? "cjs" : "mjs"}`,
         cjs ? `const api = require('${specifier}'); const support = require('@weaver-conf/config-registry');
-           const engine = require('@weaver-conf/config-engine'); const types = require('@weaver-conf/config-types'); module.exports = { api, support, engine, types };`
+           const engine = require('@weaver-conf/config-engine'); const types = require('@weaver-conf/config-types'); const persistence = require('@weaver-conf/config-registry/persistence'); module.exports = { api, support, engine, types, persistence };`
           : `import * as api from '${specifier}'; import * as support from '@weaver-conf/config-registry';
-           import * as engine from '@weaver-conf/config-engine'; import * as types from '@weaver-conf/config-types'; export { api, support, engine, types };`);
+           import * as engine from '@weaver-conf/config-engine'; import * as types from '@weaver-conf/config-types'; import * as persistence from '@weaver-conf/config-registry/persistence'; export { api, support, engine, types, persistence };`);
       const result = await build({ entryPoints: [entry], absWorkingDir: directory, bundle: true, write: false,
         treeShaking: false, platform: "browser", format: "iife", globalName: "packed", metafile: true });
       const imports = [...Object.values(result.metafile.inputs), ...Object.values(result.metafile.outputs)]
@@ -40,12 +40,15 @@ export async function browserGraphs(directory) {
       console.log(`packed full ${boundary} ${mode} metafile: ${JSON.stringify(result.metafile)}`);
       const context = createContext({ crypto: webcrypto, structuredClone });
       runInContext(result.outputFiles[0].text, context);
-       runInContext(`const { api, support, engine, types } = packed;
+        runInContext(`const { api, support, engine, types, persistence } = packed;
+          if (persistence.serializeRegistry(persistence.parsePersistedRegistry(undefined)).version !== 2) throw Error('persistence');
+          ${persistenceBoundaryExercise};
         if (typeof process !== 'undefined' || typeof Buffer !== 'undefined' || typeof require !== 'undefined') throw Error('Node globals');
          ${exercise}
           ${witnessExercise}
           ${readProjectionExercise}
           ${ancestorProjectionExercise}
+          const exerciseUnknownMutationReceipts = ${exerciseUnknownMutationReceipts.toString()};
           (${exerciseDomainBoundaries.toString()})(types, engine, support);`, context);
       const keys = JSON.parse(runInContext("JSON.stringify(Object.keys(api).sort())", context));
       assert.deepEqual(keys, boundary === "root" ? rootExports : internalExports);

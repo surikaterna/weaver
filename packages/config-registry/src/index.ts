@@ -1,10 +1,34 @@
 export { schemaRegistrationAuditMetadataSchema } from "@weaver-conf/config-types";
 export { createCanonicalSchemaRegistry } from "./canonical-schema-registry";
 export {
+  type RegisteredCeilingEvidence,
+  type RegisteredCeilingInput,
+  registeredCeilingEvidence,
+  registeredCeilingEvidenceSchema,
+  registeredCeilingInputSchema,
+  validateRegisteredCeilingNames,
+} from "./registered-ceilings";
+export {
+  type RegisteredMutationEvidence,
+  type RegisteredMutationFootprint,
+  registeredMutationEvidenceSchema,
+  registeredMutationFootprintSchema,
+} from "./registered-mutation-contracts";
+export {
+  registeredMutationEvidence,
+  registeredMutationFootprint,
+} from "./registered-mutation-evidence";
+export {
+  type RegisteredReadAccess,
+  type RegisteredReadAccessEvidence,
   type RegisteredReadProjection,
   type RegisteredReadProjectionContext,
+  type RegisteredReadViewSource,
+  registeredReadAccessEvidenceSchema,
+  registeredReadAccessSchema,
   registeredReadProjectionContextSchema,
   registeredReadProjectionSchema,
+  registeredReadViewSourceSchema,
 } from "./registered-read-contracts";
 export { createRegisteredReadProjection } from "./registered-read-projection";
 export type {
@@ -12,6 +36,7 @@ export type {
   CanonicalSchemaRegistryOptions,
   CanonicalSchemaRegistryReader,
   RegisteredSchemaAnchor,
+  RegistryProjectionReader,
   SchemaRegistrationAuditMetadata,
   SchemaRegistrationContext,
   SchemaRegistrationRequest,
@@ -20,6 +45,7 @@ export type {
 export {
   canonicalSchemaRegistryOptionsSchema,
   registeredSchemaAnchorSchema,
+  registryProjectionReaderSchema,
   schemaRegistrationContextSchema,
   schemaRegistrationRequestSchema,
   schemaRegistrationResultSchema,

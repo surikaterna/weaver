@@ -26,6 +26,7 @@ function originOf(layer: ResolutionLayer): ResolutionOrigin {
     layer: layer.layer,
     providerId: layer.providerId,
     rank: layer.rank,
+    ...(layer.sourcePath === undefined ? {} : { sourcePath: layer.sourcePath }),
   });
 }
 
@@ -37,7 +38,11 @@ function validatePlan(input: ResolutionSnapshotInput): void {
         "UNSUPPORTED_OPERATION",
         "Opaque custom merge cannot provide provenance",
       );
-    const pair = JSON.stringify([layer.layer, layer.providerId]);
+    const pair = JSON.stringify([
+      layer.layer,
+      layer.providerId,
+      layer.sourcePath,
+    ]);
     if (pairs.has(pair))
       throw createWeaverError(
         "VALIDATION_ERROR",
@@ -46,6 +51,10 @@ function validatePlan(input: ResolutionSnapshotInput): void {
     pairs.add(pair);
     if (!input.configuredRanks.includes(layer.rank))
       throw createWeaverError("VALIDATION_ERROR", "Unknown layer rank");
+    for (const ceiling of layer.sourceCeilings ?? []) {
+      if (!input.configuredRanks.includes(ceiling.maxRank))
+        throw createWeaverError("VALIDATION_ERROR", "Unknown ceiling rank");
+    }
   }
   for (const ceiling of input.ceilings) {
     if (!input.configuredRanks.includes(ceiling.maxRank))
@@ -70,10 +79,16 @@ export function resolveConfigurationSnapshot(
   let origin: RecordOrigin | undefined;
   for (const layer of parsed.data.layers) {
     if (Object.keys(layer.entries).length === 0) continue;
+    const sourcePolicy = layer.sourceCeilings?.length
+      ? compileResolutionPolicy([
+          ...parsed.data.ceilings,
+          ...layer.sourceCeilings,
+        ])
+      : policy;
     const merged = mergeObservedRecords(entries, layer.entries, origin, {
       origin: originOf(layer),
       rank: layer.rank,
-      policy: layer.trustedEmergency ? emergency : policy,
+      policy: layer.trustedEmergency ? emergency : sourcePolicy,
     });
     entries = merged.entries;
     origin = merged.origin;
@@ -145,6 +160,9 @@ export function inspectResolvedPath(
     effectiveValue: effective.value,
     effectiveLayer: winner?.layer,
     effectiveProviderId: winner?.providerId,
+    ...(winner?.sourcePath === undefined
+      ? {}
+      : { effectiveSourcePath: winner.sourcePath }),
     contributions: Object.freeze(contributions),
   });
 }

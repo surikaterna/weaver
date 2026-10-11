@@ -9,9 +9,42 @@ import {
   isReadReference,
   type ReadContext,
 } from "./registered-read-contexts";
+import type { RegisteredReadAccess } from "./registered-read-contracts";
 import { ownValue } from "./structural-witness-own-data";
 
 type Contexts = ReturnType<typeof createReadContexts>;
+
+/** Metadata is generation-captured; principal decisions remain query-local. */
+function contextAccessible(
+  context: ReadContext,
+  access: RegisteredReadAccess | undefined,
+  sources: readonly ReadContext[],
+  validation = false,
+): boolean {
+  const contexts = [context, ...sources];
+  // Raw layers may be partial. Their conservative metadata still intersects
+  // access, but required-field failures there do not invalidate resolved data.
+  if (
+    contexts.some((item) => item.hardForbidden) ||
+    (!validation && context.uncertain && context.candidate !== undefined)
+  )
+    return false;
+  const schemas = contexts.flatMap((item) => item.policies);
+  if (schemas.some((schema) => schema["x-weaver"]?.visibility === "internal"))
+    return false;
+  if (!access) return !contexts.some((item) => item.forbidden);
+  return (
+    access(
+      Object.freeze({
+        path: context.path,
+        schemas: Object.freeze(schemas),
+        sensitive: schemas.some(
+          (schema) => schema["x-weaver"]?.sensitive === true,
+        ),
+      }),
+    ) === true
+  );
+}
 
 function marker(value: unknown): unknown {
   return value !== null && typeof value === "object"
@@ -55,14 +88,19 @@ class ReadPolicy {
     private readonly contexts: Contexts,
     private readonly effectiveClassifier: MountSourceClassifier,
     private readonly aliases: readonly MountSourceClassifier[],
+    private readonly policySources: (
+      context: ReadContext,
+    ) => readonly ReadContext[],
   ) {
     contexts.bindReferenceDenial((context) => this.referenceDenied(context));
   }
 
-  denied(context: ReadContext): boolean {
-    if (context.forbidden || context.ancestorDenied) return true;
+  denied(context: ReadContext, access?: RegisteredReadAccess): boolean {
+    if (context.ancestorDenied) return true;
     if (context.uncertain && context.candidate !== undefined) return true;
-    return this.referenceDenied(context);
+    if (this.referenceDenied(context)) return true;
+    const sources = this.policySources(context);
+    return !contextAccessible(context, access, sources);
   }
   private referenceDenied(context: ReadContext): boolean {
     const cached = this.decisions.get(context);
@@ -73,12 +111,41 @@ class ReadPolicy {
     this.decisions.set(context, denied);
     return denied;
   }
-  projected(context: ReadContext): unknown {
+  projected(context: ReadContext, access?: RegisteredReadAccess): unknown {
+    const denied = new Map<ReadContext, boolean>();
+    const excluded = (current: ReadContext): boolean => {
+      if (!denied.has(current))
+        denied.set(current, !current.declared || this.denied(current, access));
+      return denied.get(current) === true;
+    };
     return projectConfigurationData(context.candidate, context, {
       decide: (_value, current) =>
-        !current.declared || this.denied(current) ? "omit" : "descend",
+        excluded(current) || !this.arrayReadable(current, excluded)
+          ? "omit"
+          : "descend",
       child: this.contexts.child,
     });
+  }
+  private arrayReadable(
+    context: ReadContext,
+    excluded: (context: ReadContext) => boolean,
+  ): boolean {
+    if (!Array.isArray(context.candidate)) return true;
+    if (Object.keys(context.candidate).length !== context.candidate.length)
+      return false;
+    const pending = [context];
+    const seen = new Set<ReadContext>();
+    while (pending.length) {
+      const current = pending.pop();
+      if (!current || seen.has(current)) continue;
+      seen.add(current);
+      if (excluded(current)) return false;
+      if (current.candidate === null || typeof current.candidate !== "object")
+        continue;
+      for (const key of Object.keys(current.candidate))
+        pending.push(this.contexts.child(current, key));
+    }
+    return true;
   }
   requireDeclared(context: ReadContext): void {
     if (!context.declared)
@@ -87,14 +154,40 @@ class ReadPolicy {
         "Configuration path is not registered",
       );
   }
-  get(context: ReadContext): unknown {
+  authorizeValidation(
+    context: ReadContext,
+    access?: RegisteredReadAccess,
+  ): void {
     this.requireDeclared(context);
-    if (this.denied(context))
+    // Invalid alternatives still contribute all applicable metadata. Validation
+    // returns sanitized diagnostics, not permission to expose their raw values.
+    if (this.validationDenied(context, access))
+      throw createWeaverError("FORBIDDEN", "Configuration validation denied");
+  }
+  validationDenied(
+    context: ReadContext,
+    access?: RegisteredReadAccess,
+  ): boolean {
+    return (
+      context.ancestorDenied ||
+      this.referenceDenied(context) ||
+      !contextAccessible(context, access, this.policySources(context), true)
+    );
+  }
+  get(context: ReadContext, access?: RegisteredReadAccess): unknown {
+    this.requireDeclared(context);
+    if (this.denied(context, access))
       throw createWeaverError(
         "FORBIDDEN",
         "Configuration path is not publicly readable",
       );
-    return this.projected(context);
+    const value = this.projected(context, access);
+    if (value === undefined && context.candidate !== undefined)
+      throw createWeaverError(
+        "FORBIDDEN",
+        "Configuration value cannot be projected",
+      );
+    return value;
   }
 }
 
@@ -103,11 +196,13 @@ export function createReadPolicy(
   effective: Contexts,
   effectiveState: Readonly<Record<string, unknown>>,
   aliases: readonly MountSourceClassifier[] = [],
+  policySources: (context: ReadContext) => readonly ReadContext[] = () => [],
 ) {
   return new ReadPolicy(
     contexts,
     createReadSourceClassifier(effective, effectiveState),
     aliases,
+    policySources,
   );
 }
 

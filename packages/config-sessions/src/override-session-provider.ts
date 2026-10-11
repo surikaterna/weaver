@@ -1,255 +1,313 @@
-// OverrideSession provider — session lifecycle management with expiration and audit
-
 import {
-  type ConfigurationLayerData,
-  type ConfigurationStorageProvider,
   createWeaverError,
   type OverrideSession,
   type SessionActivationRequest,
   type SessionDeactivationResult,
   type SessionDomainAuditEntry,
-  type WriteResult,
+  sessionActivationRequestSchema,
 } from "@weaver-conf/config-types";
+import {
+  type OverrideSessionController,
+  type OverrideSessionProviderOptions,
+  overrideSessionProviderOptionsSchema,
+  type SessionExpiryIntent,
+  type SessionTimer,
+  sessionDurationSchema,
+  sessionExpiryIntentSchema,
+} from "./session-contracts";
+import { SessionStorage } from "./session-storage";
 
-/** Options for configuring the override session provider. */
-export interface OverrideSessionProviderOptions {
-  /** Layer name for this session provider (default: "session") */
-  layer?: string | undefined;
-  /** Provider ID (default: "override-session") */
-  id?: string | undefined;
-  defaultDurationMs?: number | undefined;
-  onAudit?: ((entry: SessionDomainAuditEntry) => void) | undefined;
-  timer?:
-    | {
-        setTimeout: (fn: () => void, ms: number) => unknown;
-        clearTimeout: (id: unknown) => void;
-      }
-    | undefined;
-}
+type Metadata = Omit<OverrideSession, "overrides" | "isActive">;
+const MAX_TIMEOUT_MS = 2147483647;
+const nativeTimer: SessionTimer = {
+  setTimeout(fn, ms) {
+    const handle = setTimeout(fn, ms);
+    return () => clearTimeout(handle);
+  },
+  clearTimeout(handle) {
+    if (typeof handle === "function") handle();
+  },
+};
 
-/** Controller for managing override session lifecycle (activate, extend, deactivate). */
-export interface OverrideSessionController {
-  activate(request: SessionActivationRequest): OverrideSession;
-  deactivate(): SessionDeactivationResult;
-  extend(durationMs?: number | undefined): OverrideSession;
-  getSession(): OverrideSession | null;
-  isActive(): boolean;
-  readonly provider: ConfigurationStorageProvider;
-  dispose(): void;
-}
+class SessionController implements OverrideSessionController {
+  private session: Metadata | null = null;
+  private readonly storage: SessionStorage;
+  private readonly timer: SessionTimer;
+  private timerId: unknown;
+  private timerPending = false;
+  private lease = 0;
+  private wake = 0;
+  private deadline = 0;
+  private disposed = false;
+  private currentDuration: number;
 
-const DEFAULT_DURATION_MS = 4 * 60 * 60 * 1000; // 4 hours
+  constructor(private readonly options: OverrideSessionProviderOptions) {
+    this.currentDuration = options.defaultDurationMs ?? 14400000;
+    this.timer = options.timer ?? nativeTimer;
+    this.storage = new SessionStorage(
+      options.id ?? "override-session",
+      options.layer ?? "session",
+      () => this.isActive(),
+    );
+  }
 
-function generateSessionId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
+  get provider() {
+    return this.storage.provider;
+  }
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
+  private now(): number {
+    try {
+      const now = (this.options.now ?? Date.now)();
+      return Number.isSafeInteger(now) && now >= 0 && now <= 8640000000000000
+        ? now
+        : Number.NaN;
+    } catch {
+      return Number.NaN;
+    }
+  }
 
-/**
- * Creates an override session provider with time-limited activation and audit logging.
- *
- * @param options - Session configuration (duration, audit callback, timer)
- * @returns Controller for activating, extending, and deactivating override sessions
- */
-export function createOverrideSessionProvider(
-  options?: OverrideSessionProviderOptions | undefined,
-): OverrideSessionController {
-  const defaultDurationMs = options?.defaultDurationMs ?? DEFAULT_DURATION_MS;
-  const onAudit = options?.onAudit;
-  const timerImpl = options?.timer ?? {
-    setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
-    clearTimeout: (id: unknown) => clearTimeout(id),
-  };
+  private expiry(duration: number): { now: number; deadline: number } {
+    const parsed = sessionDurationSchema.safeParse(duration);
+    const now = this.now();
+    const deadline = Math.min(
+      now + duration,
+      Math.floor(this.options.expiresAtLimit ?? Infinity),
+    );
+    if (
+      !parsed.success ||
+      duration > (this.options.maxDurationMs ?? MAX_TIMEOUT_MS) ||
+      !Number.isFinite(now) ||
+      deadline > 8640000000000000 ||
+      deadline <= now
+    ) {
+      throw createWeaverError(
+        "VALIDATION_ERROR",
+        "Invalid session duration or clock",
+      );
+    }
+    return { now, deadline };
+  }
 
-  let session: OverrideSession | null = null;
-  let timerId: unknown = null;
-  let currentDurationMs = defaultDurationMs;
-
-  // Ephemeral in-memory storage — entries map is the single source of truth
-  const entries: Record<string, unknown> = {};
-
-  function emitAudit(
-    action: "activate" | "deactivate" | "extend" | "expire",
-    details?: Record<string, unknown> | undefined,
-  ): void {
-    if (onAudit === undefined || session === null) return;
-    onAudit({
-      domain: "session",
-      action,
-      actor: session.activatedBy,
-      sessionId: session.id,
-      timestamp: nowIso(),
-      details,
+  activate(request: SessionActivationRequest): OverrideSession {
+    if (this.disposed)
+      throw createWeaverError("SESSION_BLOCKED", "Session controller disposed");
+    if (this.session !== null)
+      throw createWeaverError("SESSION_BLOCKED", "Session already active");
+    const parsed = sessionActivationRequestSchema.safeParse(request);
+    if (!parsed.success)
+      throw createWeaverError("VALIDATION_ERROR", "Invalid session activation");
+    const duration =
+      parsed.data.durationMs ?? this.options.defaultDurationMs ?? 14400000;
+    const { now, deadline } = this.expiry(duration);
+    this.session = {
+      id: crypto.randomUUID(),
+      activatedAt: new Date(now).toISOString(),
+      expiresAt: new Date(deadline).toISOString(),
+      activatedBy: parsed.data.activatedBy ?? "system",
+      reason: parsed.data.reason,
+    };
+    this.currentDuration = duration;
+    this.deadline = deadline;
+    this.lease++;
+    this.startTimer();
+    const snapshot = this.snapshot();
+    this.audit(this.session, "activate", {
+      reason: this.session.reason,
+      durationMs: duration,
     });
+    return snapshot;
   }
 
-  function clearTimer(): void {
-    if (timerId !== null) {
-      timerImpl.clearTimeout(timerId);
-      timerId = null;
+  extend(durationMs = this.currentDuration): OverrideSession {
+    if (!this.isActive() || this.session === null)
+      throw createWeaverError("SESSION_REQUIRED", "No active session");
+    const { deadline } = this.expiry(durationMs);
+    this.clearTimer();
+    this.deadline = deadline;
+    this.currentDuration = durationMs;
+    this.lease++;
+    this.session = {
+      ...this.session,
+      expiresAt: new Date(deadline).toISOString(),
+    };
+    this.startTimer();
+    const snapshot = this.snapshot();
+    this.audit(this.session, "extend", { durationMs });
+    return snapshot;
+  }
+
+  isActive(): boolean {
+    return (
+      !this.disposed && this.session !== null && this.now() < this.deadline
+    );
+  }
+
+  getSession(): OverrideSession | null {
+    return this.session === null ? null : this.snapshot();
+  }
+
+  private snapshot(): OverrideSession {
+    if (this.session === null)
+      throw createWeaverError("SESSION_REQUIRED", "No active session");
+    return {
+      ...this.session,
+      isActive: this.isActive(),
+      overrides: this.storage.snapshot(),
+    };
+  }
+
+  deactivate(): SessionDeactivationResult {
+    if (this.session === null)
+      throw createWeaverError("SESSION_REQUIRED", "No active session");
+    return this.finish("deactivate");
+  }
+
+  private finish(action: "deactivate" | "expire"): SessionDeactivationResult {
+    const session = this.session;
+    if (session === null)
+      throw createWeaverError("SESSION_REQUIRED", "No active session");
+    this.clearTimer();
+    const overridesCleared = this.storage.clear();
+    this.session = null;
+    this.lease++;
+    const now = this.now();
+    const deactivatedAt = new Date(
+      Number.isFinite(now) ? now : this.deadline,
+    ).toISOString();
+    const auditRecorded = this.audit(
+      session,
+      action,
+      { overridesCleared },
+      deactivatedAt,
+    );
+    return {
+      sessionId: session.id,
+      deactivatedAt,
+      overridesCleared,
+      auditRecorded,
+    };
+  }
+
+  commitExpiry(intent: SessionExpiryIntent): boolean {
+    if (
+      !sessionExpiryIntentSchema.safeParse(intent).success ||
+      !this.matches(intent)
+    )
+      return false;
+    if (this.now() < this.deadline) {
+      if (!this.timerPending) this.startTimer();
+      return false;
+    }
+    this.finish("expire");
+    return true;
+  }
+
+  private matches(intent: SessionExpiryIntent): boolean {
+    return (
+      !this.disposed &&
+      this.session?.id === intent.sessionId &&
+      this.lease === intent.lease &&
+      this.deadline === intent.expiresAt
+    );
+  }
+
+  private clearTimer(): void {
+    if (!this.timerPending) return;
+    this.timerPending = false;
+    this.wake++;
+    this.timer.clearTimeout(this.timerId);
+    this.timerId = undefined;
+  }
+
+  /** Stop wakeups before a host drains already accepted work; retain queued data. */
+  cancelExpiry(): void {
+    this.clearTimer();
+  }
+
+  private startTimer(): void {
+    if (this.session === null) return;
+    const intent = Object.freeze({
+      sessionId: this.session.id,
+      expiresAt: this.deadline,
+      lease: this.lease,
+    });
+    const remaining = this.deadline - this.now();
+    const wake = ++this.wake;
+    this.timerPending = true;
+    this.timerId = this.timer.setTimeout(
+      () => this.timerFired(intent, wake),
+      Number.isFinite(remaining)
+        ? Math.min(MAX_TIMEOUT_MS, Math.max(0, remaining))
+        : 0,
+    );
+  }
+
+  private timerFired(intent: SessionExpiryIntent, wake: number): void {
+    if (wake !== this.wake || !this.matches(intent)) return;
+    this.wake++;
+    this.timerPending = false;
+    this.timerId = undefined;
+    if (this.now() < this.deadline) {
+      this.startTimer();
+      return;
+    }
+    // Deadline ends eligibility immediately; a root queues the destructive transition.
+    if (this.options.onExpiryRequested === undefined) this.commitExpiry(intent);
+    else this.requestExpiry(intent);
+  }
+
+  private requestExpiry(intent: SessionExpiryIntent): void {
+    try {
+      const result: unknown = this.options.onExpiryRequested?.(intent);
+      void Promise.resolve(result).catch(() => {});
+    } catch {
+      // A failed root callback cannot authorize new writes or clear queued data.
     }
   }
 
-  function clearAllEntries(): number {
-    const keys = Object.keys(entries);
-    for (const key of keys) {
-      delete entries[key];
-    }
-    return keys.length;
-  }
-
-  function performDeactivation(action: "deactivate" | "expire"): void {
-    if (session === null) return;
-    const sessionId = session.id;
-    const actor = session.activatedBy;
-    const overridesCleared = clearAllEntries();
-
-    if (onAudit !== undefined) {
-      onAudit({
+  private audit(
+    session: Metadata,
+    action: SessionDomainAuditEntry["action"],
+    details: Record<string, unknown>,
+    timestamp = session.activatedAt,
+  ): boolean {
+    if (this.options.onAudit === undefined) return false;
+    try {
+      const now = this.now();
+      const result: unknown = this.options.onAudit({
         domain: "session",
         action,
-        actor,
-        sessionId,
-        timestamp: nowIso(),
-        details: { overridesCleared },
+        actor: session.activatedBy,
+        sessionId: session.id,
+        timestamp: Number.isFinite(now)
+          ? new Date(now).toISOString()
+          : timestamp,
+        details,
       });
+      void Promise.resolve(result).catch(() => {});
+      return result === undefined;
+    } catch {
+      return false;
     }
-
-    session = null;
   }
 
-  function startTimer(durationMs: number): void {
-    clearTimer();
-    timerId = timerImpl.setTimeout(() => {
-      timerId = null;
-      performDeactivation("expire");
-    }, durationMs);
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.clearTimer();
+    if (this.session !== null) this.finish("deactivate");
   }
+}
 
-  function snapshotSession(): OverrideSession {
-    if (session === null) {
-      throw createWeaverError("SESSION_REQUIRED", "No active session");
-    }
-    return { ...session, overrides: { ...entries } };
-  }
-
-  const layerName = options?.layer ?? "session";
-  const providerId = options?.id ?? "override-session";
-
-  // Wrapping provider that keeps entries map in sync with session overrides
-  const provider: ConfigurationStorageProvider = {
-    id: providerId,
-    layer: layerName,
-    writable: true,
-
-    async load(): Promise<ConfigurationLayerData> {
-      return { entries: { ...entries } };
-    },
-
-    async write(key: string, value: unknown): Promise<WriteResult> {
-      entries[key] = value;
-      if (session !== null) {
-        session = { ...session, overrides: { ...entries } };
-      }
-      return { success: true };
-    },
-
-    async remove(key: string): Promise<WriteResult> {
-      delete entries[key];
-      if (session !== null) {
-        session = { ...session, overrides: { ...entries } };
-      }
-      return { success: true };
-    },
-  };
-
-  return {
-    activate(request: SessionActivationRequest): OverrideSession {
-      if (session !== null) {
-        throw createWeaverError("SESSION_BLOCKED", "Session already active");
-      }
-
-      const id = generateSessionId();
-      const activatedAt = nowIso();
-      const durationMs = request.durationMs ?? defaultDurationMs;
-      currentDurationMs = durationMs;
-      const expiresAt = new Date(Date.now() + durationMs).toISOString();
-
-      session = {
-        id,
-        activatedAt,
-        expiresAt,
-        activatedBy: request.activatedBy ?? "system",
-        reason: request.reason,
-        isActive: true,
-        overrides: {},
-      };
-
-      startTimer(durationMs);
-      emitAudit("activate", { reason: request.reason, durationMs });
-
-      return snapshotSession();
-    },
-
-    deactivate(): SessionDeactivationResult {
-      if (session === null) {
-        throw createWeaverError("SESSION_REQUIRED", "No active session");
-      }
-
-      clearTimer();
-
-      const sessionId = session.id;
-      const overridesCleared = Object.keys(entries).length;
-
-      emitAudit("deactivate", { overridesCleared });
-      clearAllEntries();
-      session = null;
-
-      return {
-        sessionId,
-        deactivatedAt: nowIso(),
-        overridesCleared,
-        auditRecorded: onAudit !== undefined,
-      };
-    },
-
-    extend(durationMs?: number | undefined): OverrideSession {
-      if (session === null) {
-        throw createWeaverError("SESSION_REQUIRED", "No active session");
-      }
-
-      const newDurationMs = durationMs ?? currentDurationMs;
-      currentDurationMs = newDurationMs;
-      const expiresAt = new Date(Date.now() + newDurationMs).toISOString();
-
-      session = { ...session, expiresAt };
-      startTimer(newDurationMs);
-      emitAudit("extend", { durationMs: newDurationMs });
-
-      return snapshotSession();
-    },
-
-    getSession(): OverrideSession | null {
-      if (session === null) return null;
-      return snapshotSession();
-    },
-
-    isActive(): boolean {
-      return session !== null;
-    },
-
-    get provider(): ConfigurationStorageProvider {
-      return provider;
-    },
-
-    dispose(): void {
-      clearTimer();
-      if (session !== null) {
-        performDeactivation("deactivate");
-      }
-    },
-  };
+/** Trusted standalone storage domain, not a root authentication or mutation port. */
+export function createOverrideSessionProvider(
+  options?: OverrideSessionProviderOptions,
+): OverrideSessionController {
+  const parsed = overrideSessionProviderOptionsSchema.safeParse(options ?? {});
+  if (!parsed.success)
+    throw createWeaverError(
+      "VALIDATION_ERROR",
+      "Invalid session provider options",
+    );
+  return new SessionController(parsed.data);
 }

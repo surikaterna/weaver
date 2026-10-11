@@ -1,8 +1,5 @@
 import { withAuth } from "@weaver-conf/config-auth";
-import type {
-  ConfigurationStorageProvider,
-  WeaverConfig,
-} from "@weaver-conf/config-types";
+import type { ConfigurationStorageProvider } from "@weaver-conf/config-types";
 import { z } from "zod";
 import type { AuditService } from "./audit/audit-service";
 import type { AuthMiddleware } from "./auth/auth-middleware";
@@ -13,6 +10,7 @@ import { createWeaverConfigService } from "./core/config-service";
 import { createPersistentSchemaRegistry } from "./core/schema-registry";
 import { createHealthEndpoints } from "./health";
 import { type HttpServer, startHttpServer } from "./http-server";
+import { captureServerAuthConfig } from "./server-auth-config";
 import { startAuthorityServer } from "./server-authority";
 import {
   hasAuthorityOptions,
@@ -111,7 +109,7 @@ export async function startWeaverServerInternal(
       config,
       configService,
       health,
-      bootstrapResult.providers.length,
+      bootstrapResult.providers,
     );
     registerShutdown(
       runtime,
@@ -147,9 +145,9 @@ async function createServerRuntime(
   config: ResolvedOptions,
   configService: ConfigService,
   health: ReturnType<typeof createHealthEndpoints>,
-  configuredProviderCount: number,
+  providers: readonly ConfigurationStorageProvider[],
 ): Promise<ServerRuntime> {
-  const auth = createServerAuth(config);
+  const auth = createServerAuth(config, providers);
   const restAdapter = await createConfiguredRestAdapter(
     config,
     configService,
@@ -170,7 +168,7 @@ async function createServerRuntime(
     });
     health.setDegradedInfo({
       degradedProviders: configService.degradedProviders,
-      totalProviders: configuredProviderCount,
+      totalProviders: providers.length,
     });
     health.setReady(true);
     return { ...auth, server, sseAdapter };
@@ -200,49 +198,34 @@ async function createConfiguredRestAdapter(
   });
 }
 
-function createServerAuth(config: ResolvedOptions): ServerAuth {
+function createServerAuth(
+  config: ResolvedOptions,
+  providers: readonly ConfigurationStorageProvider[],
+): ServerAuth {
   if (!config.jwtSecret) return {};
   const authMiddleware = createAuthMiddleware({
     jwtValidator: createJwtValidator({ publicKeyOrSecret: config.jwtSecret }),
     adminRoles: config.adminRoles,
   });
   const authFunctions = withAuth({
-    weaverConfig: authWeaverConfig(),
+    weaverConfig: captureServerAuthConfig(providers),
     visibilityRoles: {
       admin: new Set(config.adminRoles),
       platform: new Set([...config.adminRoles, "platform"]),
     },
-    layerWritePolicies: [
-      { layer: "platform", allowedRoles: config.adminRoles },
-    ],
+    layerWritePolicies: [],
     dynamicScopeRoles: new Set(config.adminRoles),
   });
   const authGate = createAuthGate({
     authFunctions,
+    schemaAdminRoles: config.adminRoles,
     mapContext: (context) => ({
       userId:
         context.identity.userId ?? context.identity.serviceId ?? "anonymous",
       roles: context.identity.roles ?? [],
-      sessionMode: undefined,
     }),
   });
   return { authGate, authMiddleware };
-}
-
-function authWeaverConfig(): WeaverConfig {
-  const rankMap = new Map([
-    ["platform", 0],
-    ["tenant", 1],
-    ["session", 2],
-  ]);
-  return {
-    layers: [],
-    layerNames: [...rankMap.keys()],
-    rankMap,
-    getRank: (layer: string) => rankMap.get(layer) ?? -1,
-    getLayer: () => undefined,
-    getLayersByType: () => [],
-  };
 }
 
 function registerShutdown(

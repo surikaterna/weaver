@@ -124,7 +124,6 @@ const adminRouteCases: readonly RouteCase[] = [
     successStatus: 201,
     operation: "write",
     gateKey: "_weaver.registry.schemas",
-    gateLayer: "admin",
   },
   {
     name: "fragment registration",
@@ -141,7 +140,6 @@ const adminRouteCases: readonly RouteCase[] = [
     successStatus: 201,
     operation: "write",
     gateKey: "_weaver.registry.schemas",
-    gateLayer: "admin",
   },
 ];
 
@@ -854,6 +852,7 @@ interface CapturedEffectiveRead {
 }
 
 interface RouteCalls {
+  schemaWrites: number;
   readonly gateReads: string[];
   readonly gateReadSchemas: Array<ConfigurationPropertySchema | undefined>;
   readonly gateWrites: Array<{ layer: string; key: string }>;
@@ -951,6 +950,7 @@ function createProductionReadHarness(options: {
 
 function createProductionGate(calls: RouteCalls): AuthGate {
   const base = createAuthGate({
+    schemaAdminRoles: ["admin"],
     authFunctions: withAuth({
       weaverConfig: testWeaverConfig(),
       visibilityRoles: {
@@ -1018,6 +1018,7 @@ function registeredAnchor(
 
 function createRouteCalls(): RouteCalls {
   return {
+    schemaWrites: 0,
     gateReads: [],
     gateReadSchemas: [],
     gateWrites: [],
@@ -1086,6 +1087,10 @@ function createCountingGate(
       calls.gateWrites.push({ layer, key });
       return policyResponse;
     },
+    gateSchemaWrite: () => {
+      calls.schemaWrites++;
+      return policyResponse;
+    },
     filterVisible: (_context, entries) => entries,
   };
 }
@@ -1114,7 +1119,7 @@ async function send(
 }
 
 function gateCount(calls: RouteCalls): number {
-  return calls.gateReads.length + calls.gateWrites.length;
+  return calls.gateReads.length + calls.gateWrites.length + calls.schemaWrites;
 }
 
 function effectCount(calls: RouteCalls): number {
@@ -1137,9 +1142,8 @@ function expectAdminMapping(
     expect(calls.gateReads).toEqual(["_weaver.registry.schemas"]);
     return;
   }
-  expect(calls.gateWrites).toEqual([
-    { layer: "admin", key: "_weaver.registry.schemas" },
-  ]);
+  expect(calls.schemaWrites).toBe(1);
+  expect(calls.gateWrites).toEqual([]);
 }
 
 function expectRegisteredMapping(calls: RouteCalls, route: RouteCase): void {

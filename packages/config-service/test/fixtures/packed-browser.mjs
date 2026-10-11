@@ -20,7 +20,7 @@ export async function browserProof(directory) {
     const context = createContext({ console, setInterval, clearInterval, setTimeout, clearTimeout, crypto: globalThis.crypto, structuredClone });
     runInContext(result.outputFiles[0].text, context);
     assert.equal(runInContext("typeof process + '/' + typeof Buffer + '/' + typeof require", context), "undefined/undefined/undefined");
-    assert.equal(JSON.stringify(context.proof.exports), JSON.stringify(["configurationServiceHostOptionsSchema", "createConfigurationService"]));
+    assert.equal(JSON.stringify(context.proof.exports), JSON.stringify(["configurationServiceHostBindingSchema", "configurationServiceHostOptionsSchema", "createConfigurationService"]));
     assert.ok(context.proof.admissionExports.includes("prepareConfigMutation"));
     const outcome = await context.proof.exercise(); assert.equal(outcome.synchronous, true); assert.equal(outcome.winner, "later");
     // VM contexts have no native structuredClone; borrowed clones have foreign prototypes.

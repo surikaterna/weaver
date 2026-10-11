@@ -36,7 +36,9 @@ export function exerciseWitness(support, engine) {
   ];
   for (const [label, operation, expected] of cases) check(operation(), expected, label);
   check(call({ type: "object", properties: { enabled: leaf }, additionalProperties: { type: "object" } }), yes, "member precedence");
-  check(call({ type: "object", additionalProperties: true }), no, "boolean wildcard is not a declaration");
+  check(call({ type: "object", additionalProperties: true }), yes, "explicit boolean wildcard declares JSON");
+  check(call({ type: "object" }), no, "omitted wildcard is not a declaration");
+  check(call({ type: "object", additionalProperties: false }), no, "false wildcard is not a declaration");
   check(call(Object.assign(Object.create(null), object)), yes, "null prototype");
   check(call({ type: "object", properties: { left: object, right: object } }, [], { left: { enabled: true }, right: { enabled: true } }), yes, "shared DAG");
   const cycle = { allOf: [] }; cycle.allOf.push(cycle);

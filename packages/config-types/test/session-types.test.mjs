@@ -6,8 +6,8 @@ import {
   sessionDeactivationResultSchema,
   configurationPropertySchemaSchema,
   sessionTypeSchema,
-  sessionModeSchema,
 } from "../src/index.ts";
+import * as publicTypes from "../src/index.ts";
 
 // --- PropertySessionMode / sessionMode on property schema ---
 
@@ -39,12 +39,10 @@ test("sessionTypeSchema rejects non-string values", () => {
   }
 });
 
-test("sessionModeSchema is an alias for sessionTypeSchema", () => {
-  // Deprecated alias should still work
-  for (const t of ["debug", "god-mode", "preview", "support"]) {
-    const result = sessionModeSchema.safeParse(t);
-    expect(result.success).toBe(true);
-  }
+test("retired session schema aliases are absent; generic session type remains", () => {
+  expect("sessionModeSchema" in publicTypes).toBe(false);
+  expect("godModeSessionSchema" in publicTypes).toBe(false);
+  expect(sessionTypeSchema.parse("custom-type")).toBe("custom-type");
 });
 
 test("configurationPropertySchemaSchema accepts sessionMode field", () => {
@@ -162,21 +160,20 @@ test("sessionActivationRequestSchema accepts request with durationMs", () => {
   expect(result.data.durationMs).toBe(1800000);
 });
 
-test("sessionActivationRequestSchema accepts request with elevatedAuth", () => {
+test("sessionActivationRequestSchema rejects ignored caller elevatedAuth", () => {
   const request = {
     reason: "Restricted key override",
     elevatedAuth: { token: "jwt-abc-123", method: "yubikey" },
   };
   const result = sessionActivationRequestSchema.safeParse(request);
-  expect(result.success).toBe(true);
-  expect(result.data.elevatedAuth).toEqual({ token: "jwt-abc-123", method: "yubikey" });
+  expect(result.success).toBe(false);
 });
 
 test("sessionActivationRequestSchema accepts full request", () => {
   const request = {
     reason: "Full debug session",
     durationMs: 7200000,
-    elevatedAuth: { token: "token-xyz", method: "mfa" },
+    activatedBy: "trusted-adapter",
   };
   const result = sessionActivationRequestSchema.safeParse(request);
   expect(result.success).toBe(true);
@@ -283,14 +280,13 @@ test("SessionActivationRequest round-trip: construct, validate, check fields", (
   const input = {
     reason: "Escalation #1234",
     durationMs: 3600000,
-    elevatedAuth: { token: "secure-token", method: "hardware-key" },
+    activatedBy: "trusted-adapter",
   };
 
   const parsed = sessionActivationRequestSchema.parse(input);
   expect(parsed.reason).toBe("Escalation #1234");
   expect(parsed.durationMs).toBe(3600000);
-  expect(parsed.elevatedAuth?.token).toBe("secure-token");
-  expect(parsed.elevatedAuth?.method).toBe("hardware-key");
+  expect(parsed.activatedBy).toBe("trusted-adapter");
 });
 
 test("SessionDeactivationResult round-trip: construct, validate, check fields", () => {

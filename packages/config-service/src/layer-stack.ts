@@ -9,7 +9,7 @@ import { type CapturedBinding, eligible } from "./provider-binding";
 export interface SelectedBinding {
   readonly captured: CapturedBinding;
   readonly rank: number;
-  readonly kind: "fixed" | "scope";
+  readonly kind: "fixed" | "scope" | "session";
 }
 export function identityKey(identity: ConfigurationServiceIdentity): string {
   return JSON.stringify([
@@ -52,6 +52,7 @@ function validateSlot(
   options: ConfigurationServiceOptions,
   assigned: Set<string>,
 ): void {
+  if (slot.kind === "session") return;
   const bindings: ConfigurationServiceProviderBinding[] = [];
   for (const id of slot.providerIds) {
     const binding = options.providers.find((candidate) => candidate.id === id);
@@ -110,6 +111,7 @@ export function selectBindings(
 ): readonly SelectedBinding[] {
   const selected: SelectedBinding[] = [];
   options.layers.forEach((slot, rank) => {
+    if (slot.kind === "session") return;
     const prefixes =
       slot.kind === "fixed"
         ? [undefined]

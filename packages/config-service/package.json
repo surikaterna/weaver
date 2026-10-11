@@ -48,6 +48,7 @@
     "test": "node --test test/*.node.mjs"
   },
   "dependencies": {
+    "@weaver-conf/config-sessions": "workspace:*",
     "@weaver-conf/config-policy": "workspace:^",
     "@weaver-conf/config-auth": "workspace:^",
     "@weaver-conf/config-types": "workspace:^",

@@ -1,5 +1,4 @@
 import type { PropertySessionMode } from "./session";
-import type { ConfigurationLayer } from "./types";
 
 /** Promotion pipeline stage required before a config change takes effect. */
 export type ConfigChangePolicy =
@@ -96,7 +95,7 @@ export interface WeaverPropertyExtensions {
   changePolicy?: ConfigChangePolicy | undefined;
   reloadBehavior?: ConfigReloadBehavior | undefined;
   expressionAllowed?: boolean | undefined;
-  maxOverrideLayer?: ConfigurationLayer | undefined;
+  maxOverrideLayer?: string | undefined;
   writeRestriction?: ReadonlyArray<ConfigurationRole> | undefined;
   sessionMode?: PropertySessionMode | undefined;
 }

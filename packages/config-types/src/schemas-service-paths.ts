@@ -28,5 +28,12 @@ export const canonicalConfigurationPathSchema = publicConfigPathSchema
   .brand<"CanonicalConfigurationPath">();
 
 export const relativeConfigurationPathSchema = serviceDataBoundary(
-  z.tuple([literalSegmentSchema]).rest(literalSegmentSchema).readonly(),
+  z.array(literalSegmentSchema).readonly(),
 );
+
+export const configurationNamespaceSchema = z.union([
+  z.literal("/"),
+  canonicalConfigurationPathSchema,
+]);
+
+export const configurationViewIdSchema = literalSegmentSchema;

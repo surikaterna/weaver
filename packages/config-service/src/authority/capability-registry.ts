@@ -16,6 +16,7 @@ interface Entry {
 export function createCapabilityRegistry(
   assertLive: () => void,
   now: () => number,
+  onRevoked?: (token: ConfigurationAuthorityCapability) => void,
 ) {
   const entries = new WeakMap<object, Entry>();
   const schema = z.custom<ConfigurationAuthorityCapability>(
@@ -32,19 +33,7 @@ export function createCapabilityRegistry(
   };
   const current = (token: unknown): Entry => {
     const entry = member(token);
-    let time: number;
-    try {
-      time = now();
-    } catch {
-      return forbidden();
-    }
-    if (
-      !Number.isFinite(time) ||
-      entry.epoch !== 0 ||
-      (entry.snapshot.expiresAt !== undefined &&
-        time >= entry.snapshot.expiresAt)
-    )
-      return forbidden();
+    assertCurrent(entry, now);
     return entry;
   };
   return {
@@ -57,9 +46,25 @@ export function createCapabilityRegistry(
     },
     revoke(token: ConfigurationAuthorityCapability): void {
       member(token).epoch++;
+      onRevoked?.(token);
     },
     current,
   };
+}
+
+function assertCurrent(entry: Entry, now: () => number): void {
+  let time: number;
+  try {
+    time = now();
+  } catch {
+    forbidden();
+  }
+  if (
+    !Number.isFinite(time) ||
+    entry.epoch !== 0 ||
+    (entry.snapshot.expiresAt !== undefined && time >= entry.snapshot.expiresAt)
+  )
+    forbidden();
 }
 
 function capturePrincipal(

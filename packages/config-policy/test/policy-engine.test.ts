@@ -82,8 +82,7 @@ describe("evaluateChangePolicy", () => {
 
   it("allows emergency-override with proper session and reason", () => {
     const ctx = makeContext({
-      sessionMode: "emergency-override",
-      overrideReason: "hotfix",
+      trustedSession: { id: "verified", emergency: true, reason: "hotfix" },
     });
     const result = evaluateChangePolicy(
       makeSchema("emergency-override"),
@@ -96,8 +95,7 @@ describe("evaluateChangePolicy", () => {
 
   it("denies emergency-override with empty reason", () => {
     const ctx = makeContext({
-      sessionMode: "emergency-override",
-      overrideReason: "",
+      trustedSession: { id: "verified", emergency: true, reason: "" },
     });
     const result = evaluateChangePolicy(
       makeSchema("emergency-override"),

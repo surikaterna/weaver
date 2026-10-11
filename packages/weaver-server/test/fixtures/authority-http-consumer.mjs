@@ -48,7 +48,7 @@ for (const format of [process.argv[2]]) {
   try {
     assert.equal((await request("")).data.value, "initial");
     const changed = await request("?layer=files", "PUT", "persisted");
-    assert.equal(changed.data.revision, changed.meta.revision);
+    assert.equal(changed.data.revisions[0].revision, changed.meta.revision);
     assert.equal((await request("?inspect")).data.effective.value, "persisted");
     assert.equal((await provider.load()).entries.example.name, "persisted");
     assert.equal((await request("?layer=files", "DELETE")).data.success, true);

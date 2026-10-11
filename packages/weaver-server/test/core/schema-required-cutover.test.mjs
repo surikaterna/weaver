@@ -50,7 +50,7 @@ function billing(additionalProperties) {
 }
 
 describe("server-bound structural admission", () => {
-  test.each([true, undefined, false])("closed/default invalid legacy siblings block declared writes when additionalProperties=%s", async (additional) => {
+  test.each([true, undefined, false])("explicit wildcard declares JSON; closed/default schemas reject legacy siblings when additionalProperties=%s", async (additional) => {
     const harness = await setup(billing(additional), {
       billing: { mode: "old", unknown: "legacy" }, legacy: { readable: true },
     });
@@ -59,15 +59,21 @@ describe("server-bound structural admission", () => {
     });
     if (additional === true) {
       expect((await harness.service.set("platform", "billing.mode", "new")).success).toBe(true);
+      expect((await harness.service.set("platform", "billing.unknown", "new")).success).toBe(true);
+      expect((await harness.provider.load()).entries.billing.unknown).toBe("new");
+      expect((await harness.service.remove("platform", "billing.unknown")).success).toBe(true);
+      expect((await harness.provider.load()).entries.billing.unknown).toBeUndefined();
+      expect((await harness.service.set("platform", "billing", { mode: "ok", surprise: true })).success).toBe(true);
+      expect((await harness.provider.load()).entries.billing).toEqual({ mode: "ok", surprise: true });
     } else {
       await denial(harness, () => harness.service.set("platform", "billing.mode", "new"), "VALIDATION_ERROR");
       await denial(harness, () => harness.service.patchRegisteredPath("platform", "/billing/mode", "new", {
         schemaRegistry: harness.registry,
       }), "SCHEMA_NOT_REGISTERED");
+      await denial(harness, () => harness.service.set("platform", "billing.unknown", "new"), "SCHEMA_NOT_REGISTERED");
+      await denial(harness, () => harness.service.remove("platform", "billing.unknown"), "SCHEMA_NOT_REGISTERED");
+      await denial(harness, () => harness.service.set("platform", "billing", { mode: "ok", surprise: true }), "SCHEMA_NOT_REGISTERED");
     }
-    await denial(harness, () => harness.service.set("platform", "billing.unknown", "new"), "SCHEMA_NOT_REGISTERED");
-    await denial(harness, () => harness.service.remove("platform", "billing.unknown"), "SCHEMA_NOT_REGISTERED");
-    await denial(harness, () => harness.service.set("platform", "billing", { mode: "ok", surprise: true }), "SCHEMA_NOT_REGISTERED");
     await denial(harness, () => harness.service.set("platform", "legacy.readable", false), "SCHEMA_NOT_REGISTERED");
     expect((await harness.service.set("platform", "billing", { mode: "clean" })).success).toBe(true);
     expect((await harness.provider.load()).entries.billing).toEqual({ mode: "clean" });
@@ -142,7 +148,7 @@ describe("server-bound structural admission", () => {
   });
 
   test("mixed invalid batches and alias/ancestor collisions reject before the first write", async () => {
-    const harness = await setup(billing(true), { billing: { mode: "ok" } });
+    const harness = await setup(billing(false), { billing: { mode: "ok" } });
     for (const entries of [
       { "billing.mode": "next", "billing.unknown": "bad" },
       { "billing.unknown": "bad", "billing.mode": "next" },
@@ -188,16 +194,17 @@ describe("server-bound structural admission", () => {
     expect((await harness.provider.load()).entries.billing).toEqual({ mode: "first", items: [] });
   });
 
-  test("a nonwinning anyOf/oneOf branch and not cannot grant authority", async () => {
+  test("nonwinning branches do not constrain an explicit wildcard; matching branches and not still validate", async () => {
     const text = { type: "object", properties: { kind: { type: "string", const: "text" }, value: { type: "string" } }, additionalProperties: true };
     const count = { type: "object", properties: { kind: { type: "string", const: "count" }, other: { type: "number" } }, additionalProperties: true };
     const schema = { type: "object", properties: { kind: { type: "string" } }, additionalProperties: true, anyOf: [text, count], oneOf: [text, count] };
     const harness = await setup(schema, { billing: { kind: "text" } });
     expect((await harness.service.set("platform", "billing.value", "yes")).success).toBe(true);
     await denial(harness, () => harness.service.set("platform", "billing.value", 2), "VALIDATION_ERROR");
-    await denial(harness, () => harness.service.set("platform", "billing.other", 5), "SCHEMA_NOT_REGISTERED");
+    expect((await harness.service.set("platform", "billing.other", "wildcard, not count branch")).success).toBe(true);
+    expect((await harness.provider.load()).entries.billing).toEqual({ kind: "text", value: "yes", other: "wildcard, not count branch" });
     const notOnly = await setup({ type: "object", additionalProperties: true, not: { type: "object", properties: { only: { type: "string" } } } });
-    await denial(notOnly, () => notOnly.service.set("platform", "billing.only", "bad"), "SCHEMA_NOT_REGISTERED");
+    await denial(notOnly, () => notOnly.service.set("platform", "billing.only", "bad"), "VALIDATION_ERROR");
   });
 
   test("allOf siblings can declare a path but every constraint still applies", async () => {
@@ -210,7 +217,7 @@ describe("server-bound structural admission", () => {
     };
     const harness = await setup(schema);
     expect((await harness.service.set("platform", "billing.mode", "valid")).success).toBe(true);
-    await denial(harness, () => harness.service.set("platform", "billing.other", 2), "SCHEMA_NOT_REGISTERED");
+    await denial(harness, () => harness.service.set("platform", "billing.other", 2), "VALIDATION_ERROR");
     await denial(harness, () => harness.service.set("platform", "billing.mode", 2), "VALIDATION_ERROR");
   });
 
@@ -346,12 +353,15 @@ describe("server-bound structural admission", () => {
     expect((await harness.service.setMany("platform", { "billing.kind": "count", "billing.value": 3 })).success).toBe(true);
   });
 
-  test("open objects do not authorize undeclared batch members; arrays remain unsupported", async () => {
+  test("explicit wildcard declares batch members; generic array indices remain unsupported", async () => {
     const harness = await setup(billing(true), { billing: { mode: "before", items: ["old"] } });
     for (const entries of [
       { "billing.mode": "next", "billing.rogue": "x" },
       { "billing.rogue": "x", "billing.mode": "next" },
-    ]) await denial(harness, () => harness.service.setMany("platform", entries), "SCHEMA_NOT_REGISTERED");
+    ]) {
+      expect((await harness.service.setMany("platform", entries)).success).toBe(true);
+      expect((await harness.provider.load()).entries.billing).toEqual({ mode: "next", items: ["old"], rogue: "x" });
+    }
     for (const entries of [
       { "billing.mode": "next", "billing.items[0]": "x" },
       { "billing.items.0": "x", "billing.mode": "next" },
@@ -403,10 +413,10 @@ describe("server-bound structural admission", () => {
       fragmentSlots: [{ slotPath: "/plugins", accepts: "object" }] })).success).toBe(true);
     expect((await harness.registry.register({ serviceId: "billing", providerId: "tax", slotPath: "/plugins",
       environment: "dev", owner, schema: fragment })).success).toBe(true);
-    for (const entries of [
-      { billing: { mode: "next", plugins: { tax: { enabled: true, rogue: 1 } } } },
-      { "billing.mode": "next", "billing.plugins.tax": { enabled: true, rogue: 1 } },
-    ]) await denial(harness, () => harness.service.setMany("platform", entries), "SCHEMA_NOT_REGISTERED");
+    for (const [entries, code] of [
+      [{ billing: { mode: "next", plugins: { tax: { enabled: true, rogue: 1 } } } }, "VALIDATION_ERROR"],
+      [{ "billing.mode": "next", "billing.plugins.tax": { enabled: true, rogue: 1 } }, "SCHEMA_NOT_REGISTERED"],
+    ]) await denial(harness, () => harness.service.setMany("platform", entries), code);
     for (const entries of [
       { "billing.mode": "next", "billing.plugins.tax": { enabled: true, source: "wrong" } },
       { billing: { mode: "next", plugins: { tax: { enabled: true, source: "wrong" } } } },

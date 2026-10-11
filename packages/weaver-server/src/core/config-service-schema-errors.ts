@@ -7,7 +7,7 @@ import {
   assertPublicConfigPath,
   parseCanonicalConfigPath,
 } from "@weaver-conf/config-engine";
-import type { SchemaPatchResult } from "./config-service-schema-patches";
+import type { SchemaPatchResult } from "@weaver-conf/config-service/admission";
 import type {
   FailedSchemaWrite,
   ResolvedWriteAnchor,

@@ -378,6 +378,16 @@ describe("composition modes and patch projection", () => {
         "leaf",
       ]),
       summary("Value must match every allOf branch (matched 0 of 1)", ["leaf"]),
+    ]);
+    expect(
+      validateConfigurationPatch(schema, "leaf", { value: true, blocked: true })
+        .errors,
+    ).toEqual([
+      summary("Value must match at least one anyOf branch", ["leaf"]),
+      summary("Value must match exactly one oneOf branch (matched 0)", [
+        "leaf",
+      ]),
+      summary("Value must match every allOf branch (matched 0 of 1)", ["leaf"]),
       summary("Value must not match the not schema", ["leaf"]),
     ]);
   });

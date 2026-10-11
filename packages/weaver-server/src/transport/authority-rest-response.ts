@@ -1,5 +1,6 @@
 import {
-  configurationServiceWriteResultSchema,
+  type ConfigurationServiceIdentity,
+  configurationMutationResultSchema,
   type WeaverErrorCode,
   WeaverErrorInstance,
   weaverErrorCodeSchema,
@@ -39,11 +40,28 @@ export function authoritySuccess(
     headers: v1Headers(revision),
   };
 }
-export function authorityWriteResponse(input: unknown): RestResponse {
-  const parsed = configurationServiceWriteResultSchema.safeParse(input);
+export function authorityWriteResponse(
+  input: unknown,
+  identity: ConfigurationServiceIdentity,
+): RestResponse {
+  const parsed = configurationMutationResultSchema.safeParse(input);
   if (!parsed.success) return authorityFailure(undefined);
   const result = parsed.data;
-  if (result.success) return authoritySuccess(result, result.revision);
+  if (result.success) {
+    const revision = result.revisions.find(
+      (item) =>
+        item.identity.environment === identity.environment &&
+        item.identity.scopePath.length === identity.scopePath.length &&
+        item.identity.scopePath.every(
+          (part, index) =>
+            part.scopeId === identity.scopePath[index]?.scopeId &&
+            part.value === identity.scopePath[index]?.value,
+        ),
+    )?.revision;
+    return revision
+      ? authoritySuccess(result, revision)
+      : authorityFailure(undefined);
+  }
   const error = authorityError(result.error.code);
   return {
     status: httpStatusForError(error.code),

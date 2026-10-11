@@ -26,7 +26,6 @@ const mockAuthFunctions = {
 const mapContext = (authCtx) => ({
   userId: authCtx.identity?.userId ?? "anonymous",
   roles: authCtx.identity?.roles ?? [],
-  sessionMode: undefined,
 });
 
 test("toAccessContext maps AuthContext correctly", () => {
@@ -44,14 +43,14 @@ test("toAccessContext maps AuthContext correctly", () => {
 
 test("gateRead returns null when access is allowed", () => {
   const gate = createAuthGate({ authFunctions: mockAuthFunctions, mapContext });
-  const accessCtx = { userId: "u1", roles: ["admin"], sessionMode: undefined };
+  const accessCtx = { userId: "u1", roles: ["admin"] };
   const result = gate.gateRead(accessCtx, "some.key", undefined);
   expect(result).toBe(null);
 });
 
 test("gateRead returns 403 when access is denied", () => {
   const gate = createAuthGate({ authFunctions: mockAuthFunctions, mapContext });
-  const accessCtx = { userId: "u1", roles: ["viewer"], sessionMode: undefined };
+  const accessCtx = { userId: "u1", roles: ["viewer"] };
   const schema = { "x-weaver": { visibility: "internal" } };
   const result = gate.gateRead(accessCtx, "secret.key", schema);
   expect(result).not.toBe(null);
@@ -60,14 +59,14 @@ test("gateRead returns 403 when access is denied", () => {
 
 test("gateWrite returns null when write is allowed", () => {
   const gate = createAuthGate({ authFunctions: mockAuthFunctions, mapContext });
-  const accessCtx = { userId: "u1", roles: ["admin"], sessionMode: undefined };
+  const accessCtx = { userId: "u1", roles: ["admin"] };
   const result = gate.gateWrite(accessCtx, "platform", "some.key", undefined);
   expect(result).toBe(null);
 });
 
 test("gateWrite returns 403 when write is denied", () => {
   const gate = createAuthGate({ authFunctions: mockAuthFunctions, mapContext });
-  const accessCtx = { userId: "u1", roles: ["viewer"], sessionMode: undefined };
+  const accessCtx = { userId: "u1", roles: ["viewer"] };
   const result = gate.gateWrite(accessCtx, "platform", "some.key", undefined);
   expect(result).not.toBe(null);
   expect(result.status).toBe(403);
@@ -75,7 +74,7 @@ test("gateWrite returns 403 when write is denied", () => {
 
 test("filterVisible removes non-visible keys", () => {
   const gate = createAuthGate({ authFunctions: mockAuthFunctions, mapContext });
-  const accessCtx = { userId: "u1", roles: ["viewer"], sessionMode: undefined };
+  const accessCtx = { userId: "u1", roles: ["viewer"] };
   const entries = { "public.key": "val1", "secret.key": "val2" };
   const schemaMap = new Map();
   schemaMap.set("secret.key", { "x-weaver": { visibility: "internal" } });

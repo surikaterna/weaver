@@ -1,5 +1,14 @@
+export { createOverrideSessionProvider } from "./override-session-provider";
 export type {
   OverrideSessionController,
   OverrideSessionProviderOptions,
-} from "./override-session-provider";
-export { createOverrideSessionProvider } from "./override-session-provider";
+  SessionExpiryIntent,
+  SessionTimer,
+} from "./session-contracts";
+export {
+  overrideSessionControllerSchema,
+  overrideSessionProviderOptionsSchema,
+  sessionDurationSchema,
+  sessionExpiryIntentSchema,
+  sessionTimerSchema,
+} from "./session-contracts";

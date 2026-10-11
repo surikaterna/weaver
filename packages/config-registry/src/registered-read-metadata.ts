@@ -2,14 +2,14 @@ import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
 import {
   allows,
   arrayMembers,
+  type MemberEvidence,
   objectMembers,
   validBranch,
-} from "./schema-write-support";
+} from "./schema-member-evidence";
 import { ownField } from "./structural-witness-own-data";
 
 type Schema = ConfigurationPropertySchema;
-export interface ReadEvidence {
-  readonly schemas: readonly Schema[];
+export interface ReadEvidence extends MemberEvidence {
   readonly forbidden: boolean;
   readonly ambiguous: boolean;
 }
@@ -29,6 +29,7 @@ function restricted(schema: Schema): boolean {
 export function expandReadEvidence(
   schemas: readonly Schema[],
   candidate: unknown,
+  unconstrained = false,
 ): ReadEvidence {
   const pending = [...schemas];
   const seen = new Set<Schema>();
@@ -46,6 +47,7 @@ export function expandReadEvidence(
   }
   return Object.freeze({
     schemas: Object.freeze(expanded),
+    unconstrained,
     forbidden,
     ambiguous,
   });
@@ -85,13 +87,14 @@ function eligibleBranches(
     : branches.filter((branch) => validBranch(branch, candidate));
 }
 
-export function readMemberSchemas(
+export function readMemberEvidence(
   evidence: ReadEvidence,
   key: string,
   candidate: unknown,
-): Schema[] {
+): MemberEvidence {
   const members: Schema[] = [];
   const seen = new Set<Schema>();
+  let unconstrained = evidence.unconstrained;
   for (const schema of evidence.schemas) {
     const array = allows(schema, "array");
     const object = allows(schema, "object");
@@ -100,14 +103,15 @@ export function readMemberSchemas(
         ? arrayMembers(schema, key)
         : object
           ? objectMembers(schema, key)
-          : [];
-    for (const member of selected) {
+          : { schemas: [], unconstrained: false };
+    unconstrained ||= selected.unconstrained;
+    for (const member of selected.schemas) {
       if (seen.has(member)) continue;
       seen.add(member);
       members.push(member);
     }
   }
-  return members;
+  return { schemas: members, unconstrained };
 }
 
 export function readMemberIsAmbiguous(

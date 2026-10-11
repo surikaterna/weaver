@@ -20,13 +20,19 @@ import type { ConfigurationLayerData } from "./types";
 
 const layer = z.string().min(1);
 const scopes = z.array(scopeInstanceSchema.readonly()).readonly();
-export const configurationServiceLayerSlotSchema = z
-  .strictObject({
-    kind: z.enum(["fixed", "scope"]),
-    layer,
-    providerIds: z.array(providerIdSchema).min(1).readonly(),
-  })
-  .readonly();
+export const configurationServiceLayerSlotSchema = z.discriminatedUnion(
+  "kind",
+  [
+    z
+      .strictObject({
+        kind: z.enum(["fixed", "scope"]),
+        layer,
+        providerIds: z.array(providerIdSchema).min(1).readonly(),
+      })
+      .readonly(),
+    z.strictObject({ kind: z.literal("session"), layer }).readonly(),
+  ],
+);
 export type ConfigurationServiceLayerSlot = z.infer<
   typeof configurationServiceLayerSlotSchema
 >;
@@ -105,6 +111,7 @@ export const configurationServiceProviderBindingSchema = z
     scopePath: scopes.optional(),
     operation: configurationServiceProviderReadSchema,
     ownership: configurationServiceProviderOwnershipSchema,
+    watch: z.boolean().optional(),
   })
   .readonly();
 export type ConfigurationServiceProviderBinding = z.infer<

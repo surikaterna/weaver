@@ -2,7 +2,6 @@ import type {
   ConfigurationPropertySchema,
   ConfigurationRole,
 } from "./property-schema";
-import type { SessionType } from "./session";
 import type { ConfigurationLayer, ScopeInstance } from "./types";
 
 /** Identity and role context for evaluating configuration access permissions. */
@@ -10,7 +9,14 @@ export interface ConfigurationAccessContext {
   userId: string;
   roles: ReadonlyArray<ConfigurationRole>;
   assignedScopes?: ReadonlyArray<ScopeInstance> | undefined;
-  sessionMode?: "emergency-override" | SessionType | undefined;
+  /** Host-verified policy input; never a native authority credential. */
+  readonly trustedSession?:
+    | {
+        readonly id: string;
+        readonly emergency: boolean;
+        readonly reason: string;
+      }
+    | undefined;
 }
 
 /** Constraint applied to a layer write policy (e.g., scope or user restriction). */

@@ -7,9 +7,9 @@ import { test } from "node:test";
 import { browserGraphs } from "./packed-browser.mjs";
 import { fixture, installConsumer, run, withConsumer } from "./packed-consumer-helper.mjs";
 import { strictDeclarations } from "./packed-declarations.mjs";
-import { exercise, internalExports, rootExports } from "./operation-support-fixture.mjs";
+import { exercise, persistenceBoundaryExercise, internalExports, rootExports } from "./operation-support-fixture.mjs";
 import { readProjectionExercise } from "./read-projection-fixture.mjs";
-import { exerciseDomainBoundaries } from "../../config-types/test/domain-boundary-fixture.mjs";
+import { exerciseDomainBoundaries, exerciseUnknownMutationReceipts } from "../../config-types/test/domain-boundary-fixture.mjs";
 import { ancestorProjectionExercise } from "./read-projection-ancestor-fixture.mjs";
 
 async function removeOwnedParent(parent, failed) {
@@ -34,12 +34,17 @@ async function nodeConsumers(directory) {
         : "import * as support from '@weaver-conf/config-registry'; import * as engine from '@weaver-conf/config-engine'; import * as internalApi from '@weaver-conf/config-registry/internal/server-adapter';"}
       assert.deepEqual(Object.keys(support).sort(), ${JSON.stringify(rootExports)});
       assert.deepEqual(Object.keys(internalApi).sort(), ${JSON.stringify(internalExports)});
+      ${cjs ? "const persistence = require('@weaver-conf/config-registry/persistence');" : "import * as persistence from '@weaver-conf/config-registry/persistence';"}
+      assert.deepEqual(${persistenceBoundaryExercise}, { accessorCases: 16, getters: 0, calls: 0 });
+      console.log('installed public persistence: 16 accessor cases, zero getters, literal cycles/DAG/descriptors preserved');
       for (const api of [support, internalApi]) { ${exercise} }
       ${witnessExercise}
       ${readProjectionExercise}
       ${ancestorProjectionExercise}
       ${cjs ? "const types = require('@weaver-conf/config-types');" : "import * as types from '@weaver-conf/config-types';"}
+      const exerciseUnknownMutationReceipts = ${exerciseUnknownMutationReceipts.toString()};
       console.log('packed boundary matrix', (${exerciseDomainBoundaries.toString()})(types, engine, support));
+      console.log('installed public unknown receipts: ordered negatives and mixed grouped-flush positives passed');
       console.log('packed runtime real registrations/reads/pages/validators passed');`);
     console.log(run(process.execPath, [filename], directory));
   }

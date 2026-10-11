@@ -114,7 +114,7 @@ describe("schema-required rollout across public readiness and restart", () => {
     }
   });
 
-  test.each([true, undefined])("historical undeclared children survive restart but cannot be written with additionalProperties=%s", async (additional) => {
+  test.each([true, undefined])("restart retains explicit wildcard declarations versus omitted additionalProperties=%s", async (additional) => {
     const { storage, effects } = provider({ billing: { mode: "old", rogue: "keep", items: ["one"] }, old: { key: "keep" } });
     const first = await startWeaverServer({ port: 0, providers: [storage] });
     try {
@@ -127,11 +127,16 @@ describe("schema-required rollout across public readiness and restart", () => {
     try {
       for (const path of ["billing/rogue", "old/key"]) {
         for (const method of ["PUT", "DELETE"]) {
-          await denied(second.port, storage, effects, deltas, `/v1/config/${path}`, method, method === "PUT" ? { value: "changed" } : undefined, "SCHEMA_NOT_REGISTERED");
+          if (additional === true && path === "billing/rogue") {
+            expect((await request(second.port, `/v1/config/${path}`, method, method === "PUT" ? { value: "changed" } : undefined)).status).toBe(200);
+            expect((await storage.load()).entries.billing.rogue).toBe(method === "PUT" ? "changed" : undefined);
+          } else {
+            await denied(second.port, storage, effects, deltas, `/v1/config/${path}`, method, method === "PUT" ? { value: "changed" } : undefined, "SCHEMA_NOT_REGISTERED");
+          }
         }
       }
       expect((await storage.load()).entries.billing.items).toEqual(["one"]);
-      expect((await storage.load()).entries.billing.rogue).toBe("keep");
+      expect((await storage.load()).entries.billing.rogue).toBe(additional === true ? undefined : "keep");
       expect((await storage.load()).entries.old.key).toBe("keep");
     } finally {
       deltas.close();
@@ -201,7 +206,9 @@ describe("schema-required rollout across public readiness and restart", () => {
     try {
       expect((await request(second.port, "/v1/config/billing/mode")).body.data.value).toBe("safe");
       await denied(second.port, storage, effects, deltas, "/v1/config/billing/mode", "PUT", { value: "unsafe" }, "VALIDATION_ERROR");
-      await denied(second.port, storage, effects, deltas, "/v1/config/billing/other", "PUT", { value: 2 }, "SCHEMA_NOT_REGISTERED");
+      expect((await request(second.port, "/v1/config/billing/other", "PUT", { value: 2 })).status).toBe(200);
+      expect((await storage.load()).entries.billing).toEqual({ kind: "text", mode: "safe", other: 2 });
+      await denied(second.port, storage, effects, deltas, "/v1/config/billing/other", "PUT", { value: "invalid" }, "VALIDATION_ERROR");
     } finally {
       deltas.close();
       await second.close();

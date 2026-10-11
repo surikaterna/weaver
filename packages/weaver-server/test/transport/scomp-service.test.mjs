@@ -106,7 +106,7 @@ describe("createWeaverScompService", () => {
       mode: { type: "string" }, items: { type: "array", items: { type: "string" } },
       labels: { type: "object", patternProperties: { "^x-": { type: "string" } } },
       extras: { type: "object", additionalProperties: { type: "integer" } },
-    }, { additionalProperties: true });
+    }, { additionalProperties: false });
     const audit = auditCapture();
     const router = createWeaverScompService({ ...deps, auditService: audit.service }).router;
     const revision = configService.revision;

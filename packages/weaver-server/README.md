@@ -32,7 +32,11 @@ const server = await bootstrap({
 - `WeaverConfigService` — Central service for reads, writes, and resolution
 - `SchemaRegistry` — Namespace schema registration and validation
 - `ScopeManager` — Scope provisioning and hierarchy management
-- `SessionManager` — Override session lifecycle (create, expire, audit)
+- Override sessions use the canonical `config-service` host controller's
+  `forSessions(capability)` port and ordinary `forMutations(capability).apply`
+  with a checked session selector. The former unwired `SessionManager` export
+  and its independent map/sweep are removed; no default network session endpoint
+  is introduced by this migration.
 - `PromotionEngine` — Promotes values between layers with approval workflows
 - `RollbackService` — Reverts configuration to previous revisions
 
@@ -40,6 +44,42 @@ const server = await bootstrap({
 
 - `createAuthMiddleware(options)` — JWT-based request authentication
 - `createJwtValidator(options)` — Token validation and identity extraction
+
+Schema registration uses the separate `AuthGate.gateSchemaWrite(accessContext)`
+purpose, not a configuration write to a synthetic `admin` layer or the registry's
+storage layer. With JWT authentication enabled, the route still requires an
+authenticated administrative context **and** the gate requires a mapped role in
+the explicitly configured `schemaAdminRoles`. Startup supplies the same
+`adminRoles` as the JWT middleware. A service identity's administrative marker
+alone does not permit registration. Schema GET retains its existing `gateRead`
+policy. Explicit no-auth legacy composition is unchanged.
+
+Custom gate compositions must move schema-write restrictions formerly placed in
+`canWrite` to the schema-specific synchronous narrowing callback:
+
+```ts
+const gate = createAuthGate({
+  authFunctions, // canWrite governs real configuration-layer writes only
+  mapContext,
+  schemaAdminRoles: ["schema-operator"],
+  canRegisterSchema: (access) => approvedSchemaOperators.has(access.userId),
+});
+```
+
+Absent/empty schema roles deny. The optional callback can only narrow the role
+policy: only exactly `true` allows, while false, exceptions, malformed results
+and promises deny. Missing or broken custom `gateSchemaWrite` methods fail closed;
+there is no fallback to `gateWrite`. Co-located native Zod gate schemas validate
+callable shapes, not authentication or authority.
+
+Default server authorization ranks now capture ordered distinct layer names from
+the **actual bootstrapped providers**, including custom names. Duplicate names
+share a slot. Scoped requests map through the existing scope parser only when the
+configured scope provider supports the complete scoped load/write/remove dialect.
+Unknown targets and ceiling names deny; no administrative rank is manufactured.
+This authorization capture does not change the legacy resolver's base/scope order
+or certify legacy network ceiling parity. The canonical root owns ceiling
+resolution; the remaining default-runtime cutover is separate work.
 
 ### Registered schema browsing (operator access)
 
@@ -50,6 +90,24 @@ The legacy identity list is O(registered anchors + declared slots), still unpage
 The private sorted index retains O(N) identity references, builds on hydration and rebuilds on successful registration in O(N log N) time with O(N) temporary memory; each page is O(limit) time/output memory without schema projections outside the page. Ordering is JS code-unit environment, path, kind. Cursor is a fixed 55-character canonical base64url ordinal (version, random process instance, local revision, effective limit, next offset), **not** a credential or signed integrity proof: a syntactically valid forged nonce can produce 409, and a forged valid offset can select a different page. Local successful registrations, even no-ops, invalidate previous cursors; failed writes do not. Restart invalidates cursors. A hydrated registry does not detect changes made by another process in protected storage: there is **no cross-process snapshot or cross-writer 409 guarantee**. Count is not a byte cap: registration count, path/environment lengths, and serialized response bytes remain unbounded, and legacy bulk/list remain unpaged. A small fixture's byte comparison is not a DoS bound. Operate a controlled registry, restrict admin/SCOMP access, and apply deployment ingress rate and response controls where available; these are operational mitigations, **not** server-enforced memory or response guarantees. Exact detail checks both path and environment after lookup; legacy bulk remains colon-keyed for unambiguous entries and fails with `SCHEMA_CONFLICT` on distinct identities sharing a legacy key (no partial result). Use identity listing and exact detail to inspect such registries.
 
 ### Schema registry v2 upgrade and rollback (`weaver-afwt`)
+
+The opt-in shared-authority server loads raw persisted registry metadata and passes
+it, with the selected fixed provider binding, to the configuration root. The root
+owns the sole live registry adapter; bootstrap does not create a second registry.
+Truly absent registry metadata permits first provisioning, while an existing
+incomplete container rejects startup. The existing v1/v2 codecs now belong to
+`@weaver-conf/config-registry/persistence`; invalid inputs produce sanitized typed
+`VALIDATION_ERROR` errors. Programmatic hosts administer live metadata through the
+root's explicit schema capability port. This does not add HTTP/SCOMP schema routes
+to the shared-authority host or change the legacy server's default selection.
+
+The shared-authority host's existing PUT/DELETE routes submit one command through
+`controller.forMutations(token).apply(commands)`. Responses expose the canonical
+receipt list and commanded-identity revisions; successful ETags use the returned
+revision, not a later query. Public JSON aggregate reads use the same pruned projection.
+Native embedded callers must replace root/query `set`/`remove` with this command port.
+No HTTP batch, patch, validation, SSE or new SCOMP endpoint is added by this migration;
+the default legacy server and its transport-backed SDK remain separate cutover work.
 
 Before deploying, stop **all old registration writers**; mixed old/new writers are unsupported. Take a verified, restorable snapshot of the protected `_weaver.registry.schemas` root (including its enclosing storage layer) and retain the authoritative service/fragment registration source. A versionless grouped v1 root loads read-only. The first successful registration writes the complete strict `{version:2,environments:{...}}` snapshot through the existing internal write path; unsuccessful registration or persistence failure does not upgrade the root. The schema graph codec inside entries remains version 1. Old binaries **cannot read v2**: never restart one against upgraded storage. To roll back, stop all new writers, restore the verified pre-upgrade v1 snapshot, then start old binaries. This discards registrations made since that snapshot. Prefer a forward v2 fix/redeploy if those registrations must be retained. Compare identities with the authoritative source/backup and re-register any missing identities from that source; a lone valid colon-bearing legacy entry cannot reveal whether an alias was lost, so never infer or fabricate its counterpart. An invalid envelope, metadata mismatch, or malformed graph fails registry startup before writes: investigate/restore from the snapshot rather than editing keys in place.
 

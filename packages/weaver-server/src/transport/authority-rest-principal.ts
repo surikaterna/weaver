@@ -4,7 +4,9 @@ import {
 } from "@weaver-conf/config-engine";
 import {
   type ConfigurationAuthorityController,
-  type ConfigurationAuthorityRequest,
+  type ConfigurationMutationAuthority,
+  type ConfigurationNamespace,
+  type ConfigurationReader,
   type ConfigurationServiceIdentity,
   createWeaverError,
   type TrustedPrincipalSnapshot,
@@ -100,13 +102,20 @@ function selectedNamespace(
   return namespace;
 }
 
+export interface AuthorityRequestContext {
+  readonly query: ConfigurationReader;
+  readonly mutations: ConfigurationMutationAuthority;
+  readonly identity: ConfigurationServiceIdentity;
+  readonly namespace: ConfigurationNamespace;
+}
+
 export async function withAuthorityRequest<T>(
   options: ServerAuthorityOptions,
   controller: ConfigurationAuthorityController,
   context: AuthContext,
   selected: SelectedAuthorityRequest,
   assertOpen: () => void,
-  operation: (port: ConfigurationAuthorityRequest) => T | Promise<T>,
+  operation: (context: AuthorityRequestContext) => T | Promise<T>,
 ): Promise<T> {
   assertOpen();
   const principal = mappedPrincipal(options, context, selected.identity);
@@ -114,10 +123,18 @@ export async function withAuthorityRequest<T>(
   assertOpen();
   const token = controller.mint(principal);
   try {
-    const port = controller.forIdentity(token, selected.identity, namespace);
+    const port = controller.forIdentity(token, {
+      identity: selected.identity,
+      namespace,
+    });
     await port.prepare();
     assertOpen();
-    return await operation(port);
+    return await operation({
+      query: port,
+      mutations: controller.forMutations(token),
+      identity: selected.identity,
+      namespace,
+    });
   } finally {
     try {
       controller.revoke(token);

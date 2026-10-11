@@ -1,7 +1,6 @@
-import {
-  type CanonicalSchemaRegistryReader,
-  createCanonicalSchemaRegistry,
-} from "@weaver-conf/config-registry";
+import { validateRegisteredCeilingNames } from "@weaver-conf/config-registry";
+import { createRegistryAdapter } from "@weaver-conf/config-registry/internal/server-adapter";
+import { parsePersistedRegistry } from "@weaver-conf/config-registry/persistence";
 import {
   type ConfigurationServiceOptions,
   configurationServiceOptionsSchema,
@@ -13,7 +12,7 @@ import {
   validateAuthLayers,
 } from "./authority/authority-contract-capture";
 import { captureWriters } from "./authority/provider-write";
-import { rejectCeilings } from "./ceiling-presence";
+import { validateRegistryCeilings } from "./ceiling-validation";
 import { selectBindings, validateStack } from "./layer-stack";
 import { captureBinding } from "./provider-binding";
 import {
@@ -67,22 +66,29 @@ export function validateFactory(
     validateStack(options);
     validateHost(host, options);
     const captured = options.providers.map(captureBinding);
+    validateWatchOwnership(captured);
     const writers = captureWriters(captured, host.writers, options.identity);
     const selected = selectBindings(options, captured, options.identity);
-    const registry = host.registry ?? registerSchemas(options);
-    const signature = registrySignature(registry, true);
-    const assertRegistryStable = () => {
-      if (host.registry && registrySignature(registry, false) !== signature)
-        throw createWeaverError("FORBIDDEN", "Configuration registry changed");
-    };
+    const adapter = registerSchemas(options, host);
+    const registryStorage = selectRegistryStorage(host, selected);
+    if (
+      registryStorage &&
+      options.schemas.length &&
+      !writers.has(registryStorage.captured)
+    )
+      throw createWeaverError(
+        "WRITE_UNAVAILABLE",
+        "Registry seed storage is read-only",
+      );
     return {
       options,
       captured,
       writers,
       selected,
-      registry,
+      registry: adapter.reader,
+      adapter,
+      registryStorage,
       host,
-      assertRegistryStable,
     };
   } catch (error) {
     if (error instanceof WeaverErrorInstance) throw error;
@@ -96,15 +102,41 @@ export function validateFactory(
   }
 }
 
+function validateWatchOwnership(
+  captured: readonly ReturnType<typeof captureBinding>[],
+): void {
+  const watched = captured
+    .filter((item) => item.watch)
+    .map((item) => item.binding.provider);
+  if (new Set(watched).size !== watched.length) invalidHost();
+}
+
+function selectRegistryStorage(
+  host: ConfigurationServiceHostOptions,
+  selected: ReturnType<typeof selectBindings>,
+) {
+  const storage = host.registry?.storage;
+  if (storage?.kind !== "provider") return undefined;
+  const binding = selected.find(
+    (item) => item.captured.binding.id === storage.providerId,
+  );
+  if (binding?.kind !== "fixed") invalidHost();
+  return binding;
+}
+
 function validateHost(
   host: ConfigurationServiceHostOptions,
   options: ConfigurationServiceOptions,
 ): void {
-  if (host.registry && options.schemas.length) invalidHost();
+  const sessions = options.layers.filter((slot) => slot.kind === "session");
   if (
-    (host.hostAuthority || host.onAuthorityReady) &&
-    (!host.hostAuthority || !host.authConfig)
+    sessions.length > 1 ||
+    Boolean(sessions.length) !== Boolean(host.sessions)
   )
+    invalidHost();
+  if (sessions.length && host.authConfig.sessionLayer !== sessions[0]?.layer)
+    invalidHost();
+  if (host.registry?.initial !== undefined && options.schemas.length)
     invalidHost();
   if (host.authConfig)
     validateAuthLayers(
@@ -114,34 +146,36 @@ function validateHost(
 }
 function registerSchemas(
   options: ConfigurationServiceOptions,
-): CanonicalSchemaRegistryReader {
-  const registry = createCanonicalSchemaRegistry({
-    defaultEnvironment: options.identity.environment,
-  });
+  host: ConfigurationServiceHostOptions,
+) {
+  const registry = createRegistryAdapter(
+    {
+      defaultEnvironment: options.identity.environment,
+      ...(host.registry?.schemaIdentityMaxPageSize === undefined
+        ? {}
+        : {
+            schemaIdentityMaxPageSize: host.registry.schemaIdentityMaxPageSize,
+          }),
+    },
+    parsePersistedRegistry(host.registry?.initial),
+  );
   for (const request of options.schemas) {
-    const result = registry.register(request);
-    if (!result.success)
-      throw (
-        result.error ??
-        createWeaverError("VALIDATION_ERROR", "Schema registration failed")
-      );
-  }
-  for (const request of options.schemas) rejectCeilings(request.schema);
-  return registry;
-}
-function registrySignature(
-  registry: CanonicalSchemaRegistryReader,
-  checkCeilings: boolean,
-): string {
-  const identities = registry.listRegisteredSchemaIdentities();
-  const details = identities.anchors.map((identity) => {
-    const detail = registry.getRegisteredSchema(
-      identity.path,
-      identity.environment,
+    validateRegisteredCeilingNames(
+      request.schema,
+      options.layers.map((slot) => slot.layer),
     );
-    if (!detail) invalidHost();
-    if (checkCeilings) rejectCeilings(detail.schema);
-    return detail;
-  });
-  return JSON.stringify([identities, details]);
+    const prepared = registry.prepare(request);
+    const result = prepared.result;
+    if (!result.success)
+      throw createWeaverError(
+        result.error?.code ?? "VALIDATION_ERROR",
+        "Schema registration failed",
+      );
+    prepared.publish();
+  }
+  validateRegistryCeilings(
+    registry.reader,
+    options.layers.map((slot) => slot.layer),
+  );
+  return registry;
 }

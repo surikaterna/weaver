@@ -1,9 +1,6 @@
 /** Session type identifier (e.g., "emergency-override", "debug"). */
 export type SessionType = string;
 
-/** @deprecated Use `SessionType` instead. */
-export type SessionMode = SessionType;
-
 /** Whether a property allows, restricts, or blocks session overrides. */
 export type PropertySessionMode = "allowed" | "restricted" | "blocked";
 
@@ -41,7 +38,6 @@ export interface OverrideSession {
 export interface SessionActivationRequest {
   reason: string;
   durationMs?: number | undefined;
-  elevatedAuth?: { token: string; method: string } | undefined;
   activatedBy?: string | undefined;
 }
 
@@ -52,6 +48,3 @@ export interface SessionDeactivationResult {
   overridesCleared: number;
   auditRecorded: boolean;
 }
-
-/** @deprecated Use `OverrideSession` instead. */
-export type GodModeSession = OverrideSession;

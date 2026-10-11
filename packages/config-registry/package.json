@@ -24,6 +24,16 @@
         "default": "./dist/index.cjs"
       }
     },
+    "./persistence": {
+      "import": {
+        "types": "./dist/persistence.d.ts",
+        "default": "./dist/persistence.js"
+      },
+      "require": {
+        "types": "./dist/persistence.d.cts",
+        "default": "./dist/persistence.cjs"
+      }
+    },
     "./internal/server-adapter": {
       "import": {
         "types": "./dist/internal/server-adapter.d.ts",

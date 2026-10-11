@@ -44,7 +44,7 @@ function fixture(schema, entries) {
   return support.createRegisteredReadProjection(reader, snapshot, { identity: { environment: "test", scopePath: [] }, revision: "r" });
 }
 
-test("arrays retain indices; compositions, patterns and schema-valued wildcard do not declassify", () => {
+test("arrays are all-or-nothing; compositions, patterns and schema-valued wildcard do not declassify", () => {
   const string = { type: "string" };
   const hidden = { type: "string", "x-weaver": { sensitive: true } };
   const object = { type: "object", properties: { public: string } };
@@ -56,19 +56,23 @@ test("arrays retain indices; compositions, patterns and schema-valued wildcard d
     pattern: { type: "object", patternProperties: { "^p": string, "^private": hidden } },
     wildcard: { type: "object", additionalProperties: string },
     unknownWildcard: { type: "object", additionalProperties: true },
+    omittedWildcard: { type: "object" },
   } }, { tuple: ["first", "hidden", "third"], all: { public: "yes", secret: "no" },
     any: { public: "no" }, one: { public: "no" }, pattern: { public: "yes", private: "no", unknown: "no" },
-    wildcard: { literal: "yes" }, unknownWildcard: { unknown: "no" } });
-  const tuple = projection.get("/example/tuple");
-  assert.equal(tuple.length, 3);
-  assert.equal(Object.hasOwn(tuple, 1), false);
-  assert.deepEqual(JSON.parse(JSON.stringify(tuple)), ["first", null, "third"]);
+    wildcard: { literal: "yes" }, unknownWildcard: { unknown: "no" }, omittedWildcard: { unknown: "no" } });
+  assert.throws(() => projection.get("/example/tuple"), { code: "FORBIDDEN" });
+  assert.deepEqual(projection.inspect("/example/tuple").effective, { state: "redacted" });
+  assert.equal(Object.hasOwn(projection.entries().example, "tuple"), false);
+  const tuple = projection.get("/example/tuple", () => true);
+  assert.deepEqual(tuple, ["first", "hidden", "third"]);
+  assert.equal(Object.hasOwn(tuple, 1), true);
   assert.deepEqual(projection.get("/example/all"), { public: "yes" });
   assert.throws(() => projection.get("/example/any/public"), { code: "FORBIDDEN" });
   assert.throws(() => projection.get("/example/one"), { code: "FORBIDDEN" });
   assert.deepEqual(projection.get("/example/pattern"), { public: "yes" });
   assert.deepEqual(projection.get("/example/wildcard"), { literal: "yes" });
-  assert.deepEqual(projection.get("/example/unknownWildcard"), {});
+  assert.deepEqual(projection.get("/example/unknownWildcard"), { unknown: "no" });
+  assert.deepEqual(projection.get("/example/omittedWildcard"), {});
 });
 
 test("shared values at public and sensitive paths have distinct contexts; references fail closed", () => {

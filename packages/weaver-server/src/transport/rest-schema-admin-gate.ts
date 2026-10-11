@@ -16,10 +16,23 @@ export function adminDenied(
   if (!request.authContext.isAdmin) {
     return v1Error(deps.configService, "FORBIDDEN", "Admin access required");
   }
-  const context = gate.toAccessContext(request.authContext);
   if (operation === "read")
-    return gate.gateRead(context, schemaRegistryAdminKey);
-  return gate.gateWrite(context, "admin", schemaRegistryAdminKey);
+    return gate.gateRead(
+      gate.toAccessContext(request.authContext),
+      schemaRegistryAdminKey,
+    );
+  try {
+    if (typeof gate.gateSchemaWrite === "function") {
+      const result: unknown = gate.gateSchemaWrite(
+        gate.toAccessContext(request.authContext),
+      );
+      if (result === null) return null;
+      void Promise.resolve(result).catch(() => {});
+    }
+  } catch {
+    // A missing or broken custom schema gate fails closed, without a data-write fallback.
+  }
+  return v1Error(deps.configService, "FORBIDDEN", "Schema write access denied");
 }
 
 export function authContextRequired(

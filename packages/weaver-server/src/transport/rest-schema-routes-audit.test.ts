@@ -640,6 +640,7 @@ function denyingGate(): AuthGate {
     toAccessContext: () => ({ userId: "denied", roles: [] }),
     gateRead: () => forbidden(),
     gateWrite: () => forbidden(),
+    gateSchemaWrite: () => forbidden(),
     filterVisible: (_context, entries) => entries,
   };
 }
@@ -649,6 +650,7 @@ function allowingGate(): AuthGate {
     toAccessContext: () => ({ userId: "allowed", roles: ["admin"] }),
     gateRead: () => null,
     gateWrite: () => null,
+    gateSchemaWrite: () => null,
     filterVisible: (_context, entries) => entries,
   };
 }

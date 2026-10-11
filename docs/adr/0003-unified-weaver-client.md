@@ -37,6 +37,53 @@ The full SDK matrix remains `weaver-0b81.9`; independent integrated audit and
 packed consumer gates remain required. Historical architecture below is retained
 without expanding replay, distributed-writer or durability guarantees.
 
+`weaver-sbmu` replaces native root/query writers with one host-capability mutation
+port, `forMutations(token).apply(commands)`. Ordered JSON set/remove/value-patch
+commands share the existing FIFO and stage every prefix before effects. Grouped
+flush and per-command receipts distinguish rejected, known partial and unknown
+outcomes without transaction or rollback fiction. The existing authority HTTP writes
+submit one-command lists and return this result directly; public aggregate queries
+remain projected. This does not add network batch/patch/validation routes or certify
+the legacy transport SDK against the native command API.
+
+`weaver-xezt` gives the shared configuration root one owned live registry and an
+explicit host-only schema capability port. Registration shares the data FIFO and
+stages metadata, encoded persistence and all ready projections before provider
+effects; required flush precedes publication. The central host supplies detached
+bootstrap data and the selected storage binding, not a separately owned reader.
+Uncertain schema persistence fences all payload access until root recreation,
+because disclosure policy itself may have changed. The shared-authority HTTP/SCOMP
+schema surface and default-server cutover remain separate work; this is not SDK
+parity, multi-writer coordination or automatic recovery.
+
+`weaver-0b81.7` connects native reader notifications to that same publication seam.
+Committed batches/prefixes, schema invalidations and validated reload/readback
+observations share one `ConfigurationReaderChange` union. Delivery reauthorizes the
+captured selection; obsolete policy evidence yields value-free invalidation, not old
+values under new policy. Root reload, declared-writer flush, explicit provider watch
+ownership and revision-bounded restart acknowledgement use the same FIFO. Neither
+reload nor acknowledgement clears uncertainty. These are core capabilities, not an
+HTTP/SSE/SCOMP feed or a migrated SDK cache; those integrations remain separate work.
+
+`weaver-0b81.8` integrates shared ephemeral contributions at an explicit configured
+session slot. The existing `config-sessions` domain remains the sole entry/metadata/
+lease/timer owner; root-local references and issued capabilities provide confinement.
+The only lifecycle port is `forSessions(capability)`; data still uses `apply` with
+a checked selector. Deadline/revocation cuts off new dispatch immediately while
+effective fallback waits on the same serialized publication queue. It is not a
+rollback of already accepted effects. Emergency membership never relaxes ordinary
+grants, visibility or schema admission. `weaver-yqi0` compiles registered ceilings
+from canonical raw-candidate branch/member evidence into the existing resolver.
+Logical and source-local physical view ceilings intersect using configured ranks,
+not virtual tier positions. Only a live matching root-owned emergency contribution
+may bypass numeric limits; new publications refresh eligibility after awaited IO
+without rewriting accepted receipts. Raw authorized layer observations remain
+distinct from ceiling-resolved effective values. Native `not` remains negative-only
+value validation; its annotations emit no positive or inverse ceiling policy,
+while all configured ceiling names are still validated. Native
+feature tests replace the unwired server session map/sweeper before its removal;
+no compatibility facade or network endpoint is introduced.
+
 Browser clients need synchronous local reads and optional offline persistence. Backend
 services need layer-targeted writes, schema metadata, and restart detection. Both use
 the same transport-backed client, but a prior design also made local Zod declarations

@@ -1,4 +1,6 @@
+import { registeredMutationEvidence } from "@weaver-conf/config-registry";
 import type { ConfigurationPropertySchema } from "@weaver-conf/config-types";
+import { z } from "zod";
 
 const MAX_ARRAY_INDEX = 4_294_967_294;
 
@@ -21,6 +23,28 @@ export type SchemaPatchResult =
       readonly segment: string;
     };
 
+export const schemaPatchResultSchema = z.discriminatedUnion("success", [
+  z.strictObject({ success: z.literal(true), value: z.unknown() }),
+  z.discriminatedUnion("reason", [
+    z.strictObject({
+      success: z.literal(false),
+      reason: z.literal("invalid-array-index"),
+      segment: z.string(),
+    }),
+    z.strictObject({
+      success: z.literal(false),
+      reason: z.literal("array-index-out-of-range"),
+      index: z.number().int().nonnegative(),
+      length: z.number().int().nonnegative(),
+    }),
+    z.strictObject({
+      success: z.literal(false),
+      reason: z.literal("invalid-container"),
+      segment: z.string(),
+    }),
+  ]),
+]) satisfies z.ZodType<SchemaPatchResult>;
+
 export function buildSchemaPatch(
   baseValue: unknown,
   segments: readonly string[],
@@ -29,15 +53,15 @@ export function buildSchemaPatch(
 ): SchemaPatchResult {
   const root = baseValue === undefined ? {} : clonePatchValue(baseValue);
   let current: unknown = root;
-  let schemas = schema === undefined ? undefined : [schema];
   for (let position = 0; position < segments.length; position++) {
     const segment = segments[position];
     if (segment === undefined) continue;
     const final = position === segments.length - 1;
-    schemas = resolvePatchMemberSchemas(schemas, segment);
+    const create = () =>
+      createContainer(schema, segments.slice(0, position + 1), root);
     const result = Array.isArray(current)
-      ? patchArray(current, segment, schemas, value, final)
-      : patchObject(current, segment, schemas, value, final);
+      ? patchArray(current, segment, create, value, final)
+      : patchObject(current, segment, create, value, final);
     if (!result.success) return result;
     current = result.next;
   }
@@ -94,7 +118,7 @@ type StepResult =
 function patchArray(
   current: unknown[],
   segment: string,
-  schemas: readonly ConfigurationPropertySchema[] | undefined,
+  create: () => unknown,
   value: unknown,
   final: boolean,
 ): StepResult {
@@ -114,7 +138,10 @@ function patchArray(
   const existing = Object.hasOwn(current, String(index))
     ? current[index]
     : undefined;
-  const next = existing ?? createContainer(schemas);
+  const next =
+    isRecord(existing) || Array.isArray(existing) ? existing : create();
+  if (next === undefined)
+    return { success: false, reason: "invalid-container", segment };
   return defineOwnArrayIndex(current, index, segment, next);
 }
 
@@ -142,7 +169,7 @@ function defineOwnArrayIndex(
 function patchObject(
   current: unknown,
   segment: string,
-  schemas: readonly ConfigurationPropertySchema[] | undefined,
+  create: () => unknown,
   value: unknown,
   final: boolean,
 ): StepResult {
@@ -157,143 +184,22 @@ function patchObject(
     ? current[segment]
     : undefined;
   const next =
-    isRecord(existing) || Array.isArray(existing)
-      ? existing
-      : createContainer(schemas);
+    isRecord(existing) || Array.isArray(existing) ? existing : create();
+  if (next === undefined)
+    return { success: false, reason: "invalid-container", segment };
   defineOwnDataProperty(current, segment, next);
   return { success: true, next };
 }
 
 function createContainer(
-  schemas: readonly ConfigurationPropertySchema[] | undefined,
-): unknown[] | Record<string, unknown> {
-  if (schemas === undefined || schemas.length === 0) return {};
-  const projected: ConfigurationPropertySchema[] = [];
-  for (let index = 0; index < schemas.length; index++) {
-    if (!Object.hasOwn(schemas, index)) continue;
-    const schema = schemas[index];
-    if (schema === undefined) continue;
-    for (const candidate of directAndAllOfSchemas(schema)) {
-      appendSchema(projected, candidate);
-    }
-  }
-  const allowsArray = projected.every((schema) => allowsType(schema, "array"));
-  const allowsObject = projected.every((schema) =>
-    allowsType(schema, "object"),
-  );
-  return allowsArray && !allowsObject ? [] : {};
-}
-
-function resolvePatchMemberSchemas(
-  schemas: readonly ConfigurationPropertySchema[] | undefined,
-  segment: string,
-): ConfigurationPropertySchema[] | undefined {
-  if (schemas === undefined) return undefined;
-  const resolved: ConfigurationPropertySchema[] = [];
-  for (let index = 0; index < schemas.length; index++) {
-    if (!Object.hasOwn(schemas, index)) continue;
-    const schema = schemas[index];
-    if (schema === undefined) continue;
-    for (const projected of directAndAllOfSchemas(schema)) {
-      for (const member of directPatchMemberSchemas(projected, segment)) {
-        appendSchema(resolved, member);
-      }
-    }
-  }
-  return resolved;
-}
-
-function directPatchMemberSchemas(
-  schema: ConfigurationPropertySchema,
-  segment: string,
-): ConfigurationPropertySchema[] {
-  if (allowsType(schema, "object")) return objectMemberSchemas(schema, segment);
-  if (!allowsType(schema, "array")) return [];
-  const items = Object.hasOwn(schema, "items") ? schema.items : undefined;
-  if (items === undefined) return [];
-  if (!isSchemaArray(items)) return [items];
-  const item = items[Number(segment)];
-  return item === undefined ? [] : [item];
-}
-
-function directAndAllOfSchemas(
-  schema: ConfigurationPropertySchema,
-): readonly ConfigurationPropertySchema[] {
-  const projected: ConfigurationPropertySchema[] = [];
-  const pending = [schema];
-  const completed = new WeakSet<ConfigurationPropertySchema>();
-  while (pending.length > 0) {
-    const current = pending.pop();
-    if (current === undefined) continue;
-    if (completed.has(current)) continue;
-    completed.add(current);
-    appendSchema(projected, current);
-    const branches = Object.hasOwn(current, "allOf")
-      ? current.allOf
-      : undefined;
-    if (!Array.isArray(branches)) continue;
-    for (let index = branches.length - 1; index >= 0; index--) {
-      if (!Object.hasOwn(branches, index)) continue;
-      const branch = branches[index];
-      if (branch !== undefined) appendSchema(pending, branch);
-    }
-  }
-  return projected;
-}
-
-function appendSchema(
-  target: ConfigurationPropertySchema[],
-  schema: ConfigurationPropertySchema,
-): void {
-  Reflect.defineProperty(target, String(target.length), {
-    configurable: true,
-    enumerable: true,
-    value: schema,
-    writable: true,
-  });
-}
-
-function objectMemberSchemas(
-  schema: ConfigurationPropertySchema,
-  key: string,
-): ConfigurationPropertySchema[] {
-  const properties = Object.hasOwn(schema, "properties")
-    ? schema.properties
-    : undefined;
-  const declared =
-    properties !== undefined && Object.hasOwn(properties, key)
-      ? properties[key]
-      : undefined;
-  const patterns = Object.hasOwn(schema, "patternProperties")
-    ? schema.patternProperties
-    : undefined;
-  const schemas: ConfigurationPropertySchema[] = [];
-  for (const [pattern, memberSchema] of Object.entries(patterns ?? {})) {
-    if (new RegExp(pattern).test(key)) appendSchema(schemas, memberSchema);
-  }
-  if (declared !== undefined) return [declared, ...schemas];
-  if (schemas.length > 0) return schemas;
-  const additional = Object.hasOwn(schema, "additionalProperties")
-    ? schema.additionalProperties
-    : undefined;
-  return additional !== null && typeof additional === "object"
-    ? [additional]
-    : [];
-}
-
-function allowsType(
-  schema: ConfigurationPropertySchema,
-  type: "array" | "object",
-): boolean {
-  return Array.isArray(schema.type)
-    ? schema.type.includes(type)
-    : schema.type === type;
-}
-
-function isSchemaArray(
-  value: ConfigurationPropertySchema | readonly ConfigurationPropertySchema[],
-): value is readonly ConfigurationPropertySchema[] {
-  return Array.isArray(value);
+  schema: ConfigurationPropertySchema | undefined,
+  path: readonly string[],
+  candidate: unknown,
+): unknown[] | Record<string, unknown> | undefined {
+  if (!schema) return undefined;
+  const evidence = registeredMutationEvidence(schema, path, candidate);
+  if (evidence.containers.length !== 1) return undefined;
+  return evidence.containers[0] === "array" ? [] : {};
 }
 
 function defineOwnDataProperty(

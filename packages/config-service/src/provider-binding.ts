@@ -12,6 +12,8 @@ export interface CapturedBinding {
   readonly load: (
     identity: ConfigurationServiceIdentity,
   ) => Promise<ConfigurationLayerData>;
+  readonly refresh?: () => Promise<void>;
+  readonly watch?: (hint: () => void) => unknown;
 }
 
 function member(provider: object, key: string): unknown {
@@ -35,6 +37,7 @@ export function captureBinding(
   binding: ConfigurationServiceProviderBinding,
 ): CapturedBinding {
   const { provider, operation } = binding;
+  const lifecycle = captureLifecycle(binding);
   if (
     member(provider, "id") !== binding.id ||
     member(provider, "layer") !== binding.layer
@@ -47,6 +50,7 @@ export function captureBinding(
     const read = operation.read;
     return {
       binding,
+      ...lifecycle,
       load: (identity) =>
         read(
           Object.freeze({
@@ -57,7 +61,38 @@ export function captureBinding(
         ),
     };
   }
-  return { binding, load: methodLoad(provider, operation) };
+  return { binding, ...lifecycle, load: methodLoad(provider, operation) };
+}
+
+function captureLifecycle(binding: ConfigurationServiceProviderBinding) {
+  const provider = binding.provider;
+  const refresh = member(provider, "refresh");
+  if (refresh !== undefined && typeof refresh !== "function")
+    throw createWeaverError("VALIDATION_ERROR", "Invalid provider refresh");
+  const watch =
+    binding.watch === true ? member(provider, "onExternalChange") : undefined;
+  if (
+    binding.watch === true &&
+    (typeof watch !== "function" ||
+      (binding.operation.kind === "load-layer" &&
+        binding.operation.layer !== binding.layer))
+  )
+    throw createWeaverError(
+      "UNSUPPORTED_OPERATION",
+      "Provider watch is unavailable for this binding",
+    );
+  return {
+    ...(typeof refresh === "function"
+      ? {
+          refresh: async () => {
+            await refresh.call(provider);
+          },
+        }
+      : {}),
+    ...(typeof watch === "function"
+      ? { watch: (hint: () => void): unknown => watch.call(provider, hint) }
+      : {}),
+  };
 }
 
 function methodLoad(

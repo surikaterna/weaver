@@ -113,12 +113,10 @@ export {
   schemaValidationResultSchema,
 } from "../schemas-schema-validation";
 export {
-  godModeSessionSchema,
   overrideSessionSchema,
   sessionActivationRequestSchema,
   sessionDeactivationResultSchema,
   sessionLayerMetadataSchema,
-  sessionModeSchema,
   sessionTypeSchema,
 } from "../schemas-session";
 export {

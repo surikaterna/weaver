@@ -55,7 +55,7 @@ test("object declarations, patterns, schema wildcard and recursive payload trees
   assert.deepEqual(support({ type: "object", patternProperties: { "^x": leaf } }, ["xyz"]), yes);
   assert.deepEqual(support({ type: "object", patternProperties: { "[": leaf } }, ["xyz"]), no);
   assert.deepEqual(support({ type: "object", additionalProperties: leaf }, ["wild"]), yes);
-  assert.deepEqual(support({ type: "object", additionalProperties: true }, ["wild"]), no);
+  assert.deepEqual(support({ type: "object", additionalProperties: true }, ["wild"]), yes);
   const nested = { type: "object", properties: { child: object } };
   assert.deepEqual(support(nested, [], { child: { enabled: true } }, { child: { enabled: true } }), yes);
   assert.deepEqual(support(nested, [], { child: { unknown: true } }, { child: { unknown: true } }), no);
