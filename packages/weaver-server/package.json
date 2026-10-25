@@ -32,6 +32,9 @@
     "test": "vitest run",
     "lint": "biome check ."
   },
+  "engines": {
+    "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
+  },
   "dependencies": {
     "@weaver-conf/config-types": "workspace:*",
     "@weaver-conf/config-engine": "workspace:*",

@@ -4,6 +4,13 @@
 
 ## Installation
 
+Requires Node.js 22.23.4+, 24.22.1+, or 26.12.1+ within the corresponding release
+line. The HTTP server decompresses Brotli request bodies, so the host runtime
+must include the
+[CVE-2026-111497 fix](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
+Upgrade Node and restart existing deployments; installing a new package version
+alone does not replace the bundled native decoder.
+
 ```bash
 pnpm add @weaver-conf/weaver-server
 ```

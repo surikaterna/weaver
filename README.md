@@ -112,6 +112,12 @@ Configuration is stored as nested JSON objects. The resolution engine composes v
 
 ## Development
 
+Use Node.js 26.12.1 for development and CI (`.node-version`). Container build and
+runtime stages use Node.js 24.22.1. Both include the fix for
+[CVE-2026-111497](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
+Rebuild and redeploy existing server images; updating JavaScript dependencies
+does not patch an already-running Node runtime.
+
 ```bash
 pnpm install
 pnpm run build
